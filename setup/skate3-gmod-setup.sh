@@ -9,7 +9,7 @@ set -euo pipefail
 
 # The engine revision the skate host in Cargo.toml was built from.
 ENGINE_URL=https://github.com/SK8-ENGINE/skate-3-rust-engine
-ENGINE_REV=cb79689
+ENGINE_REV=cb7968930f14dad38457e98720d1a274e469eec2
 
 here=$(cd "$(dirname "$0")" && pwd)
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/skate3-gmod
@@ -39,9 +39,9 @@ command -v git >/dev/null || die "git is required"
 command -v python3 >/dev/null || die "python3 is required"
 mkdir -p "$cache"
 
-engine="$cache/engine-$ENGINE_REV"
+engine="$cache/engine-${ENGINE_REV:0:7}"
 if [ ! -d "$engine/tools" ]; then
-    echo "Fetching the Skate 3 engine's converters ($ENGINE_REV)..."
+    echo "Fetching the Skate 3 engine's converters (${ENGINE_REV:0:7})..."
     rm -rf "$engine.partial"
     git init -q "$engine.partial"
     git -C "$engine.partial" remote add origin "$ENGINE_URL"

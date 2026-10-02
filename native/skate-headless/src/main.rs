@@ -59,6 +59,12 @@ fn main() {
     }
 }
 
+/// XInput's A button, as the host's raw pad packet carries it.
+const BUTTON_A: u16 = 0x1000;
+/// Ticks between pushes, and how long A is held for each.
+const PUSH_EVERY: u32 = 45;
+const PUSH_HOLD: u32 = 6;
+
 fn simulate(assets: &str, park: world::World, ticks: u32) -> Result<(), String> {
     let start = std::time::Instant::now();
     let mut session = Session::new(
@@ -75,18 +81,25 @@ fn simulate(assets: &str, park: world::World, ticks: u32) -> Result<(), String> 
     );
     let pose = session.activate(collision::to_skate(Vec3::ZERO).to_array(), 0.)?;
     report("spawned", &pose);
-    // Push the left stick forward for the whole run.
-    let push = Controls {
-        left: [0, i16::MAX],
-        ..Controls::default()
-    };
+    // Skate 3 pushes off A, not the stick: tap it like a player would.
     let start = std::time::Instant::now();
+    let mut top_speed = 0f32;
     for tick in 1..=ticks {
-        session.tick(push)?;
+        let controls = Controls {
+            buttons: if tick % PUSH_EVERY < PUSH_HOLD {
+                BUTTON_A
+            } else {
+                0
+            },
+            ..Controls::default()
+        };
+        session.tick(controls)?;
+        top_speed = top_speed.max(session.pose().velocity.length());
         if tick % 60 == 0 || tick == ticks {
             report(&format!("tick {tick}"), &session.pose());
         }
     }
+    println!("top speed {top_speed:.2} m/s");
     let elapsed = start.elapsed().as_secs_f64();
     println!(
         "{ticks} ticks in {:.1}ms ({:.0} ticks/s, {:.1}x realtime)",
