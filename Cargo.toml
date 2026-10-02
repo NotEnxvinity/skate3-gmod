@@ -1,0 +1,21 @@
+[workspace]
+members = ["native/skate-bridge", "native/skate-headless"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[workspace.dependencies]
+# The headless Skate 3 host from chasmlol/2010-rust-rewrite-mashup, itself built
+# from SK8-ENGINE/skate-3-rust-engine at cb79689. Pulled as a git dependency so
+# none of that code is copied into this repository.
+skate-host = { git = "https://github.com/chasmlol/2010-rust-rewrite-mashup", rev = "f608f85" }
+glam = "0.30"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3

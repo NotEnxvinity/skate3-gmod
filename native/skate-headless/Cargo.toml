@@ -1,0 +1,9 @@
+[package]
+name = "skate-headless"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+skate-bridge = { path = "../skate-bridge" }
+glam.workspace = true

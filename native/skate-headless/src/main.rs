@@ -1,0 +1,111 @@
+//! Milestone 1: prove the Skate 3 host runs on Linux without Gmod.
+//!
+//!   skate-headless [--assets <converted data dir>] [--ticks N]
+//!
+//! Builds a test park (floor plus a ledge) from Source-style brushes, finds its
+//! grind rails, and with `--assets` drops a skater on it and ticks the
+//! simulation, printing where the skater ends up.
+
+use glam::Vec3;
+use skate_bridge::bridge::{Controls, Session};
+use skate_bridge::{collision, world};
+
+fn main() {
+    let mut assets = None;
+    let mut ticks = 300u32;
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--assets" => assets = args.next(),
+            "--ticks" => ticks = args.next().and_then(|n| n.parse().ok()).unwrap_or(ticks),
+            _ => {
+                eprintln!("usage: skate-headless [--assets <dir>] [--ticks N]");
+                std::process::exit(2);
+            }
+        }
+    }
+
+    let park = world::build(
+        &[],
+        &[
+            world::box_brush(Vec3::new(-2048., -2048., -16.), Vec3::new(2048., 2048., 0.)),
+            world::box_brush(Vec3::new(256., -16., 0.), Vec3::new(768., 16., 16.)),
+        ],
+    );
+    println!(
+        "park: {} triangles, {} walkable edges, {} lips, {} runs, {} rails",
+        park.triangles.len(),
+        park.census.candidates,
+        park.census.lips,
+        park.census.runs,
+        park.census.rails,
+    );
+
+    let Some(assets) = assets else {
+        println!("no --assets given; skipping the simulation");
+        return;
+    };
+    // The host decodes animation banks recursively; give it the stack the
+    // mashup gives its skate thread.
+    let result = std::thread::Builder::new()
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || simulate(&assets, park, ticks))
+        .expect("spawn skate thread")
+        .join()
+        .expect("skate thread panicked");
+    if let Err(e) = result {
+        eprintln!("skate: {e}");
+        std::process::exit(1);
+    }
+}
+
+fn simulate(assets: &str, park: world::World, ticks: u32) -> Result<(), String> {
+    let start = std::time::Instant::now();
+    let mut session = Session::new(
+        std::path::Path::new(assets),
+        park.triangles,
+        park.rails,
+        [0.; 3],
+        0.,
+    )?;
+    println!(
+        "session loaded in {}ms, period {:.4}s",
+        start.elapsed().as_millis(),
+        session.period()
+    );
+    let pose = session.activate(collision::to_skate(Vec3::ZERO).to_array(), 0.)?;
+    report("spawned", &pose);
+    // Push the left stick forward for the whole run.
+    let push = Controls {
+        left: [0, i16::MAX],
+        ..Controls::default()
+    };
+    let start = std::time::Instant::now();
+    for tick in 1..=ticks {
+        session.tick(push)?;
+        if tick % 60 == 0 || tick == ticks {
+            report(&format!("tick {tick}"), &session.pose());
+        }
+    }
+    let elapsed = start.elapsed().as_secs_f64();
+    println!(
+        "{ticks} ticks in {:.1}ms ({:.0} ticks/s, {:.1}x realtime)",
+        elapsed * 1000.,
+        f64::from(ticks) / elapsed,
+        f64::from(ticks) * f64::from(session.period()) / elapsed,
+    );
+    Ok(())
+}
+
+fn report(label: &str, pose: &skate_bridge::bridge::Pose) {
+    let at = collision::from_skate(Vec3::from_array(pose.root.w_axis.truncate().to_array()));
+    println!(
+        "{label}: source pos ({:.1}, {:.1}, {:.1}), speed {:.2} m/s, {} bones, state {}",
+        at.x,
+        at.y,
+        at.z,
+        pose.velocity.length(),
+        pose.bones.len(),
+        pose.state,
+    );
+}
