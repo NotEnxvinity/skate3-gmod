@@ -13,3 +13,20 @@ jobs:
       - run: cargo test --workspace
       - run: cargo run -p skate-headless
       - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/convert.py
+
+  # A ready-to-run Linux build, so trying it on a Steam Deck needs no Rust.
+  package:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p skate-headless
+      - run: |
+          mkdir -p dist/skate3-gmod
+          cp target/release/skate-headless dist/skate3-gmod/
+          cp -r setup dist/skate3-gmod/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skate3-gmod-linux-x64
+          path: dist
