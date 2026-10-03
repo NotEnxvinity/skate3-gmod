@@ -16,27 +16,21 @@ jobs:
       - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/convert.py
       - run: sudo apt-get install -y -q luajit && for f in $(find addon -name '*.lua'); do luajit -bl "$f" > /dev/null; done
 
-  # Built on Debian 11 so the module needs nothing newer than glibc 2.31,
-  # which the Steam Linux Runtime provides.
+  # Linked against glibc 2.31 with zig, so the module loads inside the Steam
+  # Linux Runtime as well as on a current SteamOS host.
   linux:
     runs-on: ubuntu-latest
-    container: rust:1-bullseye
     steps:
       - uses: actions/checkout@v4
-      # Debian 11 left the main mirrors when its LTS ended; fall back to the archive.
-      - run: |
-          if ! apt-get update -q; then
-            echo "deb http://archive.debian.org/debian bullseye main" > /etc/apt/sources.list
-            rm -f /etc/apt/sources.list.d/*
-            apt-get -o Acquire::Check-Valid-Until=false update -q
-          fi
-          apt-get install -y -q libudev-dev
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p gmod-skate -p skate-headless
+      - run: pip install ziglang==0.16.0 && cargo install --locked cargo-zigbuild
+      - run: cargo zigbuild --release -p gmod-skate -p skate-headless --target x86_64-unknown-linux-gnu.2.31
       - run: |
           mkdir -p out
-          cp target/release/libgmcl_skate3.so out/gmcl_skate3_linux64.dll
-          cp target/release/skate-headless out/
+          cp target/x86_64-unknown-linux-gnu/release/libgmcl_skate3.so out/gmcl_skate3_linux64.dll
+          cp target/x86_64-unknown-linux-gnu/release/skate-headless out/
       - uses: actions/upload-artifact@v4
         with:
           name: linux-build
