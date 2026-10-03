@@ -8,24 +8,68 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo test --workspace
       - run: cargo run -p skate-headless
       - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/convert.py
+      - run: sudo apt-get install -y -q luajit && for f in $(find addon -name '*.lua'); do luajit -bl "$f" > /dev/null; done
 
-  # A ready-to-run Linux build, so trying it on a Steam Deck needs no Rust.
-  package:
-    runs-on: ubuntu-22.04
+  # Linked against glibc 2.31 with zig, so the module loads inside the Steam
+  # Linux Runtime as well as on a current SteamOS host.
+  linux:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release -p skate-headless
+      - run: python3 -m pip install --user --break-system-packages ziglang==0.16.0 && cargo install --locked cargo-zigbuild
+      - run: cargo zigbuild --release -p gmod-skate -p skate-headless --target x86_64-unknown-linux-gnu.2.31
       - run: |
-          mkdir -p dist/skate3-gmod
-          cp target/release/skate-headless dist/skate3-gmod/
-          cp -r setup dist/skate3-gmod/
+          mkdir -p out
+          cp target/x86_64-unknown-linux-gnu/release/libgmcl_skate3.so out/gmcl_skate3_linux64.dll
+          cp target/x86_64-unknown-linux-gnu/release/skate-headless out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: out
+
+  # For Garry's Mod running under Proton.
+  windows:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-x86-64
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release -p gmod-skate --target x86_64-pc-windows-gnu
+      - run: mkdir -p out && cp target/x86_64-pc-windows-gnu/release/gmcl_skate3.dll out/gmcl_skate3_win64.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: out
+
+  # One download laid out like the game folder, plus the setup tools.
+  package:
+    runs-on: ubuntu-latest
+    needs: [linux, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: builds
+      - run: |
+          root=dist/skate3-gmod
+          mkdir -p "$root/garrysmod/lua/bin" "$root/garrysmod/addons/skate3"
+          cp builds/linux-build/gmcl_skate3_linux64.dll builds/windows-build/gmcl_skate3_win64.dll "$root/garrysmod/lua/bin/"
+          cp -r addon/lua "$root/garrysmod/addons/skate3/"
+          cp builds/linux-build/skate-headless "$root/"
+          cp -r setup "$root/"
+          cp README.md NOTICE "$root/"
       - uses: actions/upload-artifact@v4
         with:
           name: skate3-gmod-linux-x64

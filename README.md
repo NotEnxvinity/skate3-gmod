@@ -16,11 +16,40 @@ Work in progress. See [docs/architecture.md](docs/architecture.md) for the plan.
 |---|---|
 | `native/skate-bridge` | Source collision to Skate collision, auto grind-rail detection, re-exports the skate host |
 | `native/skate-headless` | CLI that runs a skater on a test park without Gmod (milestone 1) |
+| `native/gmod-skate` | `gmcl_skate3`, the binary module: Lua bindings, BSP collision, worker thread, gamepad |
+| `addon/` | The Lua addon: `skate3_toggle`, camera, server position sync |
 | `setup/` | `skate3-gmod-setup.sh`: converts your `default.xex` data on Linux |
 
 The Skate 3 host is a git dependency on
 [chasmlol/2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)'s
 `skate-host` (built from the engine at `cb79689`); none of its code is copied in.
+
+## Install (Steam Deck / SteamOS)
+
+1. Download **skate3-gmod-linux-x64** from the latest CI run and unzip it.
+2. Convert your Skate 3 data straight into the game folder (needs git + python3):
+   ```sh
+   skate3-gmod/setup/skate3-gmod-setup.sh --xex "/path/to/Skate 3/default.xex"
+   ```
+   It defaults to `~/.local/share/Steam/steamapps/common/GarrysMod/garrysmod/data/skate3`.
+3. Copy the zip's `garrysmod` folder over `GarrysMod/garrysmod`. That adds
+   `lua/bin/gmcl_skate3_{linux64,win64}.dll` and `addons/skate3`.
+4. Use 64-bit Garry's Mod: Steam → Garry's Mod → Properties → Betas →
+   **x86-64**. Native Linux loads the `linux64` module, Proton the `win64` one.
+5. Plug in a controller, load a map, and run `skate3_toggle` in the console
+   (bind it: `bind j skate3_toggle`).
+
+Steam Input: Garry's Mod's controller layout must be a gamepad layout (Steam →
+Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and
+mouse, or the pad shows up but sends no buttons. `skate3_debug_input 1` shows
+what the mod receives; pressing A should show `buttons 1000`.
+
+Console variables: `skate3_debug_rails 1` draws the grind rails found in the
+map, `skate3_debug_input 1` shows the controller input, `skate3_data_path` points at converted data somewhere else, and the
+server's `skate3_enabled 0` turns the mode off.
+
+For now the skater is drawn as a wireframe board and a line; posing your
+playermodel is a later milestone.
 
 ## Try the headless runner
 
