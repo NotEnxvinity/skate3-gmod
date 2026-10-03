@@ -21,9 +21,14 @@ pub struct World {
 pub fn build(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> World {
     let mut out = Vec::<[Vec3; 3]>::new();
     let mut push = |p: [Vec3; 3]| {
-        if p.iter().all(|v| v.is_finite())
-            && (p[1] - p[0]).cross(p[2] - p[0]).length_squared() > 0.001
-        {
+        let cross = (p[1] - p[0]).cross(p[2] - p[0]).length();
+        let longest = [p[1] - p[0], p[2] - p[1], p[0] - p[2]]
+            .iter()
+            .map(|e| e.length_squared())
+            .fold(0., f32::max);
+        // Tiny or needle-thin triangles give the contact solver normals it
+        // can't trust, so they go.
+        if p.iter().all(|v| v.is_finite()) && cross > 0.03 && cross > 1e-3 * longest {
             out.push(p);
         }
     };
@@ -94,6 +99,19 @@ mod tests {
             .filter(|r| r.iter().all(|p| (p[1] - 16. * 0.0254).abs() < 1e-3))
             .count();
         assert!(ledge_rails >= 2, "found {} ledge rails", ledge_rails);
+    }
+
+    #[test]
+    fn drops_needle_thin_and_tiny_triangles() {
+        let keep = [Vec3::ZERO, Vec3::new(64., 0., 0.), Vec3::new(0., 64., 0.)];
+        let needle = [
+            Vec3::ZERO,
+            Vec3::new(512., 0., 0.),
+            Vec3::new(256., 0.01, 0.),
+        ];
+        let tiny = [Vec3::ZERO, Vec3::new(0.1, 0., 0.), Vec3::new(0., 0.1, 0.)];
+        let world = build(&[keep, needle, tiny], &[]);
+        assert_eq!(world.triangles.len(), 1);
     }
 
     #[test]

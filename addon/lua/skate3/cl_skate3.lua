@@ -14,6 +14,8 @@ local loaded = false
 local active = false
 local boardHeld = false
 local rideWhenReady = false
+local lastRemount = -math.huge
+local resumeAt -- where a glitched ride ended, for hopping back on
 local pose
 local rails
 local status = {}
@@ -86,6 +88,8 @@ local function Stop()
 end
 
 local function Start()
+	local at = resumeAt
+	resumeAt = nil
 	if not loaded then
 		Say("Skate 3 mode isn't available; check the console for why.")
 		return
@@ -103,7 +107,7 @@ local function Start()
 	end
 	local ply = LocalPlayer()
 	if not ply:Alive() or ply:InVehicle() then return end
-	local pos = ply:GetPos()
+	local pos = at or ply:GetPos()
 	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, ply:EyeAngles().y, ScrW() / ScrH())
 	if not ok then
 		Say(err)
@@ -158,8 +162,18 @@ hook.Add("Think", "skate3_step", function()
 			-- The full reason goes to the console; chat gets the gist.
 			local why = tostring(status.error)
 			print("[skate3] ride stopped: " .. why)
-			Say("Skate stopped: " .. why:sub(1, 120) .. (#why > 120 and "... (full error in console)" or ""))
+			local endedAt = pose and V(pose.pos)
 			Stop()
+			-- Still holding the board: hop back on where the ride ended, unless
+			-- it keeps failing right away.
+			if boardHeld and status.state ~= "failed" and now - lastRemount > 3 then
+				lastRemount = now
+				rideWhenReady = true
+				resumeAt = endedAt
+				Say("Skate glitched, hopping back on. (details in console)")
+			else
+				Say("Skate stopped: " .. why:sub(1, 120) .. (#why > 120 and "... (full error in console)" or ""))
+			end
 		end
 	end
 	if not active then return end

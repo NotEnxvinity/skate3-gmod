@@ -101,6 +101,11 @@ impl<'a> Bsp<'a> {
                 let Some(side) = sides.get(side * 8..side * 8 + 8) else {
                     continue;
                 };
+                // Bevel planes only help Source's own traces; as faces they'd
+                // be slivers along edges and corners.
+                if side[6] != 0 {
+                    continue;
+                }
                 if let Some(p) = planes.get(u16_at(side, 0) as usize) {
                     brush_planes.push([p.normal.x, p.normal.y, p.normal.z, p.dist]);
                 }
@@ -285,18 +290,20 @@ pub(crate) mod tests {
             ([0., -1., 0.], 64.),
             ([0., 0., 1.], 16.),
             ([0., 0., -1.], 0.),
+            // A bevel cutting the corner; Source only uses it for traces.
+            ([0.707, 0.707, 0.], 60.),
         ] {
             planes.extend(plane(n, d));
         }
         let mut sides = Vec::new();
-        for i in 0..6u16 {
+        for i in 0..7u16 {
             sides.extend_from_slice(&i.to_le_bytes());
-            sides.extend_from_slice(&[0; 6]);
+            sides.extend_from_slice(&[0, 0, 0, 0, u8::from(i == 6), 0]);
         }
         let mut brushes = Vec::new();
         for contents in [0x1i32, 0x20] {
             brushes.extend_from_slice(&0i32.to_le_bytes());
-            brushes.extend_from_slice(&6i32.to_le_bytes());
+            brushes.extend_from_slice(&7i32.to_le_bytes());
             brushes.extend_from_slice(&contents.to_le_bytes());
         }
         let data = build(&[
@@ -306,6 +313,7 @@ pub(crate) mod tests {
         ]);
         let solids = parse(&data).unwrap();
         assert_eq!(solids.brushes.len(), 1, "the water brush is skipped");
+        assert_eq!(solids.brushes[0].len(), 6, "the bevel side is skipped");
         let faces = skate_bridge::collision::brush_faces(&solids.brushes[0]);
         assert_eq!(faces.len(), 6);
         assert!(solids.triangles.is_empty());
