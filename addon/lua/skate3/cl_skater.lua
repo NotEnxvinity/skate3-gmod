@@ -252,8 +252,11 @@ local function BuildBones(ent, count)
 	end
 end
 
+local owner
+
 function Skater.ShowModel(ply)
 	if not data then return end
+	owner = ply
 	local name = ply:GetModel()
 	if not IsValid(model) or model:GetModel() ~= name then
 		if IsValid(model) then model:Remove() end
@@ -274,6 +277,10 @@ end
 
 function Skater.UpdateModel(p)
 	pose = p
+	-- The player's model can change mid-ride (or arrive late after spawning).
+	if IsValid(owner) and IsValid(model) and model:GetModel() ~= owner:GetModel() then
+		Skater.ShowModel(owner)
+	end
 	if IsValid(model) and p then
 		model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
 	end
