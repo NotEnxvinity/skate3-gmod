@@ -301,15 +301,18 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
         camera,
         state: p.state.clone(),
         tick: p.tick,
-        bones: p
-            .names
-            .iter()
-            .zip(&p.bones)
-            .map(|(name, m)| {
-                let m = Mat4::from_cols_array(&m.to_cols_array());
-                (name.clone(), crate::skater::to_source(m))
-            })
-            .collect(),
+        // Bones are relative to the skater's root, as the mashup places them.
+        bones: {
+            let root = crate::skater::to_source(root);
+            p.names
+                .iter()
+                .zip(&p.bones)
+                .map(|(name, m)| {
+                    let m = Mat4::from_cols_array(&m.to_cols_array());
+                    (name.clone(), root * crate::skater::to_source(m))
+                })
+                .collect()
+        },
     })
 }
 
