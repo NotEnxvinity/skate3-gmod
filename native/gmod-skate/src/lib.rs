@@ -7,6 +7,7 @@
 mod bsp;
 mod input;
 mod lua;
+mod pin;
 mod runtime;
 mod skater;
 
@@ -427,7 +428,10 @@ lua_fn!(get_input, |lua| {
 });
 
 lua_fn!(version, |lua| {
-    lua.push_str(env!("CARGO_PKG_VERSION"));
+    lua.push_str(&match option_env!("GITHUB_RUN_NUMBER") {
+        Some(run) => format!("{} (build {run})", env!("CARGO_PKG_VERSION")),
+        None => env!("CARGO_PKG_VERSION").to_owned(),
+    });
     1
 });
 
@@ -435,6 +439,10 @@ lua_fn!(version, |lua| {
 /// Called by Garry's Mod with a valid Lua state when the module is required.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
+    static PINNED: std::sync::Once = std::sync::Once::new();
+    PINNED.call_once(|| {
+        pin::pin();
+    });
     let Ok(api) = lua::api() else { return 0 };
     let lua = Lua { api, state };
     lua.new_table();

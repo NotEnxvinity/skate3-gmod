@@ -15,3 +15,6 @@ serde_json = "1"
 # XInput on Windows: what Proton implements best. evdev on Linux either way.
 gilrs = { version = "0.11.2", default-features = false, features = ["xinput"] }
 libloading = "0.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"

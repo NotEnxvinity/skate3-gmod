@@ -253,11 +253,28 @@ local function BuildBones(ent, count)
 end
 
 local owner
+local pickedName, pickedPath -- the last cl_playermodel looked up
+
+-- The model to ride as. Sandbox can spawn the first life as Kleiner before
+-- the player's own pick arrives, so there the pick itself wins.
+local function ModelFor(ply)
+	local pick = GetConVar("cl_playermodel")
+	pick = pick and pick:GetString() or ""
+	if GAMEMODE and GAMEMODE.IsSandboxDerived and pick ~= "" and pick ~= "none" then
+		if pick ~= pickedName then
+			pickedName = pick
+			pickedPath = player_manager.TranslatePlayerModel(pick)
+			if not (pickedPath and util.IsValidModel(pickedPath)) then pickedPath = nil end
+		end
+		if pickedPath then return pickedPath end
+	end
+	return ply:GetModel()
+end
 
 function Skater.ShowModel(ply)
 	if not data then return end
 	owner = ply
-	local name = ply:GetModel()
+	local name = ModelFor(ply)
 	if not IsValid(model) or model:GetModel() ~= name then
 		if IsValid(model) then model:Remove() end
 		model = ClientsideModel(name, RENDERGROUP_OPAQUE)
@@ -278,7 +295,7 @@ end
 function Skater.UpdateModel(p)
 	pose = p
 	-- The player's model can change mid-ride (or arrive late after spawning).
-	if IsValid(owner) and IsValid(model) and model:GetModel() ~= owner:GetModel() then
+	if IsValid(owner) and IsValid(model) and model:GetModel() ~= ModelFor(owner) then
 		Skater.ShowModel(owner)
 	end
 	if IsValid(model) and p then
