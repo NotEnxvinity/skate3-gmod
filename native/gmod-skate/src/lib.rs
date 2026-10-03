@@ -8,6 +8,7 @@ mod bsp;
 mod input;
 mod lua;
 mod runtime;
+mod skater;
 
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
@@ -248,6 +249,18 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"state");
     lua.push_number(p.tick as f64);
     lua.set_field(-2, c"tick");
+    // Only the bones Lua draws or retargets; the rest are fingers and faces.
+    if let Ok(wanted) = WANTED_BONES.lock() {
+        lua.new_table();
+        for (name, m) in p.bones.iter().filter(|(n, _)| wanted.contains(n)) {
+            push_matrix(&lua, m);
+            lua.set_field(
+                -2,
+                &std::ffi::CString::new(name.as_str()).unwrap_or_default(),
+            );
+        }
+        lua.set_field(-2, c"bones");
+    }
     if let Some(c) = p.camera {
         lua.new_table();
         for (name, v) in [(c"pos", c.pos), (c"forward", c.forward), (c"up", c.up)] {
@@ -257,6 +270,115 @@ lua_fn!(get_pose, |lua| {
         lua.push_number(f64::from(c.fov));
         lua.set_field(-2, c"fov");
         lua.set_field(-2, c"camera");
+    }
+    1
+});
+
+/// The skater's bones the playermodel retarget reads.
+const BODY_BONES: [&str; 23] = [
+    "HIPS",
+    "SPINE",
+    "SPINE1",
+    "SPINE2",
+    "SPINE3",
+    "NECK",
+    "HEAD",
+    "LEFTSHOULDER",
+    "LEFTARM",
+    "LEFTFOREARM",
+    "LEFTHAND",
+    "RIGHTSHOULDER",
+    "RIGHTARM",
+    "RIGHTFOREARM",
+    "RIGHTHAND",
+    "LEFTUPLEG",
+    "LEFTLEG",
+    "LEFTFOOT",
+    "LEFTTOEBASE",
+    "RIGHTUPLEG",
+    "RIGHTLEG",
+    "RIGHTFOOT",
+    "RIGHTTOEBASE",
+];
+
+/// Bones `GetPose` returns: the body's, plus whichever carry board parts.
+static WANTED_BONES: Mutex<Vec<String>> = Mutex::new(Vec::new());
+
+/// A matrix as the 12 numbers of its top three rows, for Lua's `Matrix`.
+fn push_matrix(lua: &Lua, m: &glam::Mat4) {
+    lua.new_table();
+    let rows = m.transpose().to_cols_array();
+    for (i, v) in rows[..12].iter().enumerate() {
+        lua.push_number(f64::from(*v));
+        lua.set_index(-2, i as c_int + 1);
+    }
+}
+
+/// The path below `garrysmod/data`, which Lua's file and material functions
+/// can reach, if `path` is under it.
+fn data_relative(path: &Path) -> Option<String> {
+    let text = path.to_string_lossy().replace('\\', "/");
+    let at = text.to_ascii_lowercase().rfind("garrysmod/data/")?;
+    Some(
+        text[at + "garrysmod/data/".len()..]
+            .trim_end_matches('/')
+            .to_owned(),
+    )
+}
+
+lua_fn!(get_skater, |lua| {
+    let Some(assets) = ASSETS.lock().ok().and_then(|a| a.clone()) else {
+        return lua.fail("call skate3.Init first");
+    };
+    let skater = match skater::load(&assets) {
+        Ok(s) => s,
+        Err(e) => return lua.fail(&e),
+    };
+    if let Ok(mut wanted) = WANTED_BONES.lock() {
+        wanted.clear();
+        wanted.extend(BODY_BONES.iter().map(|s| s.to_string()));
+        for part in &skater.parts {
+            if !wanted.contains(&part.bone) {
+                wanted.push(part.bone.clone());
+            }
+        }
+    }
+    lua.new_table();
+    lua.new_table();
+    for (i, part) in skater.parts.iter().enumerate() {
+        lua.new_table();
+        lua.push_str(&part.bone);
+        lua.set_field(-2, c"bone");
+        lua.push_str(&part.slot);
+        lua.set_field(-2, c"slot");
+        lua.new_table();
+        for (j, c) in part.tint.iter().enumerate() {
+            lua.push_number(f64::from(*c));
+            lua.set_index(-2, j as c_int + 1);
+        }
+        lua.set_field(-2, c"tint");
+        lua.new_table();
+        for (j, v) in part.vertices.iter().enumerate() {
+            lua.push_number(f64::from(*v));
+            lua.set_index(-2, j as c_int + 1);
+        }
+        lua.set_field(-2, c"vertices");
+        lua.set_index(-2, i as c_int + 1);
+    }
+    lua.set_field(-2, c"parts");
+    lua.new_table();
+    for (name, m) in &skater.bind {
+        push_matrix(&lua, m);
+        lua.set_field(
+            -2,
+            &std::ffi::CString::new(name.as_str()).unwrap_or_default(),
+        );
+    }
+    lua.set_field(-2, c"bind");
+    // The setup script's per-slot textures, reachable as "../data/<dir>/<slot>_base_color.png".
+    if let Some(dir) = data_relative(&assets) {
+        lua.push_str(&format!("{dir}/private/default_skater/textures/materials"));
+        lua.set_field(-2, c"textures");
     }
     1
 });
@@ -326,6 +448,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"GetPose", get_pose),
         (c"GetRails", get_rails),
         (c"GetInput", get_input),
+        (c"GetSkater", get_skater),
         (c"Version", version),
     ] {
         lua.push_function(f);
@@ -349,4 +472,20 @@ pub unsafe extern "C" fn gmod13_close(state: State) -> c_int {
         lua.set_field(lua::GLOBALS, c"skate3");
     }
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finds_the_data_folder_on_linux_and_proton() {
+        let linux = Path::new(
+            "/home/deck/.local/share/Steam/steamapps/common/GarrysMod/garrysmod/data/skate3/assets",
+        );
+        assert_eq!(data_relative(linux).as_deref(), Some("skate3/assets"));
+        let proton = Path::new(r"\\?\Z:\home\deck\GarrysMod\garrysmod\data\skate3\assets\");
+        assert_eq!(data_relative(proton).as_deref(), Some("skate3/assets"));
+        assert_eq!(data_relative(Path::new("/elsewhere/assets")), None);
+    }
 }

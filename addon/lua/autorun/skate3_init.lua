@@ -3,6 +3,7 @@
 
 if SERVER then
 	AddCSLuaFile("skate3/cl_skate3.lua")
+	AddCSLuaFile("skate3/cl_skater.lua")
 	include("skate3/sv_skate3.lua")
 else
 	include("skate3/cl_skate3.lua")

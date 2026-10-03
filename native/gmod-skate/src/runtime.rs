@@ -52,6 +52,8 @@ pub struct Pose {
     pub camera: Option<Camera>,
     pub state: String,
     pub tick: u64,
+    /// Every bone of the skater and board, in Source space.
+    pub bones: Vec<(String, Mat4)>,
 }
 
 #[derive(Clone)]
@@ -299,6 +301,15 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
         camera,
         state: p.state.clone(),
         tick: p.tick,
+        bones: p
+            .names
+            .iter()
+            .zip(&p.bones)
+            .map(|(name, m)| {
+                let m = Mat4::from_cols_array(&m.to_cols_array());
+                (name.clone(), crate::skater::to_source(m))
+            })
+            .collect(),
     })
 }
 

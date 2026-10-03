@@ -36,8 +36,9 @@ The Skate 3 host is a git dependency on
    `lua/bin/gmcl_skate3_{linux64,win64}.dll` and `addons/skate3`.
 4. Use 64-bit Garry's Mod: Steam → Garry's Mod → Properties → Betas →
    **x86-64**. Native Linux loads the `linux64` module, Proton the `win64` one.
-5. Plug in a controller, load a map, and run `skate3_toggle` in the console
-   (bind it: `bind j skate3_toggle`).
+5. Plug in a controller, load a map, and equip the **Skateboard** (spawn menu →
+   Weapons → Skate 3). Switch weapons to step off. `skate3_toggle` in the
+   console does the same without the weapon (bind it: `bind j skate3_toggle`).
 
 Steam Input: Garry's Mod's controller layout must be a gamepad layout (Steam →
 Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and
@@ -48,8 +49,8 @@ Console variables: `skate3_debug_rails 1` draws the grind rails found in the
 map, `skate3_debug_input 1` shows the controller input, `skate3_data_path` points at converted data somewhere else, and the
 server's `skate3_enabled 0` turns the mode off.
 
-For now the skater is drawn as a wireframe board and a line; posing your
-playermodel is a later milestone.
+The Skate 3 board is drawn from your converted data and your playermodel is
+posed from the skater's skeleton. Other players don't see either yet.
 
 ## Try the headless runner
 

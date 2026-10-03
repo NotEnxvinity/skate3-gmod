@@ -1,3 +1,5 @@
+local Skater = include("skate3/cl_skater.lua")
+
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
@@ -5,8 +7,13 @@ local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Dr
 local cv_hud = CreateClientConVar("skate3_hud", "1", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 
+-- Equipping this weapon gets on the board; switching away gets off.
+local BOARD_WEAPON = "weapon_skate3"
+
 local loaded = false
 local active = false
+local boardHeld = false
+local rideWhenReady = false
 local pose
 local rails
 local status = {}
@@ -53,6 +60,7 @@ local function Load()
 		return
 	end
 	loaded = true
+	Skater.Load()
 	print("[skate3] module " .. skate3.Version() .. ", data at " .. path .. "; building collision for " .. game.GetMap())
 end
 hook.Add("InitPostEntity", "skate3_load", Load)
@@ -74,6 +82,7 @@ local function Stop()
 	end
 	SetActive(false)
 	pose = nil
+	Skater.HideModel()
 end
 
 local function Start()
@@ -101,6 +110,7 @@ local function Start()
 		return
 	end
 	SetActive(true)
+	Skater.ShowModel(ply)
 end
 
 concommand.Add("skate3_toggle", function()
@@ -112,10 +122,30 @@ net.Receive("skate3_state", function()
 		skate3.Suspend()
 		active = false
 		pose = nil
+		Skater.HideModel()
 	end
 end)
 
+-- Rides while the board weapon is out.
+local function FollowWeapon()
+	local ply = LocalPlayer()
+	if not IsValid(ply) then return end
+	local wep = ply:GetActiveWeapon()
+	local held = IsValid(wep) and wep:GetClass() == BOARD_WEAPON
+	if held ~= boardHeld then
+		boardHeld = held
+		rideWhenReady = held
+		if not held then Stop() end
+	end
+	-- Equipped before the map's collision finished: ride once it's ready.
+	if rideWhenReady and not active and status.state ~= "loading" then
+		rideWhenReady = false
+		Start()
+	end
+end
+
 hook.Add("Think", "skate3_step", function()
+	FollowWeapon()
 	if not loaded then return end
 	local now = RealTime()
 	if now >= nextStatus then
@@ -135,6 +165,7 @@ hook.Add("Think", "skate3_step", function()
 	if not active then return end
 	skate3.Step(FrameTime(), ScrW() / ScrH())
 	pose = skate3.GetPose() or pose
+	Skater.UpdateModel(pose)
 	if pose and now >= nextSend then
 		nextSend = now + 0.05
 		net.Start("skate3_move")
@@ -168,27 +199,31 @@ hook.Add("PreDrawPlayerHands", "skate3_hide", function()
 	if active then return true end
 end)
 
--- Until the skater is retargeted onto the playermodel, draw a stand-in: the
+-- Without the converted board (or before it loads), a stand-in: a wireframe
 -- board and a line where the skater stands.
 local BOARD_MIN, BOARD_MAX = Vector(-16, -4, 0), Vector(16, 4, 2)
 local BOARD_COLOR, BODY_COLOR, RAIL_COLOR = Color(255, 200, 60), Color(120, 200, 255), Color(255, 60, 200)
 
-hook.Add("PostDrawTranslucentRenderables", "skate3_draw", function(_, skybox)
-	if skybox then return end
-	if active and pose then
+hook.Add("PostDrawOpaqueRenderables", "skate3_board", function(_, skybox)
+	if skybox or not active or not pose then return end
+	if not Skater.DrawBoard(pose) then
 		local pos = V(pose.pos)
-		local ang = V(pose.forward):AngleEx(V(pose.up))
-		render.DrawWireframeBox(pos, ang, BOARD_MIN, BOARD_MAX, BOARD_COLOR, true)
+		render.DrawWireframeBox(pos, V(pose.forward):AngleEx(V(pose.up)), BOARD_MIN, BOARD_MAX, BOARD_COLOR, true)
+	end
+	if not Skater.HasModel() then
+		local pos = V(pose.pos)
 		render.DrawLine(pos, pos + V(pose.up) * 64, BODY_COLOR, true)
 	end
-	if cv_rails:GetBool() and rails then
-		local eye = EyePos()
-		for _, rail in ipairs(rails) do
-			for i = 1, #rail - 1 do
-				local a, b = V(rail[i]), V(rail[i + 1])
-				if a:DistToSqr(eye) < 4e6 then
-					render.DrawLine(a, b, RAIL_COLOR, false)
-				end
+end)
+
+hook.Add("PostDrawTranslucentRenderables", "skate3_rails", function(_, skybox)
+	if skybox or not cv_rails:GetBool() or not rails then return end
+	local eye = EyePos()
+	for _, rail in ipairs(rails) do
+		for i = 1, #rail - 1 do
+			local a, b = V(rail[i]), V(rail[i + 1])
+			if a:DistToSqr(eye) < 4e6 then
+				render.DrawLine(a, b, RAIL_COLOR, false)
 			end
 		end
 	end

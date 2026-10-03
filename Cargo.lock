@@ -1549,6 +1549,7 @@ dependencies = [
  "gilrs",
  "glam 0.30.10",
  "libloading",
+ "serde_json",
  "skate-bridge",
 ]
 

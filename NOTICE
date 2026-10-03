@@ -9,3 +9,8 @@ from glam instead of Bevy, and MW2-specific extraction was removed.
 
 setup/convert.py is adapted from that project's skate/converter/iw4l_skate_convert.py
 under the same license.
+
+The playermodel retarget in addon/lua/skate3/cl_skater.lua is ported from that
+project's crates/render_anim/src/skate/rig.rs, and the board import in
+native/gmod-skate/src/skater.rs follows its crates/assets/src/skate_board.rs,
+under the same license.
