@@ -23,7 +23,14 @@ jobs:
     container: rust:1-bullseye
     steps:
       - uses: actions/checkout@v4
-      - run: apt-get update -q && apt-get install -y -q libudev-dev
+      # Debian 11 left the main mirrors when its LTS ended; fall back to the archive.
+      - run: |
+          if ! apt-get update -q; then
+            echo "deb http://archive.debian.org/debian bullseye main" > /etc/apt/sources.list
+            rm -f /etc/apt/sources.list.d/*
+            apt-get -o Acquire::Check-Valid-Until=false update -q
+          fi
+          apt-get install -y -q libudev-dev
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release -p gmod-skate -p skate-headless
       - run: |
