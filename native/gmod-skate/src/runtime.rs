@@ -121,6 +121,13 @@ impl Drop for Runtime {
     }
 }
 
+/// A loaded map's collision in Skate space.
+struct MapWorld {
+    assets: PathBuf,
+    triangles: Vec<[[f32; 3]; 3]>,
+    rails: Vec<Vec<[f32; 3]>>,
+}
+
 fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let set = |f: &dyn Fn(&mut Shared)| {
         if let Ok(mut s) = shared.lock() {
@@ -132,6 +139,11 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     // XInput's packet number, advanced every frame as the mashup does.
     let mut packet = 0u32;
     let mut last_input = Controls::default();
+    // The current map's collision, kept to rebuild a session that broke.
+    let mut map: Option<MapWorld> = None;
+    // Set once the simulation failed: some of its state may be non-finite
+    // beyond what a teleport resets, so the next ride starts a fresh session.
+    let mut broken = false;
     while let Ok(job) = jobs.recv() {
         let riding = !matches!(job, Job::Load { .. });
         let result: Result<(), String> = (|| {
@@ -156,7 +168,12 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         })
                         .collect();
                     let count = built.triangles.len();
-                    match session.as_mut() {
+                    map = Some(MapWorld {
+                        assets: assets.clone(),
+                        triangles: built.triangles.clone(),
+                        rails: built.rails.clone(),
+                    });
+                    match session.as_mut().filter(|_| !broken) {
                         // A new map on a warm session swaps collision only.
                         Some(existing) => {
                             let prepared = existing
@@ -165,6 +182,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             existing.install_collision(prepared)?;
                         }
                         None => {
+                            broken = false;
+                            session = None;
                             session = Some(Session::new(
                                 &assets,
                                 built.triangles,
@@ -185,6 +204,17 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     yaw_degrees,
                     aspect,
                 } => {
+                    if broken && let Some(map) = &map {
+                        session = None;
+                        session = Some(Session::new(
+                            &map.assets,
+                            map.triangles.clone(),
+                            map.rails.clone(),
+                            [0.; 3],
+                            0.,
+                        )?);
+                        broken = false;
+                    }
                     let session = session.as_mut().ok_or("the map isn't loaded yet")?;
                     accumulated = 0.;
                     session.set_aspect_ratio(aspect);
@@ -248,6 +278,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
         })();
         if let Err(e) = result {
             if riding {
+                broken = true;
                 // Only this ride is lost; the map's collision is still good.
                 let c = last_input;
                 let e = format!(
@@ -261,6 +292,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 set(&|s| {
                     s.error = Some(e.clone());
                     s.active = false;
+                    s.pose = None;
                 });
             } else {
                 set(&|s| {

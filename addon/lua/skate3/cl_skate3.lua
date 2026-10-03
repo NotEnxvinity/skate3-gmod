@@ -162,11 +162,14 @@ hook.Add("Think", "skate3_step", function()
 			-- The full reason goes to the console; chat gets the gist.
 			local why = tostring(status.error)
 			print("[skate3] ride stopped: " .. why)
+			-- Also kept in garrysmod/data/skate3/errors.txt, for reading outside the game.
+			file.CreateDir("skate3")
+			file.Append("skate3/errors.txt", os.date("%Y-%m-%d %H:%M:%S  ") .. why .. "\n\n")
 			local endedAt = pose and V(pose.pos)
 			Stop()
-			-- Still holding the board: hop back on where the ride ended, unless
-			-- it keeps failing right away.
-			if boardHeld and status.state ~= "failed" and now - lastRemount > 3 then
+			-- Still holding the board: hop back on where the ride ended (on a
+			-- fresh simulation, which takes a few seconds), unless it keeps failing.
+			if boardHeld and status.state ~= "failed" and now - lastRemount > 10 then
 				lastRemount = now
 				rideWhenReady = true
 				resumeAt = endedAt
