@@ -131,14 +131,22 @@ lua_fn!(status, |lua| {
     if let Some(Ok(s)) = with_runtime(|r| {
         r.shared
             .lock()
-            .map(|s| (s.status.clone(), s.triangles, s.rails.len(), s.active))
+            .map(|s| {
+                (
+                    s.status.clone(),
+                    s.triangles,
+                    s.rails.len(),
+                    s.active,
+                    s.error.clone(),
+                )
+            })
             .map_err(|_| ())
     }) {
-        let (state, triangles, rails, active) = s;
+        let (state, triangles, rails, active, ride_error) = s;
         let (name, error) = match state {
             Status::Idle => ("idle", None),
             Status::Loading => ("loading", None),
-            Status::Ready => ("ready", None),
+            Status::Ready => ("ready", ride_error),
             Status::Failed(e) => ("failed", Some(e)),
         };
         lua.push_str(name);
@@ -181,6 +189,10 @@ lua_fn!(activate, |lua| {
         return lua.fail("the map's skate collision isn't ready yet");
     }
     with_runtime(|r| {
+        // A new ride: the last one's error no longer applies.
+        if let Ok(mut s) = r.shared.lock() {
+            s.error = None;
+        }
         r.send(Job::Activate {
             pos: Vec3::new(x as f32, y as f32, z as f32),
             yaw_degrees: yaw as f32,
@@ -264,6 +276,34 @@ lua_fn!(get_rails, |lua| {
     1
 });
 
+// The pad exactly as the simulation receives it, for checking that a
+// controller's buttons get through Steam Input.
+lua_fn!(get_input, |lua| {
+    let pad = match input::poll() {
+        Ok(pad) => pad,
+        Err(e) => return lua.fail(&format!("gamepad: {e}")),
+    };
+    let c = pad.controls;
+    lua.new_table();
+    for (name, value) in [
+        (c"buttons", f64::from(c.buttons)),
+        (c"lt", f64::from(c.triggers[0])),
+        (c"rt", f64::from(c.triggers[1])),
+        (c"lx", f64::from(c.left[0])),
+        (c"ly", f64::from(c.left[1])),
+        (c"rx", f64::from(c.right[0])),
+        (c"ry", f64::from(c.right[1])),
+    ] {
+        lua.push_number(value);
+        lua.set_field(-2, name);
+    }
+    if let Some(name) = pad.name {
+        lua.push_str(&name);
+        lua.set_field(-2, c"pad");
+    }
+    1
+});
+
 lua_fn!(version, |lua| {
     lua.push_str(env!("CARGO_PKG_VERSION"));
     1
@@ -285,6 +325,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Suspend", suspend),
         (c"GetPose", get_pose),
         (c"GetRails", get_rails),
+        (c"GetInput", get_input),
         (c"Version", version),
     ] {
         lua.push_function(f);

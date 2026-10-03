@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 
 use glam::{Mat3, Mat4, Vec3};
-use skate_bridge::bridge::{Controls, Session};
+use skate_bridge::bridge::{Controls, InputFrame, Session};
 use skate_bridge::{collision, world};
 
 /// The longest frame the simulation catches up on, as in the mashup.
@@ -71,6 +71,9 @@ pub struct Shared {
     pub rails: Vec<Vec<Vec3>>,
     pub pose: Option<Pose>,
     pub active: bool,
+    /// Why the last ride stopped, if the simulation gave up on it. The map
+    /// stays loaded, so the next activation starts a fresh ride.
+    pub error: Option<String>,
 }
 
 pub struct Runtime {
@@ -124,7 +127,11 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     };
     let mut session: Option<Session> = None;
     let mut accumulated = 0f32;
+    // XInput's packet number, advanced every frame as the mashup does.
+    let mut packet = 0u32;
+    let mut last_input = Controls::default();
     while let Ok(job) = jobs.recv() {
+        let riding = !matches!(job, Job::Load { .. });
         let result: Result<(), String> = (|| {
             match job {
                 Job::Load { assets, bsp, extra } => {
@@ -186,6 +193,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     let pose = convert(&pose)?;
                     set(&|s| {
                         s.active = true;
+                        s.error = None;
                         s.pose = Some(pose.clone());
                     });
                 }
@@ -197,12 +205,28 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     let Some(session) = session.as_mut() else {
                         return Ok(());
                     };
+                    let dt = dt.max(0.);
                     session.set_aspect_ratio(aspect);
-                    accumulated = (accumulated + dt.max(0.)).min(MAX_CATCH_UP);
+                    // The game's own input path: sample the pad every frame,
+                    // publish actions on each simulation tick.
+                    packet = packet.wrapping_add(1);
+                    last_input = controls;
+                    session.collect(
+                        InputFrame::from_pad(
+                            controls.buttons,
+                            controls.triggers,
+                            controls.left,
+                            controls.right,
+                            packet,
+                        ),
+                        dt,
+                    );
+                    accumulated = (accumulated + dt).min(MAX_CATCH_UP);
                     let mut advanced = false;
+                    // The native camera can change the simulation period.
                     while accumulated >= session.period() {
                         accumulated -= session.period();
-                        session.tick(controls)?;
+                        session.advance()?;
                         advanced = true;
                     }
                     if advanced {
@@ -221,10 +245,27 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
             Ok(())
         })();
         if let Err(e) = result {
-            set(&|s| {
-                s.status = Status::Failed(e.clone());
-                s.active = false;
-            });
+            if riding {
+                // Only this ride is lost; the map's collision is still good.
+                let c = last_input;
+                let e = format!(
+                    "{e} (input: buttons {:04x}, triggers {:?}, left {:?}, right {:?})",
+                    c.buttons, c.triggers, c.left, c.right
+                );
+                accumulated = 0.;
+                if let Some(session) = session.as_mut() {
+                    session.suspend_input();
+                }
+                set(&|s| {
+                    s.error = Some(e.clone());
+                    s.active = false;
+                });
+            } else {
+                set(&|s| {
+                    s.status = Status::Failed(e.clone());
+                    s.active = false;
+                });
+            }
         }
     }
 }

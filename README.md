@@ -39,8 +39,13 @@ The Skate 3 host is a git dependency on
 5. Plug in a controller, load a map, and run `skate3_toggle` in the console
    (bind it: `bind j skate3_toggle`).
 
+Steam Input: Garry's Mod's controller layout must be a gamepad layout (Steam →
+Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and
+mouse, or the pad shows up but sends no buttons. `skate3_debug_input 1` shows
+what the mod receives; pressing A should show `buttons 1000`.
+
 Console variables: `skate3_debug_rails 1` draws the grind rails found in the
-map, `skate3_data_path` points at converted data somewhere else, and the
+map, `skate3_debug_input 1` shows the controller input, `skate3_data_path` points at converted data somewhere else, and the
 server's `skate3_enabled 0` turns the mode off.
 
 For now the skater is drawn as a wireframe board and a line; posing your

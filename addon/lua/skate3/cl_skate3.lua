@@ -3,6 +3,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
 local cv_hud = CreateClientConVar("skate3_hud", "1", true, false, "Show the skate status line")
+local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 
 local loaded = false
 local active = false
@@ -123,8 +124,11 @@ hook.Add("Think", "skate3_step", function()
 		if status.state == "ready" and not rails then
 			rails = skate3.GetRails()
 			print(("[skate3] collision ready: %d triangles, %d grind rails"):format(status.triangles, status.rails))
-		elseif status.state == "failed" and active then
-			Say("Skate stopped: " .. tostring(status.error))
+		elseif active and (status.state == "failed" or status.error) then
+			-- The full reason goes to the console; chat gets the gist.
+			local why = tostring(status.error)
+			print("[skate3] ride stopped: " .. why)
+			Say("Skate stopped: " .. why:sub(1, 120) .. (#why > 120 and "... (full error in console)" or ""))
 			Stop()
 		end
 	end
@@ -154,6 +158,14 @@ hook.Add("CalcView", "skate3_view", function()
 		fov = c.fov,
 		drawviewer = false,
 	}
+end)
+
+-- The skate camera replaces the first-person view, so no hands or weapon.
+hook.Add("PreDrawViewModel", "skate3_hide", function()
+	if active then return true end
+end)
+hook.Add("PreDrawPlayerHands", "skate3_hide", function()
+	if active then return true end
 end)
 
 -- Until the skater is retargeted onto the playermodel, draw a stand-in: the
@@ -190,8 +202,15 @@ hook.Add("HUDPaint", "skate3_hud", function()
 	elseif active and pose then
 		line = ("skate3: %s  %.0f km/h  %s"):format(pose.state, pose.speed * 3.6, status.pad or "no controller")
 	end
-	if not line then return end
-	draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 48, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
+	if line then
+		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 48, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
+	end
+	if cv_input:GetBool() and skate3 then
+		local i, err = skate3.GetInput()
+		local text = i and ("pad: %s  buttons %04X  LT %d RT %d  L %d,%d  R %d,%d"):format(
+			i.pad or "none", i.buttons, i.lt, i.rt, i.lx, i.ly, i.rx, i.ry) or ("pad: " .. tostring(err))
+		draw.SimpleTextOutlined(text, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 30, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
+	end
 end)
 
 hook.Add("ShutDown", "skate3_shutdown", function()
