@@ -54,6 +54,25 @@ pub struct Pose {
     pub tick: u64,
     /// Every bone of the skater and board, in Source space.
     pub bones: Vec<(String, Mat4)>,
+    pub score: Score,
+}
+
+/// The trick score, as the HUD shows it.
+#[derive(Clone, Default)]
+pub struct Score {
+    /// The latest trick's name.
+    pub trick: String,
+    /// The line in progress, multiplier applied.
+    pub line: f32,
+    pub multiplier: f32,
+    /// Whether a line is still being built.
+    pub building: bool,
+    /// Every landed line this ride, added up.
+    pub total: f32,
+    /// The last line that settled (0 for a bail), and how many have settled
+    /// this session, so Lua can spot a new one.
+    pub landed: f32,
+    pub settled: u32,
 }
 
 #[derive(Clone)]
@@ -141,6 +160,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let mut last_input = Controls::default();
     // The skater's last few states and the tick each began, for error reports.
     let mut states: Vec<(String, u64)> = Vec::new();
+    // Score carried across ticks: the ride's total and the last landed line.
+    let mut score = Score::default();
     // The current map's collision, kept to rebuild a session that broke.
     let mut map: Option<MapWorld> = None;
     // Set once the simulation failed: some of its state may be non-finite
@@ -262,9 +283,22 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         accumulated -= session.period();
                         session.advance()?;
                         advanced = true;
+                        // A line settles on the tick it stops building; read
+                        // every tick so none is missed between frames.
+                        let now = session.score();
+                        if score.building && !now.active {
+                            score.landed = now.line;
+                            score.settled = score.settled.wrapping_add(1);
+                            score.total += now.line;
+                        }
+                        score.trick = now.trick;
+                        score.line = now.line;
+                        score.multiplier = now.multiplier;
+                        score.building = now.active;
                     }
                     if advanced {
-                        let pose = convert(&session.pose())?;
+                        let mut pose = convert(&session.pose())?;
+                        pose.score = score.clone();
                         if states.last().is_none_or(|(state, _)| *state != pose.state) {
                             if states.len() == 6 {
                                 states.remove(0);
@@ -362,6 +396,7 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
                 })
                 .collect()
         },
+        score: Score::default(),
     })
 }
 
