@@ -139,6 +139,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     // XInput's packet number, advanced every frame as the mashup does.
     let mut packet = 0u32;
     let mut last_input = Controls::default();
+    // The skater's last few states and the tick each began, for error reports.
+    let mut states: Vec<(String, u64)> = Vec::new();
     // The current map's collision, kept to rebuild a session that broke.
     let mut map: Option<MapWorld> = None;
     // Set once the simulation failed: some of its state may be non-finite
@@ -263,6 +265,12 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     }
                     if advanced {
                         let pose = convert(&session.pose())?;
+                        if states.last().is_none_or(|(state, _)| *state != pose.state) {
+                            if states.len() == 6 {
+                                states.remove(0);
+                            }
+                            states.push((pose.state.clone(), pose.tick));
+                        }
                         set(&|s| s.pose = Some(pose.clone()));
                     }
                 }
@@ -281,10 +289,19 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 broken = true;
                 // Only this ride is lost; the map's collision is still good.
                 let c = last_input;
+                let history: Vec<String> = states
+                    .iter()
+                    .map(|(state, tick)| format!("{state}@{tick}"))
+                    .collect();
                 let e = format!(
-                    "{e} (input: buttons {:04x}, triggers {:?}, left {:?}, right {:?})",
-                    c.buttons, c.triggers, c.left, c.right
+                    "{e} (input: buttons {:04x}, triggers {:?}, left {:?}, right {:?}; states: {})",
+                    c.buttons,
+                    c.triggers,
+                    c.left,
+                    c.right,
+                    history.join(" > ")
                 );
+                states.clear();
                 accumulated = 0.;
                 if let Some(session) = session.as_mut() {
                     session.suspend_input();

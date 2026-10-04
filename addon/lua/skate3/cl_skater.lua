@@ -171,6 +171,10 @@ end
 
 local model -- the clientside stand-in for the local player
 local rest = {} -- bone index -> the model's bind Matrix at the origin
+-- Bones the engine sets up at all. Writing any other (unused helper bones on
+-- some playermodels) logs "Bone is unwriteable" every frame.
+local writable = {}
+local USED = BONE_USED_BY_ANYTHING or 0x7FF00
 local fits = {} -- bone index -> { skate = name, pre = Matrix }
 
 -- The model's rest pose, read once with the entity at the origin.
@@ -183,8 +187,10 @@ local function CaptureRest(ent)
 	ent:InvalidateBoneCache()
 	ent:SetupBones()
 	rest = {}
+	writable = {}
 	for i = 0, ent:GetBoneCount() - 1 do
 		rest[i] = ent:GetBoneMatrix(i) or Matrix()
+		writable[i] = ent:BoneHasFlag(i, USED)
 	end
 end
 
@@ -246,11 +252,8 @@ local function BuildBones(ent, count)
 			skin = parent >= 0 and skins[parent] or pelvis
 		end
 		skins[i] = skin
-		-- Some renders (other views like portals, low detail) set up only
-		-- part of the skeleton and refuse writes to the rest; skip those
-		-- quietly instead of raising an error every frame.
-		if skin and rest[i] and not pcall(ent.SetBoneMatrix, ent, i, skin * rest[i]) then
-			return
+		if skin and rest[i] and writable[i] then
+			ent:SetBoneMatrix(i, skin * rest[i])
 		end
 	end
 end

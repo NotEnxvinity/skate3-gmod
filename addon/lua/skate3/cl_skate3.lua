@@ -21,6 +21,7 @@ local rideWhenReady = false
 local lastRemount = -math.huge
 local resumeAt -- where a glitched ride ended, for hopping back on
 local stepOffUntil -- tapping Y until then, to start off the board
+local resumeOnFoot = false -- the glitched ride ended on foot
 local stepOffFrame = 0
 local pose
 local rails
@@ -154,10 +155,12 @@ local function FollowWeapon()
 	-- Equipped before the map's collision finished: start once it's ready.
 	if rideWhenReady and not active and status.state ~= "loading" then
 		rideWhenReady = false
-		-- A fresh equip starts on foot; hopping back on after a glitch doesn't.
-		local fresh = resumeAt == nil
+		-- A fresh equip starts on foot, and so does recovering from a glitch
+		-- that happened on foot.
+		local onFoot = resumeAt == nil or resumeOnFoot
+		resumeOnFoot = false
 		Start()
-		if active and fresh then
+		if active and onFoot then
 			stepOffUntil = RealTime() + STEP_OFF_FOR
 			stepOffFrame = 0
 		end
@@ -182,6 +185,7 @@ hook.Add("Think", "skate3_step", function()
 			file.CreateDir("skate3")
 			file.Append("skate3/errors.txt", os.date("%Y-%m-%d %H:%M:%S  ") .. why .. "\n\n")
 			local endedAt = pose and V(pose.pos)
+			local endedOnFoot = pose and pose.state and pose.state:find("^Biped") ~= nil
 			Stop()
 			-- Still holding the board: hop back on where the ride ended (on a
 			-- fresh simulation, which takes a few seconds), unless it keeps failing.
@@ -189,7 +193,8 @@ hook.Add("Think", "skate3_step", function()
 				lastRemount = now
 				rideWhenReady = true
 				resumeAt = endedAt
-				Say("Skate glitched, hopping back on. (details in console)")
+				resumeOnFoot = endedOnFoot or false
+				Say("Skate glitched, putting you back where you were. (details in console)")
 			else
 				Say("Skate stopped: " .. why:sub(1, 120) .. (#why > 120 and "... (full error in console)" or ""))
 			end
