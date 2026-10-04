@@ -5,11 +5,12 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, mpsc};
 
 use glam::{Mat3, Mat4, Vec3};
-use skate_bridge::bridge::{Controls, InputFrame, Session};
+use skate_bridge::bridge::{Controls, Session};
+use skate_bridge::repro::{Driver, Event, Recording};
 use skate_bridge::{collision, world};
 
-/// The longest frame the simulation catches up on, as in the mashup.
-const MAX_CATCH_UP: f32 = 0.15;
+/// Recordings of glitched rides kept in data/skate3/rides.
+const KEEP_RIDES: usize = 5;
 
 pub enum Job {
     Load {
@@ -154,10 +155,12 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
         }
     };
     let mut session: Option<Session> = None;
-    let mut accumulated = 0f32;
-    // XInput's packet number, advanced every frame as the mashup does.
-    let mut packet = 0u32;
+    let mut driver = Driver::default();
+    // Everything the session was fed since it was built, saved when it
+    // breaks so skate-headless can replay it.
+    let mut recording: Option<Recording> = None;
     let mut last_input = Controls::default();
+    let mut last_pos: Option<Vec3> = None;
     // The skater's last few states and the tick each began, for error reports.
     let mut states: Vec<(String, u64)> = Vec::new();
     // Score carried across ticks: the ride's total and the last landed line.
@@ -203,10 +206,13 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                                 .collision_builder()
                                 .build(built.triangles, built.rails)?;
                             existing.install_collision(prepared)?;
+                            // A replay can't swap collision mid-session.
+                            recording = None;
                         }
                         None => {
                             broken = false;
                             session = None;
+                            recording = None;
                             session = Some(Session::new(
                                 &assets,
                                 built.triangles,
@@ -214,6 +220,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                                 [0.; 3],
                                 0.,
                             )?);
+                            driver = Driver::default();
+                            recording = map
+                                .as_ref()
+                                .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
                         }
                     }
                     set(&|s| {
@@ -229,6 +239,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 } => {
                     if broken && let Some(map) = &map {
                         session = None;
+                        recording = None;
                         session = Some(Session::new(
                             &map.assets,
                             map.triangles.clone(),
@@ -236,15 +247,23 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             [0.; 3],
                             0.,
                         )?);
+                        driver = Driver::default();
+                        recording = Some(Recording::new(map.triangles.clone(), map.rails.clone()));
                         broken = false;
                     }
                     let session = session.as_mut().ok_or("the map isn't loaded yet")?;
-                    accumulated = 0.;
-                    session.set_aspect_ratio(aspect);
-                    let pose = session.activate(
-                        collision::to_skate(pos).to_array(),
-                        yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2,
-                    )?;
+                    let spawn = collision::to_skate(pos).to_array();
+                    let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
+                    record(
+                        &mut recording,
+                        Event::Activate {
+                            spawn,
+                            heading,
+                            aspect,
+                        },
+                    );
+                    last_pos = Some(pos);
+                    let pose = driver.activate(session, spawn, heading, aspect)?;
                     let pose = convert(&pose)?;
                     set(&|s| {
                         s.active = true;
@@ -260,29 +279,16 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     let Some(session) = session.as_mut() else {
                         return Ok(());
                     };
-                    let dt = dt.max(0.);
-                    session.set_aspect_ratio(aspect);
-                    // The game's own input path: sample the pad every frame,
-                    // publish actions on each simulation tick.
-                    packet = packet.wrapping_add(1);
                     last_input = controls;
-                    session.collect(
-                        InputFrame::from_pad(
-                            controls.buttons,
-                            controls.triggers,
-                            controls.left,
-                            controls.right,
-                            packet,
-                        ),
-                        dt,
+                    record(
+                        &mut recording,
+                        Event::Step {
+                            dt,
+                            controls,
+                            aspect,
+                        },
                     );
-                    accumulated = (accumulated + dt).min(MAX_CATCH_UP);
-                    let mut advanced = false;
-                    // The native camera can change the simulation period.
-                    while accumulated >= session.period() {
-                        accumulated -= session.period();
-                        session.advance()?;
-                        advanced = true;
+                    let advanced = driver.step(session, dt, controls, aspect, |session| {
                         // A line settles on the tick it stops building; read
                         // every tick so none is missed between frames.
                         let now = session.score();
@@ -295,9 +301,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         score.line = now.line;
                         score.multiplier = now.multiplier;
                         score.building = now.active;
-                    }
+                    })?;
                     if advanced {
                         let mut pose = convert(&session.pose())?;
+                        last_pos = Some(pose.pos);
                         pose.score = score.clone();
                         if states.last().is_none_or(|(state, _)| *state != pose.state) {
                             if states.len() == 6 {
@@ -309,9 +316,9 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     }
                 }
                 Job::Suspend => {
-                    accumulated = 0.;
                     if let Some(session) = session.as_mut() {
-                        session.suspend_input();
+                        record(&mut recording, Event::Suspend);
+                        driver.suspend(session);
                     }
                     set(&|s| s.active = false);
                 }
@@ -327,7 +334,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     .iter()
                     .map(|(state, tick)| format!("{state}@{tick}"))
                     .collect();
-                let e = format!(
+                let mut e = format!(
                     "{e} (input: buttons {:04x}, triggers {:?}, left {:?}, right {:?}; states: {})",
                     c.buttons,
                     c.triggers,
@@ -335,10 +342,18 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     c.right,
                     history.join(" > ")
                 );
+                if let Some(p) = last_pos {
+                    e += &format!(" at setpos {:.0} {:.0} {:.0}", p.x, p.y, p.z);
+                }
+                if let (Some(rec), Some(map)) = (recording.take(), &map) {
+                    match save_ride(&rec, &map.assets) {
+                        Ok(name) => e += &format!("; ride saved as data/skate3/rides/{name}"),
+                        Err(why) => e += &format!("; couldn't save the ride: {why}"),
+                    }
+                }
                 states.clear();
-                accumulated = 0.;
                 if let Some(session) = session.as_mut() {
-                    session.suspend_input();
+                    driver.suspend(session);
                 }
                 set(&|s| {
                     s.error = Some(e.clone());
@@ -353,6 +368,44 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
             }
         }
     }
+}
+
+/// Adds to the recording, dropping it once it is full: a replay needs every
+/// event from the session's start.
+fn record(recording: &mut Option<Recording>, event: Event) {
+    if let Some(rec) = recording
+        && !rec.push(event)
+    {
+        *recording = None;
+    }
+}
+
+/// Writes a broken ride next to the converted data, as data/skate3/rides,
+/// keeping only the newest few. Returns the file's name.
+fn save_ride(rec: &Recording, assets: &std::path::Path) -> Result<String, String> {
+    let dir = assets
+        .parent()
+        .ok_or("the data folder has no parent")?
+        .join("rides");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs());
+    let name = format!("ride-{secs}.sk3r");
+    let mut file =
+        std::io::BufWriter::new(std::fs::File::create(dir.join(&name)).map_err(|e| e.to_string())?);
+    rec.write(&mut file).map_err(|e| e.to_string())?;
+    std::io::Write::flush(&mut file).map_err(|e| e.to_string())?;
+    let mut old: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(|f| f.ok().map(|f| f.path()))
+        .filter(|p| p.extension().is_some_and(|x| x == "sk3r"))
+        .collect();
+    old.sort();
+    while old.len() > KEEP_RIDES {
+        let _ = std::fs::remove_file(old.remove(0));
+    }
+    Ok(name)
 }
 
 /// Skate directions (Y up, metres) as Source directions (Z up).

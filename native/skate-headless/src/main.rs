@@ -1,28 +1,55 @@
 //! Milestone 1: prove the Skate 3 host runs on Linux without Gmod.
 //!
 //!   skate-headless [--assets <converted data dir>] [--ticks N]
+//!   skate-headless --assets <dir> --replay <ride.sk3r>
 //!
 //! Builds a test park (floor plus a ledge) from Source-style brushes, finds its
 //! grind rails, and with `--assets` drops a skater on it and ticks the
 //! simulation, printing where the skater ends up.
+//!
+//! `--replay` instead plays back a ride the mod saved when it glitched
+//! (garrysmod/data/skate3/rides), to see whether and where it breaks again.
 
 use glam::Vec3;
 use skate_bridge::bridge::{Controls, Session};
+use skate_bridge::repro::{Driver, Event, Recording};
 use skate_bridge::{collision, world};
 
 fn main() {
     let mut assets = None;
     let mut ticks = 300u32;
+    let mut replay = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--assets" => assets = args.next(),
             "--ticks" => ticks = args.next().and_then(|n| n.parse().ok()).unwrap_or(ticks),
+            "--replay" => replay = args.next(),
             _ => {
-                eprintln!("usage: skate-headless [--assets <dir>] [--ticks N]");
+                eprintln!(
+                    "usage: skate-headless [--assets <dir>] [--ticks N] [--replay <ride.sk3r>]"
+                );
                 std::process::exit(2);
             }
         }
+    }
+
+    if let Some(ride) = replay {
+        let Some(assets) = assets else {
+            eprintln!("--replay needs --assets <converted data dir>");
+            std::process::exit(2);
+        };
+        let result = std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || play(&assets, &ride))
+            .expect("spawn skate thread")
+            .join()
+            .expect("skate thread panicked");
+        if let Err(e) = result {
+            eprintln!("skate: {e}");
+            std::process::exit(1);
+        }
+        return;
     }
 
     let park = world::build(
@@ -121,4 +148,76 @@ fn report(label: &str, pose: &skate_bridge::bridge::Pose) {
         pose.bones.len(),
         pose.state,
     );
+}
+
+/// Replays a saved ride on a fresh session, as the mod fed it.
+fn play(assets: &str, path: &str) -> Result<(), String> {
+    let mut file =
+        std::io::BufReader::new(std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?);
+    let rec = Recording::read(&mut file).map_err(|e| format!("{path}: {e}"))?;
+    let steps = rec
+        .events
+        .iter()
+        .filter(|e| matches!(e, Event::Step { .. }))
+        .count();
+    println!(
+        "ride: {} triangles, {} rails, {} events ({steps} frames)",
+        rec.triangles.len(),
+        rec.rails.len(),
+        rec.events.len()
+    );
+    let mut session = Session::new(
+        std::path::Path::new(assets),
+        rec.triangles,
+        rec.rails,
+        [0.; 3],
+        0.,
+    )?;
+    let mut driver = Driver::default();
+    let mut state = String::new();
+    let mut frame = 0usize;
+    for (i, event) in rec.events.iter().enumerate() {
+        let result = match *event {
+            Event::Activate {
+                spawn,
+                heading,
+                aspect,
+            } => driver
+                .activate(&mut session, spawn, heading, aspect)
+                .map(|pose| {
+                    report(&format!("event {i}: activated"), &pose);
+                }),
+            Event::Step {
+                dt,
+                controls,
+                aspect,
+            } => {
+                frame += 1;
+                driver
+                    .step(&mut session, dt, controls, aspect, |_| {})
+                    .and_then(|_| {
+                        let pose = session.pose();
+                        if !pose.root.is_finite() {
+                            return Err("the skater's pose went non-finite".into());
+                        }
+                        if pose.state != state {
+                            state = pose.state.clone();
+                            report(&format!("frame {frame}"), &pose);
+                        }
+                        Ok(())
+                    })
+            }
+            Event::Suspend => {
+                driver.suspend(&mut session);
+                println!("event {i}: suspended");
+                Ok(())
+            }
+        };
+        if let Err(e) = result {
+            println!("BROKE at event {i} (frame {frame}): {e}");
+            return Ok(());
+        }
+    }
+    println!("replayed the whole ride without a glitch");
+    Ok(())
 }
