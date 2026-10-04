@@ -94,6 +94,7 @@ function Skater.DrawBoard(pose)
 	render.SuppressEngineLighting(true)
 	render.ResetModelLighting(light.x * 0.6 + 0.05, light.y * 0.6 + 0.05, light.z * 0.6 + 0.05)
 	render.SetModelLighting(BOX_TOP, light.x, light.y, light.z)
+	local drawn = 0
 	for _, part in ipairs(parts) do
 		local m = pose.bones[part.bone]
 		if m then
@@ -101,10 +102,34 @@ function Skater.DrawBoard(pose)
 			cam.PushModelMatrix(Mat(m))
 			for _, piece in ipairs(part.meshes) do piece:Draw() end
 			cam.PopModelMatrix()
+			drawn = drawn + 1
 		end
 	end
 	render.SuppressEngineLighting(false)
-	return true
+	-- None of the board's bones came through: show the stand-in instead.
+	return drawn > 0
+end
+
+-- What the board is made of and where it is, for skate3_board_info.
+function Skater.BoardInfo(pose)
+	if not data then
+		print("[skate3] no board data loaded (see the console line from when the map loaded)")
+		return
+	end
+	print(("[skate3] board: %d parts, textures at %s"):format(#data.parts, tostring(data.textures)))
+	for i, p in ipairs(data.parts) do
+		local png = data.textures and (data.textures .. "/" .. p.slot .. "_base_color.png")
+		local m = pose and pose.bones and pose.bones[p.bone]
+		local where = "bone missing from the pose"
+		if not pose then
+			where = "not riding"
+		elseif m then
+			local at = Vector(m[4], m[8], m[12])
+			where = ("bone at %s, %.0f units from the skater"):format(tostring(at), at:Distance(Vector(pose.pos[1], pose.pos[2], pose.pos[3])))
+		end
+		print(("  %d. %s on %s: %d triangles, texture %s, %s"):format(
+			i, p.slot, p.bone, #p.vertices / 24, png and file.Exists(png, "DATA") and "found" or "missing", where))
+	end
 end
 
 ---------------------------------------------------------------------------

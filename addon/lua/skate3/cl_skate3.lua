@@ -128,6 +128,10 @@ concommand.Add("skate3_toggle", function()
 	if active then Stop() else Start() end
 end, nil, "Get on or off the board")
 
+concommand.Add("skate3_board_info", function()
+	Skater.BoardInfo(active and pose or nil)
+end, nil, "Print what the board is made of and where it is drawn")
+
 net.Receive("skate3_state", function()
 	if not net.ReadBool() and active then
 		skate3.Suspend()
