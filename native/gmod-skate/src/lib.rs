@@ -264,6 +264,24 @@ lua_fn!(get_pose, |lua| {
         }
         lua.set_field(-2, c"bones");
     }
+    let score = &p.score;
+    lua.new_table();
+    lua.push_str(&score.trick);
+    lua.set_field(-2, c"trick");
+    for (name, value) in [
+        (c"line", score.line),
+        (c"multiplier", score.multiplier),
+        (c"total", score.total),
+        (c"landed", score.landed),
+    ] {
+        lua.push_number(f64::from(value));
+        lua.set_field(-2, name);
+    }
+    lua.push_number(f64::from(score.settled));
+    lua.set_field(-2, c"settled");
+    lua.push_bool(score.building);
+    lua.set_field(-2, c"building");
+    lua.set_field(-2, c"score");
     if let Some(c) = p.camera {
         lua.new_table();
         for (name, v) in [(c"pos", c.pos), (c"forward", c.forward), (c"up", c.up)] {
