@@ -1,4 +1,5 @@
 local Skater = include("skate3/cl_skater.lua")
+local Sounds = include("skate3/cl_sounds.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -92,6 +93,7 @@ local function Stop()
 	SetActive(false)
 	pose = nil
 	Skater.HideModel()
+	Sounds.Stop()
 end
 
 local function Start()
@@ -138,6 +140,7 @@ net.Receive("skate3_state", function()
 		active = false
 		pose = nil
 		Skater.HideModel()
+		Sounds.Stop()
 	end
 end)
 
@@ -220,6 +223,7 @@ hook.Add("Think", "skate3_step", function()
 	skate3.Step(FrameTime(), ScrW() / ScrH(), press)
 	pose = skate3.GetPose() or pose
 	Skater.UpdateModel(pose)
+	Sounds.Update(LocalPlayer(), pose)
 	if pose and now >= nextSend then
 		nextSend = now + 0.05
 		net.Start("skate3_move")
