@@ -86,6 +86,8 @@ local function BuildBoard()
 	end
 end
 
+local cv_xray = CreateClientConVar("skate3_debug_board", "0", false, false, "Draw the board through walls, with a box on each part")
+
 -- Returns false when there's no board to draw.
 function Skater.DrawBoard(pose)
 	if not data or not pose.bones then return false end
@@ -94,6 +96,8 @@ function Skater.DrawBoard(pose)
 	render.SuppressEngineLighting(true)
 	render.ResetModelLighting(light.x * 0.6 + 0.05, light.y * 0.6 + 0.05, light.z * 0.6 + 0.05)
 	render.SetModelLighting(BOX_TOP, light.x, light.y, light.z)
+	local xray = cv_xray:GetBool()
+	if xray then cam.IgnoreZ(true) end
 	local drawn = 0
 	for _, part in ipairs(parts) do
 		local m = pose.bones[part.bone]
@@ -106,6 +110,17 @@ function Skater.DrawBoard(pose)
 		end
 	end
 	render.SuppressEngineLighting(false)
+	-- X-ray: the board through walls and floors, plus a box on each part.
+	if xray then
+		for _, part in ipairs(parts) do
+			local m = pose.bones[part.bone]
+			if m then
+				local at = Vector(m[4], m[8], m[12])
+				render.DrawWireframeBox(at, angle_zero, Vector(-1, -1, -1), Vector(1, 1, 1), Color(255, 60, 200), false)
+			end
+		end
+		cam.IgnoreZ(false)
+	end
 	-- None of the board's bones came through: show the stand-in instead.
 	return drawn > 0
 end
@@ -117,6 +132,11 @@ function Skater.BoardInfo(pose)
 		return
 	end
 	print(("[skate3] board: %d parts, textures at %s"):format(#data.parts, tostring(data.textures)))
+	if pose then
+		local at = Vector(pose.pos[1], pose.pos[2], pose.pos[3])
+		local floor = util.TraceLine({ start = at + Vector(0, 0, 48), endpos = at - Vector(0, 0, 256), mask = MASK_SOLID_BRUSHONLY })
+		print(("[skate3] skater root at %s, floor below it at height %.1f"):format(tostring(at), floor.HitPos.z))
+	end
 	for i, p in ipairs(data.parts) do
 		local png = data.textures and (data.textures .. "/" .. p.slot .. "_base_color.png")
 		local m = pose and pose.bones and pose.bones[p.bone]
@@ -260,6 +280,8 @@ local function Fit(ent)
 end
 
 local pose
+local cv_bones = CreateClientConVar("skate3_bone_mode", "override", true, false,
+	"How the playermodel is posed: override (default) or callback (the older way)")
 
 local function BuildBones(ent, count)
 	if not pose or not pose.bones then return end
@@ -317,7 +339,20 @@ function Skater.ShowModel(ply)
 		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
-		model:AddCallback("BuildBonePositions", BuildBones)
+		if cv_bones:GetString() == "callback" then
+			model:AddCallback("BuildBonePositions", BuildBones)
+		else
+			-- Pose the bones right before drawing, after setting up the whole
+			-- skeleton. Inside the engine's own setup (the callback) other
+			-- views like portals set up only part of it and refuse the rest.
+			model.RenderOverride = function(self, flags)
+				if pose and pose.bones then
+					self:SetupBones()
+					BuildBones(self, self:GetBoneCount())
+				end
+				self:DrawModel(flags)
+			end
+		end
 		model:SetRenderBounds(Vector(-96, -96, -32), Vector(96, 96, 128))
 	end
 	model:SetSkin(ply:GetSkin())
