@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use glam::Vec3;
 use lua::{Lua, State};
 use runtime::{Job, Runtime, Status};
+use skate_bridge::bridge::Controls;
 
 static RUNTIME: Mutex<Option<Runtime>> = Mutex::new(None);
 
@@ -174,6 +175,46 @@ lua_fn!(status, |lua| {
     1
 });
 
+/// Y gets on and off the board, so the simulation never sees it.
+const PAD_Y: u16 = 0x8000;
+
+/// A trigger counts as pressed past this (of 255).
+const TRIGGER_DOWN: u8 = 30;
+
+/// Inputs held when a ride starts (Y, or a trigger that Steam Input maps to
+/// the left click that dropped the board), hidden from the simulation until
+/// let go, so getting on doesn't also flick or grab.
+#[derive(Clone, Copy, Default)]
+struct Held {
+    buttons: u16,
+    triggers: [bool; 2],
+}
+
+static HELD: Mutex<Held> = Mutex::new(Held {
+    buttons: 0,
+    triggers: [false; 2],
+});
+
+impl Held {
+    fn from(c: &Controls) -> Self {
+        Self {
+            buttons: c.buttons,
+            triggers: c.triggers.map(|t| t > TRIGGER_DOWN),
+        }
+    }
+
+    fn hide(&mut self, c: &mut Controls) {
+        self.buttons &= c.buttons;
+        c.buttons &= !(self.buttons | PAD_Y);
+        for (held, trigger) in self.triggers.iter_mut().zip(&mut c.triggers) {
+            *held &= *trigger > TRIGGER_DOWN;
+            if *held {
+                *trigger = 0;
+            }
+        }
+    }
+}
+
 lua_fn!(activate, |lua| {
     let (Some(x), Some(y), Some(z), Some(yaw)) =
         (lua.number(1), lua.number(2), lua.number(3), lua.number(4))
@@ -189,6 +230,10 @@ lua_fn!(activate, |lua| {
     });
     if ready != Some(true) {
         return lua.fail("the map's skate collision isn't ready yet");
+    }
+    // Whatever dropped the board is still held down; keep it from the ride.
+    if let (Ok(pad), Ok(mut held)) = (input::poll(), HELD.lock()) {
+        *held = Held::from(&pad.controls);
     }
     with_runtime(|r| {
         // A new ride: the last one's error no longer applies.
@@ -208,10 +253,13 @@ lua_fn!(activate, |lua| {
 lua_fn!(step, |lua| {
     let dt = lua.number(1).unwrap_or(0.) as f32;
     let aspect = lua.number(2).unwrap_or(16. / 9.) as f32;
-    let controls = match input::poll() {
+    let mut controls = match input::poll() {
         Ok(pad) => pad.controls,
         Err(e) => return lua.fail(&format!("gamepad: {e}")),
     };
+    if let Ok(mut held) = HELD.lock() {
+        held.hide(&mut controls);
+    }
     with_runtime(|r| {
         r.send(Job::Step {
             dt,
@@ -485,6 +533,27 @@ pub unsafe extern "C" fn gmod13_close(state: State) -> c_int {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hides_y_and_whatever_was_held_on_getting_on() {
+        let pad = |buttons, rt| Controls {
+            buttons,
+            triggers: [0, rt],
+            ..Controls::default()
+        };
+        // Got on with Y and the right trigger down, A up.
+        let mut held = Held::from(&pad(PAD_Y | 0x1000, 255));
+        held.buttons &= !0x1000;
+        let mut c = pad(PAD_Y | 0x1000, 255);
+        held.hide(&mut c);
+        assert_eq!((c.buttons, c.triggers[1]), (0x1000, 0));
+        // Let go of the trigger, then press it again: now it grabs.
+        let mut c = pad(0, 0);
+        held.hide(&mut c);
+        let mut c = pad(PAD_Y, 200);
+        held.hide(&mut c);
+        assert_eq!((c.buttons, c.triggers[1]), (0, 200));
+    }
 
     #[test]
     fn finds_the_data_folder_on_linux_and_proton() {

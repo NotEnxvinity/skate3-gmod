@@ -37,8 +37,9 @@ The Skate 3 host is a git dependency on
 4. Use 64-bit Garry's Mod: Steam → Garry's Mod → Properties → Betas →
    **x86-64**. Native Linux loads the `linux64` module, Proton the `win64` one.
 5. Plug in a controller, load a map, and equip the **Skateboard** (spawn menu →
-   Weapons → Skate 3). Switch weapons to step off. `skate3_toggle` in the
-   console does the same without the weapon (bind it: `bind j skate3_toggle`).
+   Weapons → Skate 3) to carry it. Press **Y** (or left click) to drop it and
+   ride, and **Y** again to pick it back up. `skate3_toggle` in the console
+   gets on and off without the weapon (bind it: `bind j skate3_toggle`).
 
 Steam Input: Garry's Mod's controller layout must be a gamepad layout (Steam →
 Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and

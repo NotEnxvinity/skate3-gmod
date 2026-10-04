@@ -7,8 +7,10 @@ local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Dr
 local cv_hud = CreateClientConVar("skate3_hud", "1", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 
--- Equipping this weapon gets on the board; switching away gets off.
+-- Equipping this weapon puts the board in your hands; Y on the pad (or a left
+-- click) drops it and rides, Y again picks it back up.
 local BOARD_WEAPON = "weapon_skate3"
+local PAD_Y = 0x8000
 
 local loaded = false
 local active = false
@@ -16,6 +18,8 @@ local boardHeld = false
 local rideWhenReady = false
 local lastRemount = -math.huge
 local resumeAt -- where a glitched ride ended, for hopping back on
+local wantToggle = false -- drop or pick up the board on the next frame
+local lastPadY, lastAttack = false, false
 local pose
 local rails
 local status = {}
@@ -130,7 +134,7 @@ net.Receive("skate3_state", function()
 	end
 end)
 
--- Rides while the board weapon is out.
+-- Riding needs the board weapon out; putting it away picks the board up.
 local function FollowWeapon()
 	local ply = LocalPlayer()
 	if not IsValid(ply) then return end
@@ -138,10 +142,11 @@ local function FollowWeapon()
 	local held = IsValid(wep) and wep:GetClass() == BOARD_WEAPON
 	if held ~= boardHeld then
 		boardHeld = held
-		rideWhenReady = held
+		rideWhenReady = false
+		wantToggle = false
 		if not held then Stop() end
 	end
-	-- Equipped before the map's collision finished: ride once it's ready.
+	-- Hopping back on after a glitch, once the collision is ready.
 	if rideWhenReady and not active and status.state ~= "loading" then
 		rideWhenReady = false
 		Start()
@@ -179,6 +184,16 @@ hook.Add("Think", "skate3_step", function()
 			end
 		end
 	end
+	if boardHeld then
+		local input = skate3.GetInput()
+		local y = input ~= nil and bit.band(input.buttons, PAD_Y) ~= 0
+		if y and not lastPadY then wantToggle = true end
+		lastPadY = y
+	end
+	if wantToggle then
+		wantToggle = false
+		if active then Stop() elseif boardHeld then Start() end
+	end
 	if not active then return end
 	skate3.Step(FrameTime(), ScrW() / ScrH())
 	pose = skate3.GetPose() or pose
@@ -192,6 +207,11 @@ hook.Add("Think", "skate3_step", function()
 end)
 
 hook.Add("CreateMove", "skate3_block", function(cmd)
+	-- A left click drops the board too. Not while riding: a pad layout may put
+	-- attack on a trigger, and the triggers grab.
+	local attack = cmd:KeyDown(IN_ATTACK)
+	if boardHeld and not active and attack and not lastAttack then wantToggle = true end
+	lastAttack = attack
 	if not active then return end
 	cmd:ClearMovement()
 	cmd:ClearButtons()
@@ -220,6 +240,19 @@ end)
 -- board and a line where the skater stands.
 local BOARD_MIN, BOARD_MAX = Vector(-16, -4, 0), Vector(16, 4, 2)
 local BOARD_COLOR, BODY_COLOR, RAIL_COLOR = Color(255, 200, 60), Color(120, 200, 255), Color(255, 60, 200)
+
+-- The board in the hands of everyone holding it, this player included.
+hook.Add("PostDrawOpaqueRenderables", "skate3_held", function(_, skybox)
+	if skybox then return end
+	local me = LocalPlayer()
+	for _, ply in ipairs(player.GetAll()) do
+		local wep = ply:Alive() and ply:GetActiveWeapon()
+		local riding = ply:GetNWBool("skate3_riding") or (ply == me and active)
+		if IsValid(wep) and wep:GetClass() == BOARD_WEAPON and not riding then
+			Skater.DrawHeld(ply, ply == me and not ply:ShouldDrawLocalPlayer())
+		end
+	end
+end)
 
 hook.Add("PostDrawOpaqueRenderables", "skate3_board", function(_, skybox)
 	if skybox or not active or not pose then return end
@@ -252,7 +285,9 @@ hook.Add("HUDPaint", "skate3_hud", function()
 	if status.state == "loading" then
 		line = "skate3: building collision..."
 	elseif active and pose then
-		line = ("skate3: %s  %.0f km/h  %s"):format(pose.state, pose.speed * 3.6, status.pad or "no controller")
+		line = ("skate3: %s  %.0f km/h  %s   (Y: pick up the board)"):format(pose.state, pose.speed * 3.6, status.pad or "no controller")
+	elseif boardHeld and not active then
+		line = "Y on your controller or left click: drop the board and ride"
 	end
 	if line then
 		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 48, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)

@@ -25,6 +25,7 @@ function Skater.Load()
 	end
 	data = skater
 	parts = nil
+	held = nil
 	bind = {}
 	for name, m in pairs(skater.bind) do bind[name] = Mat(m) end
 	print(("[skate3] board ready: %d parts"):format(#skater.parts))
@@ -105,6 +106,103 @@ function Skater.DrawBoard(pose)
 	end
 	render.SuppressEngineLighting(false)
 	return true
+end
+
+---------------------------------------------------------------------------
+-- The board in hand
+--
+-- Carried at the right side the way skaters do: deck on edge, grip toward the
+-- leg, nose forward, the hand on the top edge.
+
+local held -- part index -> Matrix taking the part into the board's own frame
+local heldSize -- the board's length, width and thickness
+
+-- The board's own frame: x along its length, z out of the grip, centred.
+local function BuildHeld()
+	local root = bind.SKATEBOARD_ROOT
+	local into = root and root:GetInverse() or Matrix()
+	local rel, lo, hi = {}, Vector(math.huge, math.huge, math.huge), Vector(-math.huge, -math.huge, -math.huge)
+	local sums = { deck = { Vector(), 0 }, wheels = { Vector(), 0 } }
+	for i, p in ipairs(data.parts) do
+		rel[i] = into * (bind[p.bone] or Matrix())
+		local sum = p.slot == "SkateWheel" and sums.wheels or p.slot == "SkateBoard" and sums.deck
+		local v = p.vertices
+		for o = 0, #v - 1, 8 do
+			local at = rel[i] * Vector(v[o + 1], v[o + 2], v[o + 3])
+			for _, k in ipairs({ "x", "y", "z" }) do
+				lo[k] = math.min(lo[k], at[k])
+				hi[k] = math.max(hi[k], at[k])
+			end
+			if sum then
+				sum[1]:Add(at)
+				sum[2] = sum[2] + 1
+			end
+		end
+	end
+	if lo.x > hi.x then return end
+	local size, center = hi - lo, (lo + hi) * 0.5
+	local axes = { "x", "y", "z" }
+	table.sort(axes, function(a, b) return size[a] > size[b] end)
+	local unit = { x = Vector(1, 0, 0), y = Vector(0, 1, 0), z = Vector(0, 0, 1) }
+	local x, z = unit[axes[1]], Vector(unit[axes[3]])
+	-- The grip faces away from the wheels.
+	local deck, wheels = sums.deck, sums.wheels
+	if deck[2] > 0 and wheels[2] > 0 and (deck[1] / deck[2] - wheels[1] / wheels[2]):Dot(z) < 0 then
+		z:Mul(-1)
+	end
+	local y = z:Cross(x)
+	local align = Matrix({
+		{ x.x, x.y, x.z, -x:Dot(center) },
+		{ y.x, y.y, y.z, -y:Dot(center) },
+		{ z.x, z.y, z.z, -z:Dot(center) },
+		{ 0, 0, 0, 1 },
+	})
+	held = {}
+	for i, m in ipairs(rel) do held[i] = align * m end
+	heldSize = { size[axes[1]], size[axes[2]], size[axes[3]] }
+end
+
+-- Draws the board in ply's right hand, or at the bottom right of the view.
+function Skater.DrawHeld(ply, firstPerson)
+	if not data then return end
+	if not parts then BuildBoard() end
+	if not held then
+		BuildHeld()
+		if not held then return end
+	end
+	local width, thick = heldSize[2], heldSize[3]
+	local pos, f, r, u
+	if firstPerson then
+		local ang = ply:EyeAngles()
+		f, r, u = ang:Forward(), ang:Right(), ang:Up()
+		pos = ply:EyePos() + f * 18 + r * 11 - u * 14
+	else
+		local ang = Angle(0, ply:GetAngles().y, 0)
+		f, r, u = ang:Forward(), ang:Right(), ang:Up()
+		local hand = ply:LookupBone("ValveBiped.Bip01_R_Hand")
+		local at = hand and ply:GetBonePosition(hand)
+		if not at or at == ply:GetPos() then at = ply:GetPos() + u * 34 + r * 9 end
+		pos = at - u * (width * 0.5 - 1) + r * (thick * 0.5 + 1)
+	end
+	-- Board x along forward, grip (z) toward the body, so its width runs down.
+	local x, y, z = f, -u, -r
+	local hold = Matrix({
+		{ x.x, y.x, z.x, pos.x },
+		{ x.y, y.y, z.y, pos.y },
+		{ x.z, y.z, z.z, pos.z },
+		{ 0, 0, 0, 1 },
+	})
+	local light = render.GetLightColor(pos)
+	render.SuppressEngineLighting(true)
+	render.ResetModelLighting(light.x * 0.6 + 0.05, light.y * 0.6 + 0.05, light.z * 0.6 + 0.05)
+	render.SetModelLighting(BOX_TOP, light.x, light.y, light.z)
+	for i, part in ipairs(parts) do
+		render.SetMaterial(part.material)
+		cam.PushModelMatrix(hold * held[i])
+		for _, piece in ipairs(part.meshes) do piece:Draw() end
+		cam.PopModelMatrix()
+	end
+	render.SuppressEngineLighting(false)
 end
 
 ---------------------------------------------------------------------------

@@ -1,10 +1,10 @@
--- The skateboard as a weapon: equip it to ride, switch away to step off.
--- The riding itself lives in skate3/cl_skate3.lua, which watches for it.
+-- The skateboard as a weapon: equip it to carry the board, then drop it to
+-- ride. The riding itself lives in skate3/cl_skate3.lua, which watches for it.
 
 SWEP.PrintName = "Skateboard"
 SWEP.Category = "Skate 3"
-SWEP.Purpose = "Equip to ride, switch weapons to step off."
-SWEP.Instructions = "Needs a controller: push with A."
+SWEP.Purpose = "Carry your board; drop it to ride."
+SWEP.Instructions = "Y on your controller or left click: drop the board and ride. Y again: pick it up. Needs a controller to skate."
 SWEP.Spawnable = true
 SWEP.Slot = 5
 SWEP.SlotPos = 1
@@ -28,5 +28,5 @@ end
 function SWEP:PrimaryAttack() end
 function SWEP:SecondaryAttack() end
 
--- The skate mode draws the board under the skater.
+-- The skate mode draws the board, in hand or under the skater.
 function SWEP:DrawWorldModel() end
