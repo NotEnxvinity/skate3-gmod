@@ -246,8 +246,11 @@ local function BuildBones(ent, count)
 			skin = parent >= 0 and skins[parent] or pelvis
 		end
 		skins[i] = skin
-		if skin and rest[i] then
-			ent:SetBoneMatrix(i, skin * rest[i])
+		-- Some renders (other views like portals, low detail) set up only
+		-- part of the skeleton and refuse writes to the rest; skip those
+		-- quietly instead of raising an error every frame.
+		if skin and rest[i] and not pcall(ent.SetBoneMatrix, ent, i, skin * rest[i]) then
+			return
 		end
 	end
 end
@@ -275,10 +278,15 @@ function Skater.ShowModel(ply)
 	if not data then return end
 	owner = ply
 	local name = ModelFor(ply)
-	if not IsValid(model) or model:GetModel() ~= name then
+	if not IsValid(model) or model.skate3Name ~= name then
 		if IsValid(model) then model:Remove() end
 		model = ClientsideModel(name, RENDERGROUP_OPAQUE)
 		if not IsValid(model) then return end
+		-- What was asked for, not GetModel(): the two can differ in case or
+		-- slashes, which would rebuild the model every frame.
+		model.skate3Name = name
+		-- Full detail, so every bone the retarget writes is in the skeleton.
+		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
 		model:AddCallback("BuildBonePositions", BuildBones)
@@ -295,7 +303,7 @@ end
 function Skater.UpdateModel(p)
 	pose = p
 	-- The player's model can change mid-ride (or arrive late after spawning).
-	if IsValid(owner) and IsValid(model) and model:GetModel() ~= ModelFor(owner) then
+	if IsValid(owner) and IsValid(model) and model.skate3Name ~= ModelFor(owner) then
 		Skater.ShowModel(owner)
 	end
 	if IsValid(model) and p then
