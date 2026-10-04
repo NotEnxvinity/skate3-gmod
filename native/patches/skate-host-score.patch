@@ -1,0 +1,66 @@
+Lets skate-host report the trick line in progress (trick name, line score,
+multiplier, whether it is still building) so the addon can draw a score HUD.
+Applied on top of chasmlol/2010-rust-rewrite-mashup at f608f85 by
+native/patch-engine.sh until the change lands upstream. Same license as the
+file it changes (Apache-2.0).
+
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index e03fc9a..c8fd04f 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -20,6 +20,17 @@ pub struct Session {
+     camera: CameraRuntime,
+     markers: crate::session_marker::Runtime,
+ }
++/// The trick line in progress, for a score HUD.
++#[derive(Clone, Debug, Default)]
++pub struct Score {
++    /// The latest recognised trick's display name.
++    pub trick: String,
++    /// The line's score so far, multiplier applied.
++    pub line: f32,
++    pub multiplier: f32,
++    /// Whether a line is still being built (false once it lands or bails).
++    pub active: bool,
++}
+ pub struct Pose {
+     pub root: Mat4,
+     pub bones: Vec<Mat4>,
+@@ -158,6 +169,15 @@ impl Session {
+         );
+         self.advance_published()
+     }
++    pub fn score(&self) -> Score {
++        let (trick, line, multiplier, active) = self.skater.scoring.hud();
++        Score {
++            trick: trick.to_owned(),
++            line,
++            multiplier,
++            active,
++        }
++    }
+     pub fn pose(&self) -> Pose {
+         let v = self.physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()]
+             .rates
+diff --git a/skate/crates/skate-host/src/scoring_runtime.rs b/skate/crates/skate-host/src/scoring_runtime.rs
+index 415d808..c6d230b 100644
+--- a/skate/crates/skate-host/src/scoring_runtime.rs
++++ b/skate/crates/skate-host/src/scoring_runtime.rs
+@@ -308,6 +308,17 @@ impl Runtime {
+         }
+         Ok(())
+     }
++    /// The line in progress as a score HUD shows it: the latest trick's name,
++    /// the line's score so far (multiplier applied), the combo multiplier,
++    /// and whether a line is still being built.
++    pub(crate) fn hud(&self) -> (&str, f32, f32, bool) {
++        (
++            &self.trick_name,
++            self.sequence_score,
++            self.session.combo.multiplier,
++            self.sequence_active,
++        )
++    }
+     pub fn advance(&mut self, f: Frame) -> Result<(), String> {
+         self.new_trick = false;
+         self.modified_trick = false;

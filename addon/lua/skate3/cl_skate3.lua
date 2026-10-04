@@ -1,5 +1,6 @@
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
+local Score = include("skate3/cl_score.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -94,6 +95,7 @@ local function Stop()
 	pose = nil
 	Skater.HideModel()
 	Sounds.Stop()
+	Score.Reset()
 end
 
 local function Start()
@@ -327,6 +329,7 @@ hook.Add("HUDPaint", "skate3_hud", function()
 		line = ("skate3: %s  %.0f km/h  %s   (Y: %s)"):format(pose.state, pose.speed * 3.6, status.pad or "no controller",
 			onFoot and "get on the board" or "step off")
 	end
+	if active then Score.Draw(pose) end
 	if line then
 		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 48, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
 	end

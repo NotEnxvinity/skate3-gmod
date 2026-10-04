@@ -11,6 +11,7 @@ jobs:
       - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - run: native/patch-engine.sh
       - run: cargo test --workspace
       - run: cargo run -p skate-headless
       - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/convert.py
@@ -25,6 +26,7 @@ jobs:
       - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+      - run: native/patch-engine.sh
       - run: python3 -m pip install --user --break-system-packages ziglang==0.16.0 && cargo install --locked cargo-zigbuild
       - run: cargo zigbuild --release -p gmod-skate -p skate-headless --target x86_64-unknown-linux-gnu.2.31
       - run: |
@@ -46,6 +48,7 @@ jobs:
         with:
           targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2
+      - run: native/patch-engine.sh
       - run: cargo build --release -p gmod-skate --target x86_64-pc-windows-gnu
       - run: mkdir -p out && cp target/x86_64-pc-windows-gnu/release/gmcl_skate3.dll out/gmcl_skate3_win64.dll
       - uses: actions/upload-artifact@v4
