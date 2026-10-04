@@ -207,6 +207,10 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
                         Ok(())
                     })
             }
+            Event::Stance { goofy } => {
+                session.set_stance(goofy);
+                Ok(())
+            }
             Event::Suspend => {
                 driver.suspend(&mut session);
                 println!("event {i}: suspended");

@@ -22,6 +22,7 @@ pub enum Job {
         pos: Vec3,
         yaw_degrees: f32,
         aspect: f32,
+        goofy: bool,
     },
     Step {
         dt: f32,
@@ -58,23 +59,8 @@ pub struct Pose {
     pub score: Score,
 }
 
-/// The trick score, as the HUD shows it.
-#[derive(Clone, Default)]
-pub struct Score {
-    /// The latest trick's name.
-    pub trick: String,
-    /// The line in progress, multiplier applied.
-    pub line: f32,
-    pub multiplier: f32,
-    /// Whether a line is still being built.
-    pub building: bool,
-    /// Every landed line this ride, added up.
-    pub total: f32,
-    /// The last line that settled (0 for a bail), and how many have settled
-    /// this session, so Lua can spot a new one.
-    pub landed: f32,
-    pub settled: u32,
-}
+/// The trick score, as the engine keeps it for its HUD.
+pub type Score = skate_bridge::bridge::Score;
 
 #[derive(Clone)]
 pub struct Camera {
@@ -163,8 +149,6 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let mut last_pos: Option<Vec3> = None;
     // The skater's last few states and the tick each began, for error reports.
     let mut states: Vec<(String, u64)> = Vec::new();
-    // Score carried across ticks: the ride's total and the last landed line.
-    let mut score = Score::default();
     // The current map's collision, kept to rebuild a session that broke.
     let mut map: Option<MapWorld> = None;
     // Set once the simulation failed: some of its state may be non-finite
@@ -236,6 +220,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     pos,
                     yaw_degrees,
                     aspect,
+                    goofy,
                 } => {
                     if broken && let Some(map) = &map {
                         session = None;
@@ -252,6 +237,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         broken = false;
                     }
                     let session = session.as_mut().ok_or("the map isn't loaded yet")?;
+                    session.set_stance(goofy);
+                    record(&mut recording, Event::Stance { goofy });
                     let spawn = collision::to_skate(pos).to_array();
                     let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
                     record(
@@ -288,24 +275,11 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             aspect,
                         },
                     );
-                    let advanced = driver.step(session, dt, controls, aspect, |session| {
-                        // A line settles on the tick it stops building; read
-                        // every tick so none is missed between frames.
-                        let now = session.score();
-                        if score.building && !now.active {
-                            score.landed = now.line;
-                            score.settled = score.settled.wrapping_add(1);
-                            score.total += now.line;
-                        }
-                        score.trick = now.trick;
-                        score.line = now.line;
-                        score.multiplier = now.multiplier;
-                        score.building = now.active;
-                    })?;
+                    let advanced = driver.step(session, dt, controls, aspect, |_| {})?;
                     if advanced {
                         let mut pose = convert(&session.pose())?;
                         last_pos = Some(pose.pos);
-                        pose.score = score.clone();
+                        pose.score = session.score();
                         if states.last().is_none_or(|(state, _)| *state != pose.state) {
                             if states.len() == 6 {
                                 states.remove(0);

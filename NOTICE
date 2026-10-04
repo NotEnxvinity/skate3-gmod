@@ -15,6 +15,6 @@ project's crates/render_anim/src/skate/rig.rs, and the board import in
 native/gmod-skate/src/skater.rs follows its crates/assets/src/skate_board.rs,
 under the same license.
 
-native/patches/skate-host-score.patch modifies that project's skate-host crate
-(at the same commit) to report the trick line in progress, under the same
+native/patches/skate-host-hud.patch modifies that project's skate-host crate
+(at the same commit) to report the trick line in progress and set the skater's stance, under the same
 license. CI applies it to a fresh clone; none of that crate is copied here.

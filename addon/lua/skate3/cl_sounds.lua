@@ -15,6 +15,7 @@ local SOUNDS = {
 }
 
 local cv_volume = CreateClientConVar("skate3_volume", "1", true, false, "Skate sound volume, 0 to 1", 0, 1)
+local cv_pack = CreateClientConVar("skate3_sounds", "hl2", true, false, "Skate sounds: hl2 (the classic Half-Life 2 ones) or off")
 
 -- Which kind of contact a skater state is.
 local function Kind(state)
@@ -46,7 +47,7 @@ end
 
 -- Called every frame while skating, with the latest pose.
 function Sounds.Update(ent, pose)
-	if not IsValid(ent) or not pose then return Sounds.Stop() end
+	if not IsValid(ent) or not pose or cv_pack:GetString() == "off" then return Sounds.Stop() end
 	local kind = Kind(pose.state)
 	local volume = cv_volume:GetFloat()
 	-- m/s: a brisk push is about 4, flat out about 10.

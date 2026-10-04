@@ -178,9 +178,10 @@ lua_fn!(activate, |lua| {
     let (Some(x), Some(y), Some(z), Some(yaw)) =
         (lua.number(1), lua.number(2), lua.number(3), lua.number(4))
     else {
-        return lua.fail("Activate expects x, y, z, yaw[, aspect]");
+        return lua.fail("Activate expects x, y, z, yaw[, aspect[, goofy]]");
     };
     let aspect = lua.number(5).unwrap_or(16. / 9.) as f32;
+    let goofy = lua.number(6).unwrap_or(1.) != 0.;
     let ready = with_runtime(|r| {
         r.shared
             .lock()
@@ -199,6 +200,7 @@ lua_fn!(activate, |lua| {
             pos: Vec3::new(x as f32, y as f32, z as f32),
             yaw_degrees: yaw as f32,
             aspect,
+            goofy,
         })
     });
     lua.push_bool(true);
@@ -269,18 +271,17 @@ lua_fn!(get_pose, |lua| {
     lua.push_str(&score.trick);
     lua.set_field(-2, c"trick");
     for (name, value) in [
+        (c"sequence", score.sequence),
         (c"line", score.line),
+        (c"banked", score.banked),
         (c"multiplier", score.multiplier),
-        (c"total", score.total),
-        (c"landed", score.landed),
+        (c"timer", score.line_timer),
     ] {
         lua.push_number(f64::from(value));
         lua.set_field(-2, name);
     }
-    lua.push_number(f64::from(score.settled));
-    lua.set_field(-2, c"settled");
-    lua.push_bool(score.building);
-    lua.set_field(-2, c"building");
+    lua.push_bool(score.active);
+    lua.set_field(-2, c"active");
     lua.set_field(-2, c"score");
     if let Some(c) = p.camera {
         lua.new_table();

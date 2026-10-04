@@ -1,6 +1,7 @@
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
+include("skate3/cl_menu.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -8,6 +9,7 @@ local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Convert
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
 local cv_hud = CreateClientConVar("skate3_hud", "1", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
+local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
 
 -- Equipping this weapon starts skate mode standing with the board in hand,
 -- the way Skate 3 does off the board; Y gets on and off. Switching away ends it.
@@ -119,7 +121,8 @@ local function Start()
 	local ply = LocalPlayer()
 	if not ply:Alive() or ply:InVehicle() then return end
 	local pos = at or ply:GetPos()
-	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, ply:EyeAngles().y, ScrW() / ScrH())
+	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, ply:EyeAngles().y, ScrW() / ScrH(),
+		cv_stance:GetString() == "regular" and 0 or 1)
 	if not ok then
 		Say(err)
 		return

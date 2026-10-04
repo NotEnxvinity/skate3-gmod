@@ -47,10 +47,12 @@ Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and
 mouse, or the pad shows up but sends no buttons. `skate3_debug_input 1` shows
 what the mod receives; pressing A should show `buttons 1000`.
 
-Console variables: `skate3_camera low`, `normal` or `high` sets the camera
-height (`skate3_camera_cycle` steps through them, handy on a bind),
-`skate3_volume` sets the skate sounds' volume from 0 to 1, `skate3_score_hud 0`
-hides the trick score, `skate3_debug_rails 1` draws the grind rails found in the
+Settings live in the spawn menu under Utilities > Skate 3: stance (regular or
+goofy), camera height, sounds and volume, and the score widget. The same as
+console variables: `skate3_stance regular` or `goofy`, `skate3_camera low`,
+`normal` or `high` (`skate3_camera_cycle` steps through them, handy on a bind),
+`skate3_sounds hl2` or `off`, `skate3_volume` from 0 to 1, `skate3_score_hud 0`
+hides the trick score. For debugging, `skate3_debug_rails 1` draws the grind rails found in the
 map, `skate3_debug_input 1` shows the controller input, `skate3_data_path` points at converted data somewhere else, and the
 server's `skate3_enabled 0` turns the mode off.
 

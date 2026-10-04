@@ -75,7 +75,7 @@ impl Driver {
 }
 
 const MAGIC: &[u8; 4] = b"SK3R";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
 /// Events kept per session: half an hour of frames at 60 a second.
 pub const MAX_EVENTS: usize = 108_000;
 
@@ -93,6 +93,10 @@ pub enum Event {
         aspect: f32,
     },
     Suspend,
+    /// The skater's natural stance, set before an activation.
+    Stance {
+        goofy: bool,
+    },
 }
 
 #[derive(Clone, Default)]
@@ -184,6 +188,7 @@ impl Recording {
                     }
                 }
                 Event::Suspend => w.write_all(&[2])?,
+                Event::Stance { goofy } => w.write_all(&[3, u8::from(goofy)])?,
             }
         }
         Ok(())
@@ -231,6 +236,9 @@ impl Recording {
                     }
                 }
                 2 => Event::Suspend,
+                3 => Event::Stance {
+                    goofy: read::<1>(r)?[0] != 0,
+                },
                 _ => return Err(bad("unknown event in the recording")),
             };
             rec.events.push(event);
@@ -265,6 +273,7 @@ mod tests {
                     },
                 },
                 Event::Suspend,
+                Event::Stance { goofy: true },
             ],
         };
         let mut bytes = Vec::new();
@@ -272,7 +281,7 @@ mod tests {
         let back = Recording::read(&mut bytes.as_slice()).unwrap();
         assert_eq!(back.triangles, rec.triangles);
         assert_eq!(back.rails, rec.rails);
-        assert_eq!(back.events.len(), 3);
+        assert_eq!(back.events.len(), 4);
         let Event::Activate { spawn, heading, .. } = back.events[0] else {
             panic!("expected an activation")
         };
@@ -289,5 +298,6 @@ mod tests {
             (0x1000, [3, 255], [-16413, -5084], [7, -7])
         );
         assert!(matches!(back.events[2], Event::Suspend));
+        assert!(matches!(back.events[3], Event::Stance { goofy: true }));
     }
 }

@@ -1,0 +1,79 @@
+Lets skate-host report the trick line in progress (trick name, sequence and
+line scores, multiplier, line timer) so the addon can draw a score HUD, and
+lets the host set the skater's natural stance (regular or goofy) the way
+Skate 3's profile does. Applied on top of chasmlol/2010-rust-rewrite-mashup at
+f608f85 by native/patch-engine.sh until the change lands upstream. Same
+license as the files it changes (Apache-2.0).
+
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index e03fc9a..00a4169 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -20,6 +20,23 @@ pub struct Session {
+     camera: CameraRuntime,
+     markers: crate::session_marker::Runtime,
+ }
++/// The trick line in progress, for a score HUD.
++#[derive(Clone, Debug, Default)]
++pub struct Score {
++    /// The latest recognised trick's name, as a localisation ID.
++    pub trick: String,
++    /// The trick sequence being built, multiplier applied.
++    pub sequence: f32,
++    /// The line's banked-so-far score, which lands when the line timer runs out.
++    pub line: f32,
++    /// Every completed line this session.
++    pub banked: f32,
++    pub multiplier: f32,
++    /// What is left of the line timer, 0 to 1.
++    pub line_timer: f32,
++    /// Whether a trick sequence is still being built.
++    pub active: bool,
++}
+ pub struct Pose {
+     pub root: Mat4,
+     pub bones: Vec<Mat4>,
+@@ -158,6 +175,14 @@ impl Session {
+         );
+         self.advance_published()
+     }
++    pub fn score(&self) -> Score {
++        self.skater.scoring.hud()
++    }
++    /// The skater's natural stance, as Skate 3's profile sets it: regular or
++    /// goofy. The current relative stance and trick state carry over.
++    pub fn set_stance(&mut self, goofy: bool) {
++        self.skater.animation.set_customisation(u32::from(goofy), 0);
++    }
+     pub fn pose(&self) -> Pose {
+         let v = self.physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()]
+             .rates
+diff --git a/skate/crates/skate-host/src/scoring_runtime.rs b/skate/crates/skate-host/src/scoring_runtime.rs
+index 415d808..28f4a3d 100644
+--- a/skate/crates/skate-host/src/scoring_runtime.rs
++++ b/skate/crates/skate-host/src/scoring_runtime.rs
+@@ -308,6 +308,24 @@ impl Runtime {
+         }
+         Ok(())
+     }
++    /// The line in progress as a score HUD shows it.
++    pub(crate) fn hud(&self) -> crate::physics::bridge::Score {
++        let session = &self.session;
++        let capacity = self.data.session_rules().line_capacity;
++        crate::physics::bridge::Score {
++            trick: self.trick_name.clone(),
++            sequence: self.sequence_score,
++            line: session.holder.snapshot.line,
++            banked: session.holder.snapshot.completed_lines,
++            multiplier: session.combo.multiplier,
++            line_timer: if capacity > 0. {
++                (session.line.points / capacity).clamp(0., 1.)
++            } else {
++                0.
++            },
++            active: self.sequence_active,
++        }
++    }
+     pub fn advance(&mut self, f: Frame) -> Result<(), String> {
+         self.new_trick = false;
+         self.modified_trick = false;
