@@ -10,8 +10,6 @@ local MAX_STEP = 600
 
 local function SetSkating(ply, on)
 	ply.Skate3 = on
-	-- Everyone else stops drawing the board in this player's hands.
-	ply:SetNWBool("skate3_riding", on)
 	ply:SetMoveType(on and MOVETYPE_NONE or MOVETYPE_WALK)
 end
 
