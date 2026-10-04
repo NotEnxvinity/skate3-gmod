@@ -234,12 +234,36 @@ hook.Add("CreateMove", "skate3_block", function(cmd)
 	cmd:ClearButtons()
 end)
 
+-- Camera height presets, in units above (or below) the game's own camera.
+local CAMERA_HEIGHTS = { low = -16, normal = 0, high = 32 }
+local cv_camera = CreateClientConVar("skate3_camera", "normal", true, false, "Skate camera height: low, normal or high")
+
+concommand.Add("skate3_camera_cycle", function()
+	local order = { low = "normal", normal = "high", high = "low" }
+	local next = order[cv_camera:GetString()] or "normal"
+	RunConsoleCommand("skate3_camera", next)
+	Say("Camera: " .. next)
+end, nil, "Switch the skate camera between low, normal and high")
+
 hook.Add("CalcView", "skate3_view", function()
 	if not active or not pose or not pose.camera then return end
 	local c = pose.camera
+	local origin, forward, up = V(c.pos), V(c.forward), V(c.up)
+	local lift = CAMERA_HEIGHTS[cv_camera:GetString()] or 0
+	if lift ~= 0 then
+		-- Move the camera up or down and keep it aimed at the same spot by
+		-- the skater, so the framing stays centred.
+		local target = origin + forward * math.max(origin:Distance(V(pose.pos)), 32)
+		-- Stop short of ceilings and floors.
+		local tr = util.TraceLine({ start = origin, endpos = origin + Vector(0, 0, lift), mask = MASK_SOLID_BRUSHONLY })
+		origin = tr.Hit and tr.HitPos + tr.HitNormal * 4 or tr.HitPos
+		forward = (target - origin):GetNormalized()
+		up = forward:Cross(up):Cross(forward)
+		up:Normalize()
+	end
 	return {
-		origin = V(c.pos),
-		angles = V(c.forward):AngleEx(V(c.up)),
+		origin = origin,
+		angles = forward:AngleEx(up),
 		fov = c.fov,
 		drawviewer = false,
 	}
