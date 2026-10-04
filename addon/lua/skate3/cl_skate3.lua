@@ -245,6 +245,12 @@ hook.Add("CalcView", "skate3_view", function()
 	}
 end)
 
+-- The skater stands in for the player while skating; the player's own model
+-- would otherwise show up in mirrors and portals.
+hook.Add("PrePlayerDraw", "skate3_hide", function(ply)
+	if active and ply == LocalPlayer() then return true end
+end)
+
 -- The skate camera replaces the first-person view, so no hands or weapon.
 hook.Add("PreDrawViewModel", "skate3_hide", function()
 	if active then return true end
