@@ -24,30 +24,22 @@ The Skate 3 host is a git dependency on
 [chasmlol/2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)'s
 `skate-host` (built from the engine at `cb79689`); none of its code is copied in.
 
-## Install with the setup app (Windows or Linux)
+## Install (Windows, Linux or SteamOS)
 
-1. Download **skate3-gmod-setup-Windows** or **skate3-gmod-setup-Linux** from
-   the latest CI run and unzip it.
-2. Run `skate3-gmod-setup` and pick your Skate 3 (Xbox 360) disc image
+1. Subscribe to **Skate 3 Skateboard** on the Steam Workshop. That's the Lua
+   addon; the Workshop can't carry the native skate engine, so that comes from
+   the setup app (the way [G64](https://github.com/ckosmic/g64) does it).
+2. Download **skate3-gmod-setup-Windows.zip** or **skate3-gmod-setup-Linux.zip**
+   from the [latest release](https://github.com/NotEnxvinity/skate3-gmod/releases/latest)
+   and unzip it.
+3. Run `skate3-gmod-setup` and pick your Skate 3 (Xbox 360) disc image
    (`.iso`), or `default.xex` in an extracted copy. It finds Garry's Mod,
-   installs the skate module into `garrysmod/lua/bin` and the addon into
-   `garrysmod/addons/skate3`, converts what the mod needs from your disc
-   into `garrysmod/data/skate3`, and decodes the disc's skate sounds (with
-   [vgmstream](https://github.com/vgmstream/vgmstream)) into
-   `garrysmod/sound/skate3`. Run it again after each update. Without a
-   window: `skate3-gmod-setup --game <iso or default.xex> [--gmod <garrysmod folder>]`.
-3. Use the x86-64 branch and a controller, as in steps 4 and 5 below.
-
-## Install (Steam Deck / SteamOS)
-
-1. Download **skate3-gmod-linux-x64** from the latest CI run and unzip it.
-2. Convert your Skate 3 data straight into the game folder (needs git + python3):
-   ```sh
-   skate3-gmod/setup/skate3-gmod-setup.sh --xex "/path/to/Skate 3/default.xex"
-   ```
-   It defaults to `~/.local/share/Steam/steamapps/common/GarrysMod/garrysmod/data/skate3`.
-3. Copy the zip's `garrysmod` folder over `GarrysMod/garrysmod`. That adds
-   `lua/bin/gmcl_skate3_{linux64,win64}.dll` and `addons/skate3`.
+   installs the skate module into `garrysmod/lua/bin`, converts what the mod
+   needs from your disc into `garrysmod/data/skate3`, and decodes the disc's
+   skate sounds (with [vgmstream](https://github.com/vgmstream/vgmstream))
+   into `garrysmod/sound/skate3`. Run the new release's setup after each
+   update. Without a window:
+   `skate3-gmod-setup --game <iso or default.xex> [--gmod <garrysmod folder>]`.
 4. Use 64-bit Garry's Mod: Steam → Garry's Mod → Properties → Betas →
    **x86-64**. Native Linux loads the `linux64` module, Proton the `win64` one.
 5. Plug in a controller, load a map, and equip the **Skateboard** (spawn menu →
@@ -55,6 +47,11 @@ The Skate 3 host is a git dependency on
    on and off it, as in Skate 3. Switch weapons to leave skate mode.
    `skate3_toggle` in the console starts and ends it without the weapon (bind
    it: `bind j skate3_toggle`).
+
+Testing a build whose Lua isn't on the Workshop yet: tick "Also install the Lua
+addon" in setup (or pass `--with-addon`). That copy in `garrysmod/addons/skate3`
+loads instead of the Workshop one until setup runs again without it, which
+removes it.
 
 Steam Input: Garry's Mod's controller layout must be a gamepad layout (Steam →
 Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and

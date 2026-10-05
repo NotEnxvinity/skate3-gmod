@@ -2,6 +2,8 @@ name: ci
 on:
   push:
     branches: [main]
+    # A v* tag also publishes a GitHub release with the setup apps.
+    tags: ['v*']
   pull_request:
 jobs:
   test:
@@ -141,3 +143,27 @@ jobs:
         with:
           name: skate3-gmod-linux-x64
           path: dist
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, setup-app]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: skate3-gmod-setup-*
+          path: builds
+      # Zipped here so the Linux app keeps its executable bit.
+      - run: |
+          for os in Windows Linux; do
+            dir=builds/skate3-gmod-setup-$os
+            chmod +x "$dir"/skate3-gmod-setup*
+            cp LICENSE NOTICE "$dir/"
+            (cd "$dir" && zip -q -r "$GITHUB_WORKSPACE/skate3-gmod-setup-$os.zip" .)
+          done
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skate 3 for Garry's Mod $GITHUB_REF_NAME" --generate-notes skate3-gmod-setup-Windows.zip skate3-gmod-setup-Linux.zip
+        env:
+          GH_TOKEN: ${{ github.token }}
