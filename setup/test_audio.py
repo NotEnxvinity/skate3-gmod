@@ -68,6 +68,16 @@ class AudioTest(unittest.TestCase):
         peak = np.argmax(np.abs(np.fft.rfft(middle)))
         self.assertAlmostEqual(peak * 44100 / len(middle), 1000, delta=2)
 
+    def test_roll_bands_loop_seamlessly(self):
+        import numpy as np
+        ramp = np.arange(80000, dtype=np.int16)[:, None] // 4
+        parts = audio.bands(ramp, 1000, count=4, fade=1.0)
+        self.assertEqual([len(p) for p in parts], [19000] * 4)
+        for k, part in enumerate(parts):
+            # The loop's end runs straight on into its start.
+            self.assertLessEqual(abs(int(part[0, 0]) - int(ramp[k * 20000 + 19000, 0])), 1)
+            self.assertEqual(part[-1, 0], ramp[k * 20000 + 18999, 0])
+
     def test_loop_cue(self):
         import numpy as np
         with tempfile.TemporaryDirectory() as tmp:
@@ -92,7 +102,9 @@ class AudioTest(unittest.TestCase):
                 self.assertEqual((w.getframerate(), w.getnframes()), (44100, 441))
             with wave.open(str(out / 'collisions/001.wav')) as w:
                 self.assertEqual((w.getframerate(), w.getnframes()), (22050, 960))
-            self.assertIn(b'cue ', (out / 'roll/wood_ramp_soft.wav').read_bytes())
+            self.assertNotIn(b'cue ', (out / 'roll/wood_ramp_soft.wav').read_bytes())
+            for k in range(audio.ROLL_BANDS):
+                self.assertIn(b'cue ', (out / f'roll/wood_ramp_soft_{k}.wav').read_bytes())
             self.assertNotIn(b'cue ', (out / 'grinds/000.wav').read_bytes())
             self.assertIn('spins/whls_spins_jump_1.wav', (out / 'index.txt').read_text())
 

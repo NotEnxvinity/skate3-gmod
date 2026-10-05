@@ -34,7 +34,7 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Skate 3 (from your disc)", "disc" },
 			{ "Off", "off" },
 		})
-		panel:ControlHelp("Skate 3's own sounds come from your disc: run setup to install them. Rolling is in so far; the rest still use Half-Life 2.")
+		panel:ControlHelp("Skate 3's own sounds come from your disc: run setup to install them. Rolling is in so far (it follows the surface and your speed); the rest still use Half-Life 2.")
 		panel:NumSlider("Volume", "skate3_volume", 0, 1, 2)
 
 		panel:CheckBox("Show the trick score", "skate3_score_hud")

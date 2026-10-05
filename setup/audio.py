@@ -4,8 +4,8 @@ Garry's Mod can play, in garrysmod/sound/skate3.
 Skate 3 keeps its audio in EA "EB" archives (data/audio/*.big). The sounds
 inside are EA SNR streams (Xbox XMA), packed into banks; this cuts each one
 out of its bank and has vgmstream decode it. Source plays 44.1 and 22.05 kHz
-WAVs, so other rates are resampled here, and looping sounds get the cue point
-Source loops from.
+WAVs, so other rates are resampled here, looping sounds get the cue point
+Source loops from, and the rolling recordings are cut into speed bands.
 
     python audio.py --game <extracted game folder> --out <garrysmod/sound/skate3>
 """
@@ -37,7 +37,11 @@ BANKS = {
     'spins': ('wheels.big', '.snr'),
     'roll': ('grains.big', '.grain'),
 }
-LOOPS = {'roll', 'spins'}
+LOOPS = {'spins'}
+# Each rolling grain is one recording that speeds up from a crawl to flat out;
+# Skate 3 plays the part for the board's speed. Setup cuts it into this many
+# looping bands, which the mod crossfades by speed.
+ROLL_BANDS = 8
 RATES = {48000, 44100, 32000, 24000, 22050, 16000, 11025}
 SOURCE_RATES = {44100, 22050}
 
@@ -182,6 +186,22 @@ def write_wav(path, samples, rate, loop):
     Path(path).write_bytes(b'RIFF' + struct.pack('<I', len(body)) + body)
 
 
+def bands(samples, rate, count=ROLL_BANDS, fade=0.2):
+    """`samples` cut into `count` equal parts, each made into a seamless loop
+    by blending its last `fade` seconds into its start."""
+    import numpy as np
+    length = len(samples) // count
+    blend = min(int(rate * fade), length // 2)
+    ramp = np.linspace(0, 1, blend, dtype=np.float32)[:, None]
+    out = []
+    for k in range(count):
+        part = samples[k * length:(k + 1) * length].astype(np.float32)
+        body, tail = part[:length - blend].copy(), part[length - blend:]
+        body[:blend] = body[:blend] * ramp + tail * (1 - ramp)
+        out.append(np.clip(np.round(body), -32768, 32767).astype(np.int16))
+    return out
+
+
 def read_wav(path):
     import numpy as np
     with wave.open(str(path)) as w:
@@ -275,7 +295,7 @@ def install(game, out, report=print):
             raise RuntimeError('no sounds were found in the disc\'s audio archives')
         decode(vgmstream, made, report)
         staged = work / 'out'
-        index = []
+        index, installed = [], 0
         for path in made:
             folder, name = path.stem.split('__')
             decoded = Path(f'{path}.wav')
@@ -288,11 +308,16 @@ def install(game, out, report=print):
             (staged / folder).mkdir(parents=True, exist_ok=True)
             write_wav(staged / folder / f'{name}.wav', samples, target, folder in LOOPS)
             index.append(f'{folder}/{name}.wav {len(samples) / target:.2f}s {rate}Hz')
+            if folder == 'roll':
+                for k, band in enumerate(bands(samples, target)):
+                    write_wav(staged / folder / f'{name}_{k}.wav', band, target, True)
+                    index.append(f'{folder}/{name}_{k}.wav {len(band) / target:.2f}s {rate}Hz')
+            installed += 1
         (staged / 'index.txt').write_text('\n'.join(index) + '\n')
         shutil.rmtree(out, ignore_errors=True)
         shutil.move(str(staged), str(out))
-    report(f'Installed {len(index)} skate sounds in {out}')
-    return len(index)
+    report(f'Installed {installed} skate sounds in {out}')
+    return installed
 
 
 def main():

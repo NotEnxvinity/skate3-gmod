@@ -19,8 +19,14 @@ local cv_volume = CreateClientConVar("skate3_volume", "1", true, false, "Skate s
 local cv_pack = CreateClientConVar("skate3_sounds", "hl2", true, false,
 	"Skate sounds: hl2 (the classic Half-Life 2 ones), disc (Skate 3's own, installed by setup) or off")
 
--- Skate 3 rolls on recordings of each surface, looped; Source materials map
--- onto them here.
+-- Skate 3 rolls on one recording per surface that speeds up from a crawl to
+-- flat out, playing the part that matches the board's speed. Setup cuts each
+-- into ROLL_BANDS looping bands (setup/audio.py) and this crossfades between
+-- them, the way HL2's vehicles blend engine loops by RPM. Source materials
+-- map onto the surfaces here.
+local ROLL_BANDS = 8
+-- m/s the end of the recording stands for: flat out is about 10.
+local ROLL_TOP = 11
 local ROLL = {
 	[MAT_WOOD] = "wood_ramp_hard",
 	[MAT_METAL] = "metal_smooth_hard",
@@ -41,24 +47,62 @@ end
 
 local ground, nextTrace = ROLL_DEFAULT, 0
 
--- The grain for what's under the board, checked a few times a second.
-local function RollSound(ent)
+local function Disc()
+	return cv_pack:GetString() == "disc" and Sounds.HasDisc()
+end
+
+-- The surface under the board, checked a few times a second.
+local function Ground(ent)
 	if CurTime() >= nextTrace then
 		nextTrace = CurTime() + 0.25
 		local pos = ent:GetPos()
 		local tr = util.TraceLine({ start = pos + Vector(0, 0, 8), endpos = pos - Vector(0, 0, 40), filter = ent })
 		local name = tr.Hit and ROLL[tr.MatType] or ROLL_DEFAULT
-		ground = file.Exists("sound/skate3/roll/" .. name .. ".wav", "GAME") and name or ROLL_DEFAULT
+		ground = file.Exists("sound/skate3/roll/" .. name .. "_0.wav", "GAME") and name or ROLL_DEFAULT
 	end
-	return "skate3/roll/" .. ground .. ".wav"
+	return ground
 end
 
 -- The sound to use for `name`, from the set the player picked.
 local function Path(name, ent)
-	if cv_pack:GetString() == "disc" and Sounds.HasDisc() then
-		if name == "roll" then return RollSound(ent) end
-	end
 	return HL2[name]
+end
+
+local bands = {}
+
+-- The disc's rolling: the two bands either side of the board's speed, blended
+-- at equal power, quiet when barely moving.
+local function RollBands(ent, rolling, speed, volume)
+	local name = rolling and Ground(ent) or ground
+	local position = math.Clamp(speed / ROLL_TOP, 0, 1) * (ROLL_BANDS - 1)
+	local low = math.floor(position)
+	local blend = position - low
+	local level = rolling and math.Clamp(speed / 1.5, 0, 1) * 0.7 * volume or 0
+	for k = 0, ROLL_BANDS - 1 do
+		local want = 0
+		if k == low then
+			want = math.cos(blend * math.pi / 2) * level
+		elseif k == low + 1 then
+			want = math.sin(blend * math.pi / 2) * level
+		end
+		local path = "skate3/roll/" .. name .. "_" .. k .. ".wav"
+		local s = bands[k]
+		if want > 0.01 then
+			if not s or s.ent ~= ent or s.path ~= path then
+				if s then s.patch:Stop() end
+				s = { patch = CreateSound(ent, path), ent = ent, path = path }
+				bands[k] = s
+			end
+			if not s.on then
+				s.patch:PlayEx(0, 100)
+				s.on = true
+			end
+			s.patch:ChangeVolume(want, 0.1)
+		elseif s and s.on then
+			s.patch:FadeOut(0.2)
+			s.on = false
+		end
+	end
 end
 
 -- Which kind of contact a skater state is.
@@ -74,8 +118,7 @@ end
 local loops = {}
 local last
 
--- A looping sound for `name`, swapped when its entity or sound changes (the
--- disc's rolling sound follows the surface).
+-- A looping sound for `name`, swapped when its entity or sound changes.
 local function Loop(name, ent)
 	local path = Path(name, ent)
 	local s = loops[name]
@@ -98,6 +141,23 @@ local function Play(name, ent, level)
 	ent:EmitSound(list, 75, math.random(95, 105), level * cv_volume:GetFloat())
 end
 
+-- HL2's rolling: one scrape loop, pitched and louder with speed.
+local function RollClassic(ent, rolling, speed, volume)
+	local roll = Loop("roll", ent)
+	if rolling then
+		if not loops.roll.on then
+			roll:PlayEx(0, 100)
+			loops.roll.on = true
+		end
+		loops.roll.volume = math.Clamp(speed / 10, 0.05, 0.6) * volume
+		roll:ChangeVolume(loops.roll.volume, 0.1)
+		roll:ChangePitch(math.Clamp(70 + speed * 6, 70, 130), 0.1)
+	elseif loops.roll.on then
+		roll:FadeOut(0.15)
+		loops.roll.on = false
+	end
+end
+
 -- Called every frame while skating, with the latest pose.
 function Sounds.Update(ent, pose)
 	if not IsValid(ent) or not pose or cv_pack:GetString() == "off" then return Sounds.Stop() end
@@ -117,18 +177,15 @@ function Sounds.Update(ent, pose)
 	end
 	last = kind
 
-	local roll = Loop("roll", ent)
-	if kind == "ground" and speed > 0.3 then
-		if not loops.roll.on then
-			roll:PlayEx(0, 100)
-			loops.roll.on = true
+	if Disc() then
+		RollBands(ent, kind == "ground" and speed > 0.3, speed, volume)
+		if loops.roll and loops.roll.on then
+			loops.roll.patch:Stop()
+			loops.roll.on = false
 		end
-		loops.roll.volume = math.Clamp(speed / 10, 0.05, 0.6) * volume
-		roll:ChangeVolume(loops.roll.volume, 0.1)
-		roll:ChangePitch(math.Clamp(70 + speed * 6, 70, 130), 0.1)
-	elseif loops.roll.on then
-		roll:FadeOut(0.15)
-		loops.roll.on = false
+	else
+		RollBands(ent, false, speed, volume)
+		RollClassic(ent, kind == "ground" and speed > 0.3, speed, volume)
 	end
 
 	local grind = Loop("grind", ent)
@@ -145,9 +202,11 @@ function Sounds.Update(ent, pose)
 end
 
 function Sounds.Stop()
-	for _, s in pairs(loops) do
-		s.patch:Stop()
-		s.on = false
+	for _, set in ipairs({ loops, bands }) do
+		for _, s in pairs(set) do
+			s.patch:Stop()
+			s.on = false
+		end
 	end
 	last = nil
 end
