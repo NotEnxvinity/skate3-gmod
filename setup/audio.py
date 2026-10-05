@@ -11,7 +11,7 @@ Source loops from, and the rolling recordings are cut into speed bands.
 """
 from pathlib import Path
 from fractions import Fraction
-import argparse, os, shutil, struct, subprocess, sys, tempfile, wave
+import argparse, json, os, shutil, struct, subprocess, sys, tempfile, wave
 
 ARCHIVES = ('audiofiles.big', 'grains.big', 'wheels.big')
 FROM_DISC = tuple('data/audio/' + name for name in ARCHIVES)
@@ -38,6 +38,16 @@ BANKS = {
     'roll': ('grains.big', '.grain'),
 }
 LOOPS = {'spins'}
+# The SPLC sound ids the mod plays, per bank folder. Skate 3 names these
+# through its attribute vault; the values are retail's, as recovered by
+# doriangironde/skate-3-rust-macos (docs/engine-defects.md, splice.rs):
+# 0x447 the landing impact, 0x35C-0x35F the landing's soft/hard layer,
+# 0x449-0x44B and 0x44F-0x451 the pops (soft, medium, hard) for the two
+# surface categories, and 879/883 with metal 399/401 a rail grind's hit.
+SOUND_IDS = {
+    'collisions': (0x447, 0x35C, 0x35D, 0x35E, 0x35F, 0x449, 0x44A, 0x44B, 0x44F, 0x450, 0x451, 879, 883),
+    'metal': (399, 401),
+}
 # Each rolling grain is one recording that speeds up from a crawl to flat out;
 # Skate 3 plays the part for the board's speed. Setup cuts it into this many
 # looping bands, which the mod crossfades by speed.
@@ -175,15 +185,65 @@ def resample(samples, rate, target):
 
 
 def write_wav(path, samples, rate, loop):
-    """A 16-bit PCM WAV; `loop` adds the cue point Source loops from."""
+    """A 16-bit PCM WAV; `loop`, a sample position or True for the start,
+    adds the cue point Source loops from (to the end)."""
     channels = samples.shape[1]
     pcm = samples.tobytes()
     chunks = [b'fmt ' + struct.pack('<IHHIIHH', 16, 1, channels, rate, rate * channels * 2, channels * 2, 16)]
-    if loop:
-        chunks.append(b'cue ' + struct.pack('<II', 28, 1) + struct.pack('<II4sIII', 0, 0, b'data', 0, 0, 0))
+    if loop is not None and loop is not False:
+        start = 0 if loop is True else int(loop)
+        chunks.append(b'cue ' + struct.pack('<II', 28, 1) + struct.pack('<II4sIII', 0, start, b'data', 0, 0, start))
     chunks.append(b'data' + struct.pack('<I', len(pcm)) + pcm + b'\0' * (len(pcm) & 1))
     body = b'WAVE' + b''.join(chunks)
     Path(path).write_bytes(b'RIFF' + struct.pack('<I', len(body)) + body)
+
+
+def splc(data):
+    """An SPLC bank (the .bnk sound banks): its sample streams, in the order
+    the bank numbers them, and what each sound id plays.
+
+    Big-endian. A 60-byte header (+8 the sample table, from byte 60; +12
+    records; +16 containers; +20 24-byte extras; +24 samples), 36-byte records
+    (+4 id, +7 groups), 72-byte containers (+4 record ids, +68 their count),
+    then each record's groups: a 12-byte header (+8 members) and 72-byte
+    members (+0 sample, +8 gain). The sample table holds 12-byte entries
+    (+0 start, +4 end) into the streams after it. A sound id names a record,
+    or, from the record count up, a container that picks one of its ids.
+
+    Returns (streams, play) with play(id) giving the alternatives for a
+    sound: lists of groups, each a list of (sample, gain) to pick one from."""
+    u32 = lambda at: struct.unpack_from('>I', data, at)[0]
+    if data[:4] != b'SPLC' or u32(4) != 3:
+        raise ValueError('not an SPLC v3 bank')
+    table, records, containers, extras, count = 60 + u32(8), u32(12), u32(16), u32(20), u32(24)
+    cursor = 60 + 36 * records + 72 * containers + 24 * extras
+    groups = []
+    for r in range(records):
+        mine = []
+        for _ in range(data[60 + 36 * r + 7]):
+            members = data[cursor + 8]
+            cursor += 12
+            mine.append([(struct.unpack_from('>H', data, cursor + 72 * m)[0],
+                          round(struct.unpack_from('>f', data, cursor + 72 * m + 8)[0], 4)) for m in range(members)])
+            cursor += 72 * members
+        groups.append(mine)
+    if cursor != table or table + 12 * count > len(data):
+        raise ValueError(f'SPLC layout not understood (groups end at {cursor:#x}, table at {table:#x})')
+    streams_at = table + 12 * count
+    streams = []
+    for k in range(count):
+        start, end = struct.unpack_from('>II', data, table + 12 * k)
+        streams.append(data[streams_at + start:streams_at + end])
+    picks = [[struct.unpack_from('>H', data, at + 4 + 2 * j)[0] for j in range(data[at + 68])]
+             for at in (60 + 36 * records + 72 * c for c in range(containers))]
+
+    def play(sound, depth=0):
+        if sound < records:
+            return [groups[sound]]
+        if sound - records >= containers or depth > 8:
+            return []
+        return [alt for pick in picks[sound - records] for alt in play(pick, depth + 1)]
+    return streams, play
 
 
 def bands(samples, rate, count=ROLL_BANDS, fade=0.2):
@@ -236,6 +296,17 @@ def decode(vgmstream, inputs, report):
         report(f'Decoded {min(start + 64, len(inputs))} of {len(inputs)} sounds')
 
 
+def loop_start(clip):
+    """Where an SNR sound loops from, in samples, or None if it doesn't."""
+    if len(clip) < 12:
+        return None
+    h2, = struct.unpack_from('>I', clip, 4)
+    if not (h2 >> 29) & 1:
+        return None
+    start, = struct.unpack_from('>I', clip, 8)
+    return start if start < (h2 & 0x1FFFFFFF) else 0
+
+
 def check(vgmstream):
     """Decodes a short generated tone, to prove vgmstream runs here."""
     samples = 480
@@ -249,8 +320,10 @@ def check(vgmstream):
             raise RuntimeError('vgmstream decoded the test sound wrongly')
 
 
-def sounds(game, report):
-    """(folder, name, snr bytes) for every sound setup installs."""
+def sounds(game, report, play=None):
+    """(folder, name, snr bytes) for every sound setup installs. SPLC banks
+    are numbered as the game numbers them, and `play`, if given, gets what
+    their SOUND_IDS play, as {folder: {id: alternatives}}."""
     audio = Path(game) / 'data/audio'
     missing = [name for name in ARCHIVES if not (audio / name).is_file()]
     if missing:
@@ -265,7 +338,19 @@ def sounds(game, report):
                         for clip in carve(big.read(name))[:1]:
                             yield folder, Path(name).stem.lower(), clip
             elif entry in big.files:
-                for i, clip in enumerate(carve(big.read(entry))):
+                data = big.read(entry)
+                if data[:4] == b'SPLC':
+                    try:
+                        streams, sound = splc(data)
+                    except (ValueError, struct.error, IndexError) as error:
+                        report(f'Reading {entry} the rough way: {error}')
+                    else:
+                        if play is not None:
+                            play[folder] = {f'{i}': sound(i) for i in SOUND_IDS.get(folder, ())}
+                        for i, clip in enumerate(streams):
+                            yield folder, f'{i:04d}', clip
+                        continue
+                for i, clip in enumerate(carve(data)):
                     yield folder, f'{i:03d}', clip
             else:
                 report(f'Skipping {entry}: not on this disc')
@@ -286,16 +371,17 @@ def install(game, out, report=print):
     with tempfile.TemporaryDirectory(prefix='skate3-audio-', dir=out.parent) as work:
         work = Path(work)
         report('Reading the skate sounds off your disc')
-        made = []
-        for folder, name, clip in sounds(game, report):
+        made, loops, play = [], {}, {}
+        for folder, name, clip in sounds(game, report, play):
             path = work / f'{folder}__{name}.snr'
             path.write_bytes(clip)
             made.append(path)
+            loops[path] = loop_start(clip)
         if not made:
             raise RuntimeError('no sounds were found in the disc\'s audio archives')
         decode(vgmstream, made, report)
         staged = work / 'out'
-        index, installed = [], 0
+        index, installed, looping = [], 0, {}
         for path in made:
             folder, name = path.stem.split('__')
             decoded = Path(f'{path}.wav')
@@ -306,14 +392,21 @@ def install(game, out, report=print):
             target = rate if rate in SOURCE_RATES else (22050 if rate < 22050 else 44100)
             samples = resample(samples, rate, target)
             (staged / folder).mkdir(parents=True, exist_ok=True)
-            write_wav(staged / folder / f'{name}.wav', samples, target, folder in LOOPS)
-            index.append(f'{folder}/{name}.wav {len(samples) / target:.2f}s {rate}Hz')
+            loop = True if folder in LOOPS else loops[path]
+            if loop is not None and loop is not True:
+                loop = loop * target // rate
+            write_wav(staged / folder / f'{name}.wav', samples, target, loop)
+            index.append(f'{folder}/{name}.wav {len(samples) / target:.2f}s {rate}Hz' + (' loop' if loop is not None else ''))
+            if loop is not None:
+                looping.setdefault(folder, []).append(name)
             if folder == 'roll':
                 for k, band in enumerate(bands(samples, target)):
                     write_wav(staged / folder / f'{name}_{k}.wav', band, target, True)
                     index.append(f'{folder}/{name}_{k}.wav {len(band) / target:.2f}s {rate}Hz')
             installed += 1
         (staged / 'index.txt').write_text('\n'.join(index) + '\n')
+        # What the mod reads: the sound ids' samples and which sounds loop.
+        (staged / 'sounds.json').write_text(json.dumps({'ids': play, 'loops': looping}))
         shutil.rmtree(out, ignore_errors=True)
         shutil.move(str(staged), str(out))
     report(f'Installed {installed} skate sounds in {out}')

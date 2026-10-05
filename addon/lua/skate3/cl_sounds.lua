@@ -63,9 +63,84 @@ local function Ground(ent)
 	return ground
 end
 
--- The sound to use for `name`, from the set the player picked.
+-- setup's sounds.json: the samples behind the game's sound ids, and which
+-- of the disc's sounds loop.
+local manifest
+
+local function Manifest()
+	if manifest == nil then
+		local text = file.Read("sound/skate3/sounds.json", "GAME")
+		manifest = text and util.JSONToTable(text) or false
+	end
+	return manifest or nil
+end
+
+local function Loops(folder)
+	local m = Manifest()
+	return m and m.loops and m.loops[folder] or {}
+end
+
+-- Plays one of the game's own sound ids from a bank: one alternative, and
+-- one member from each of its groups, at the member's gain. False when setup
+-- didn't install it.
+local function PlayId(folder, id, ent, level)
+	local m = Manifest()
+	local ids = m and m.ids and m.ids[folder]
+	-- util.JSONToTable turns numeric keys into numbers.
+	local alternatives = ids and (ids[id] or ids[tostring(id)])
+	if not alternatives or #alternatives == 0 then return false end
+	local played = false
+	for _, group in ipairs(alternatives[math.random(#alternatives)]) do
+		if #group > 0 then
+			local member = group[math.random(#group)]
+			local path = string.format("skate3/%s/%04d.wav", folder, member[1])
+			ent:EmitSound(path, 75, math.random(97, 103), math.Clamp(member[2], 0, 1) * level * cv_volume:GetFloat())
+			played = true
+		end
+	end
+	return played
+end
+
+local picks = {}
+
+-- The sound to use for `name`, from the set the player picked: the disc's
+-- loops where setup found some, else HL2's.
 local function Path(name, ent)
+	if Disc() and picks[name] then return picks[name] end
 	return HL2[name]
+end
+
+-- A random looping sound from a disc folder for `name`, kept until the next pick.
+local function Pick(name, folder)
+	local list = Loops(folder)
+	picks[name] = #list > 0 and string.format("skate3/%s/%s.wav", folder, list[math.random(#list)]) or nil
+end
+
+local function OnMetal(ent)
+	return Ground(ent) == "metal_smooth_hard"
+end
+
+-- Skate 3's pop: soft, medium or hard by how fast you're going, from the
+-- metal set on metal (retail picks it by the wheels' surface category).
+local function Pop(ent, speed)
+	local class = speed < 3 and 0 or speed < 6 and 1 or 2
+	local base = OnMetal(ent) and 0x44F or 0x449
+	return PlayId("collisions", base + class, ent, 1)
+end
+
+-- Skate 3's landing: the fixed impact plus a soft or hard layer by time in
+-- the air (0.75 s splits them), the metal pair on metal.
+local function Land(ent, air)
+	local impact = PlayId("collisions", 0x447, ent, 1)
+	local layer = (OnMetal(ent) and 0x35E or 0x35C) + (air >= 0.75 and 1 or 0)
+	return PlayId("collisions", layer, ent, 1) or impact
+end
+
+-- A grind's hit: the board on the rail, plus the rail itself when it's metal.
+local function GrindHit(ent)
+	local board = PlayId("collisions", 879, ent, 1)
+	local rail = OnMetal(ent) and PlayId("metal", 399, ent, 1)
+	return board or rail
 end
 
 local bands = {}
@@ -141,6 +216,24 @@ local function Play(name, ent, level)
 	ent:EmitSound(list, 75, math.random(95, 105), level * cv_volume:GetFloat())
 end
 
+local airStart
+
+-- Keeps the loop for `name` playing at `level` while `on`, fading it out after.
+local function Hold(name, ent, on, level)
+	if on and level > 0.01 then
+		local patch = Loop(name, ent)
+		if not loops[name].on then
+			patch:PlayEx(0, 100)
+			loops[name].on = true
+		end
+		patch:ChangeVolume(level, 0.1)
+		loops[name].volume = level
+	elseif loops[name] and loops[name].on then
+		loops[name].patch:FadeOut(0.2)
+		loops[name].on = false
+	end
+end
+
 -- HL2's rolling: one scrape loop, pitched and louder with speed.
 local function RollClassic(ent, rolling, speed, volume)
 	local roll = Loop("roll", ent)
@@ -166,26 +259,49 @@ function Sounds.Update(ent, pose)
 	-- m/s: a brisk push is about 4, flat out about 10.
 	local speed = pose.speed or 0
 
+	local disc = Disc()
 	if last and kind ~= last then
 		if kind == "air" and (last == "ground" or last == "grind") then
-			Play("pop", ent, 0.8)
+			airStart = CurTime()
+			if not (disc and Pop(ent, speed)) then Play("pop", ent, 0.8) end
 		elseif (kind == "ground" or kind == "grind") and last == "air" then
-			Play("land", ent, math.Clamp(0.5 + speed / 20, 0.5, 1))
+			local air = airStart and CurTime() - airStart or 0
+			-- Dropping onto a rail is the grind's hit, not a landing.
+			local hit = disc and (kind == "grind" and GrindHit(ent) or kind == "ground" and Land(ent, air))
+			if not hit then Play("land", ent, math.Clamp(0.5 + speed / 20, 0.5, 1)) end
+		elseif kind == "grind" and disc then
+			GrindHit(ent)
 		elseif kind == "bail" then
 			Play("bail", ent, 1)
 		end
+		if kind == "grind" then Pick("grind", "grinds") end
 	end
 	last = kind
 
-	if Disc() then
+	if disc then
 		RollBands(ent, kind == "ground" and speed > 0.3, speed, volume)
 		if loops.roll and loops.roll.on then
 			loops.roll.patch:Stop()
 			loops.roll.on = false
 		end
+		-- The trucks' rattle rides on top of the surface, louder with speed.
+		if not picks.rattle then Pick("rattle", "rattles") end
+		if picks.rattle then
+			Hold("rattle", ent, kind == "ground" and speed > 0.5, math.Clamp(speed / 12, 0, 0.45) * volume)
+		end
+		-- Wheels spinning free after the pop, winding down through the air.
+		if picks.spin == nil then
+			picks.spin = file.Exists("sound/skate3/spins/whls_spins_jump_1.wav", "GAME") and "skate3/spins/whls_spins_jump_1.wav" or false
+		end
+		local air = kind == "air" and airStart and CurTime() - airStart or 0
+		if picks.spin then
+			Hold("spin", ent, kind == "air", math.Clamp(1 - air / 2, 0, 1) * 0.35 * volume)
+		end
 	else
 		RollBands(ent, false, speed, volume)
 		RollClassic(ent, kind == "ground" and speed > 0.3, speed, volume)
+		Hold("rattle", ent, false, 0)
+		Hold("spin", ent, false, 0)
 	end
 
 	local grind = Loop("grind", ent)
@@ -194,7 +310,11 @@ function Sounds.Update(ent, pose)
 			grind:PlayEx(0.7 * volume, 100)
 			loops.grind.on = true
 		end
-		grind:ChangePitch(math.Clamp(80 + speed * 4, 80, 130), 0.1)
+		if disc and picks.grind then
+			grind:ChangePitch(math.Clamp(92 + speed * 1.5, 92, 110), 0.1)
+		else
+			grind:ChangePitch(math.Clamp(80 + speed * 4, 80, 130), 0.1)
+		end
 	elseif loops.grind.on then
 		grind:FadeOut(0.1)
 		loops.grind.on = false

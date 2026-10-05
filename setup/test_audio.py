@@ -1,7 +1,7 @@
 """Builds tiny EA audio archives holding PCM sounds and reads them back; with
 vgmstream-cli available (SKATE3_VGMSTREAM or PATH) it runs the whole install."""
 from pathlib import Path
-import math, os, struct, tempfile, unittest, wave
+import json, math, os, struct, tempfile, unittest, wave
 
 import audio
 
@@ -12,6 +12,32 @@ def snr(samples, rate=48000, block_id=0x80):
     pcm = b''.join(struct.pack('>h', int(8000 * math.sin(i / 7))) for i in range(samples))
     return (struct.pack('>II', 0x02000000 | rate, samples)
             + bytes([block_id]) + (8 + len(pcm)).to_bytes(3, 'big') + struct.pack('>I', samples) + pcm)
+
+
+def looped(samples):
+    """An SNR sound with the loop flag, looping whole (vgmstream only takes a
+    partway loop from the compressed codecs)."""
+    plain = snr(samples)
+    return plain[:4] + struct.pack('>II', (1 << 29) | samples, 0) + plain[8:]
+
+
+def splc_bank(records, containers, streams):
+    """An SPLC v3 bank: `records` lists each record's groups, each a list of
+    (sample, gain); `containers` lists record ids per container."""
+    head = struct.pack('>4sI', b'SPLC', 3)
+    body = b''.join(struct.pack('>IHBB', 0, i, 0, len(groups)).ljust(36, b'\0') for i, groups in enumerate(records))
+    body += b''.join((struct.pack('>I', 0) + b''.join(struct.pack('>H', i) for i in ids)).ljust(68, b'\0')
+                     + bytes([len(ids), 0, 0, 0]) for ids in containers)
+    for groups in records:
+        for members in groups:
+            body += struct.pack('>QBB', 0, len(members), 0).ljust(12, b'\0')
+            body += b''.join(struct.pack('>HHIf', sample, 0, 0, gain).ljust(72, b'\0') for sample, gain in members)
+    table, data = b'', b''
+    for stream in streams:
+        table += struct.pack('>III', len(data), len(data) + len(stream), 0)
+        data += stream + b'\0' * 5
+    header = head + struct.pack('>IIIII', len(body), len(records), len(containers), 0, len(streams))
+    return header.ljust(60, b'\0') + body + table + data
 
 
 def big(files, slot=40, shift=4):
@@ -38,7 +64,9 @@ def game(folder):
     grain = struct.pack('>If', 0x10, 17.5) + b'\0' * 8 + snr(4410, 44100)
     audio_dir = Path(folder) / 'data/audio'
     audio_dir.mkdir(parents=True)
-    (audio_dir / 'audiofiles.big').write_bytes(big({'Skate_Collisions.bnk': bank, 'GRINDS.abk': b'ABKC' + snr(300)}))
+    metal = splc_bank([[[(1, 0.5)]], [[(0, 1.0), (1, 0.8)], [(1, 0.25)]]], [[0, 1]], [snr(120), snr(240, 22050)])
+    (audio_dir / 'audiofiles.big').write_bytes(big({'Skate_Collisions.bnk': bank, 'Skate_Metal.bnk': metal,
+                                                    'GRINDS.abk': b'ABKC' + snr(300) + looped(900)}))
     (audio_dir / 'grains.big').write_bytes(big({'wood_ramp_soft.grain': grain}))
     (audio_dir / 'wheels.big').write_bytes(big({'Whls_spins_Jump_1.sek': b'\0' * 87, 'Whls_spins_Jump_1.snr': snr(4800)}, slot=24))
 
@@ -48,10 +76,30 @@ class AudioTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             game(tmp)
             found = {(folder, name): clip for folder, name, clip in audio.sounds(tmp, lambda _: None)}
-            self.assertEqual(sorted(found), [('collisions', '000'), ('collisions', '001'), ('collisions', '002'), ('grinds', '000'),
+            self.assertEqual(sorted(found), [('collisions', '000'), ('collisions', '001'), ('collisions', '002'),
+                                             ('grinds', '000'), ('grinds', '001'), ('metal', '0000'), ('metal', '0001'),
                                              ('roll', 'wood_ramp_soft'), ('spins', 'whls_spins_jump_1')])
+            self.assertEqual(found['metal', '0001'], snr(240, 22050))
             self.assertEqual(found['collisions', '001'], snr(960, 22050, 0))
             self.assertEqual(found['roll', 'wood_ramp_soft'], snr(4410, 44100))
+
+    def test_splc_numbers_samples_and_resolves_sounds(self):
+        bank = splc_bank([[[(1, 0.5)]], [[(0, 1.0), (1, 0.8)], [(1, 0.25)]]], [[0, 1]], [snr(120), snr(240)])
+        streams, play = audio.splc(bank)
+        self.assertEqual(streams, [snr(120), snr(240)])
+        self.assertEqual(play(0), [[[(1, 0.5)]]])
+        self.assertEqual(play(1), [[[(0, 1.0), (1, 0.8)], [(1, 0.25)]]])
+        # A container offers each of its records.
+        self.assertEqual(play(2), play(0) + play(1))
+        self.assertEqual(play(3), [])
+        with self.assertRaises(ValueError):
+            audio.splc(bank[:60] + bank[61:])
+
+    def test_loop_start(self):
+        self.assertIsNone(audio.loop_start(snr(100)))
+        self.assertEqual(audio.loop_start(looped(100)), 0)
+        partway = looped(100)[:8] + struct.pack('>I', 40) + looped(100)[12:]
+        self.assertEqual(audio.loop_start(partway), 40)
 
     def test_ignores_lookalikes(self):
         clip = snr(100)
@@ -97,7 +145,7 @@ class AudioTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             game(tmp)
             out = Path(tmp) / 'garrysmod/sound/skate3'
-            self.assertEqual(audio.install(tmp, out, lambda _: None), 6)
+            self.assertEqual(audio.install(tmp, out, lambda _: None), 9)
             with wave.open(str(out / 'collisions/000.wav')) as w:
                 self.assertEqual((w.getframerate(), w.getnframes()), (44100, 441))
             with wave.open(str(out / 'collisions/001.wav')) as w:
@@ -107,6 +155,10 @@ class AudioTest(unittest.TestCase):
                 self.assertIn(b'cue ', (out / f'roll/wood_ramp_soft_{k}.wav').read_bytes())
             self.assertNotIn(b'cue ', (out / 'grinds/000.wav').read_bytes())
             self.assertIn('spins/whls_spins_jump_1.wav', (out / 'index.txt').read_text())
+            manifest = json.loads((out / 'sounds.json').read_text())
+            self.assertEqual(manifest['loops']['grinds'], ['001'])
+            self.assertEqual(manifest['ids']['metal'], {'399': [], '401': []})
+            self.assertIn(b'cue ', (out / 'grinds/001.wav').read_bytes())
 
 
 if __name__ == '__main__':
