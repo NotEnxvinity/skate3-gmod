@@ -5,8 +5,8 @@ A toggleable Skate 3 skating mode for Garry's Mod, driven by the
 through a native binary module, the way [G64](https://github.com/ckosmic/g64)
 drives libsm64. Targets 64-bit Gmod on SteamOS: native Linux and Proton.
 
-**No Skate 3 files ship here.** You convert your own extracted Xbox 360
-`default.xex` with the setup script.
+**No Skate 3 files ship here.** The setup app converts your own Xbox 360 disc
+(an ISO or the extracted folder) on your machine.
 
 Work in progress. See [docs/architecture.md](docs/architecture.md) for the plan.
 
@@ -87,8 +87,21 @@ Without `--assets` it only builds the test park and prints the rails it found.
 
 ## Credits
 
-- Skate 3 engine and converters: SK8-ENGINE/skate-3-rust-engine (dumbad, Chasm and contributors).
-- Headless host, collision handoff and rail finder: chasmlol/2010-rust-rewrite-mashup (Apache-2.0). See [NOTICE](NOTICE).
-- Module architecture: ckosmic/g64.
+- Skate 3 engine and converters: [SK8-ENGINE/skate-3-rust-engine](https://github.com/SK8-ENGINE/skate-3-rust-engine)
+  (dumbad, Chasm and contributors), used with their permission
+  ([issue #34](https://github.com/SK8-ENGINE/skate-3-rust-engine/issues/34)) on the condition that
+  this mod stays free. It always will be.
+- Headless host, collision handoff and rail finder: [chasmlol/2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)
+  (Apache-2.0, text in [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)). See [NOTICE](NOTICE).
+- Module architecture: inspired by [ckosmic/g64](https://github.com/ckosmic/g64). No code taken.
+- Sound bank research: [doriangironde/skate-3-rust-macos](https://github.com/doriangironde/skate-3-rust-macos)
+  and Hailey-Ross's audio work on SK8-ENGINE. Sounds are decoded on your machine by
+  [vgmstream](https://github.com/vgmstream/vgmstream).
+
+## License
+
+GPL-3.0, see [LICENSE](LICENSE). Code ported from chasmlol's project stays under
+Apache-2.0 as NOTICE describes. Skate 3 and its assets belong to Electronic Arts;
+none of them are in this repository or its downloads.
 
 Unofficial fan project, not affiliated with EA or Facepunch.
