@@ -1,0 +1,31 @@
+skate3-gmod
+
+native/skate-bridge/src/rails.rs and parts of native/skate-bridge/src/collision.rs
+are ported from 2010 Rust Rewrite Mashup by chasmlol
+(https://github.com/chasmlol/2010-rust-rewrite-mashup, commit f608f85),
+licensed under the Apache License, Version 2.0
+(http://www.apache.org/licenses/LICENSE-2.0). Changes: the math types come
+from glam instead of Bevy, and MW2-specific extraction was removed.
+
+setup/convert.py is adapted from that project's skate/converter/iw4l_skate_convert.py
+under the same license.
+
+The playermodel retarget in addon/lua/skate3/cl_skater.lua is ported from that
+project's crates/render_anim/src/skate/rig.rs, and the board import in
+native/gmod-skate/src/skater.rs follows its crates/assets/src/skate_board.rs,
+under the same license.
+
+native/patches/skate-host-hud.patch modifies that project's skate-host crate
+(at the same commit) to report the trick line in progress and set the skater's stance, under the same
+license. CI applies it to a fresh clone; none of that crate is copied here.
+
+The setup app bundles vgmstream-cli (https://github.com/vgmstream/vgmstream),
+which decodes the sounds on the player's own disc. Its licence ships beside it
+as COPYING; the Windows build's FFmpeg and codec libraries are vgmstream's own
+distribution, unchanged.
+
+Which Skate 3 sound ids play the pops, landings and grind hits, and the
+layout of the game's SPLC sound banks, come from the reverse-engineering notes
+in doriangironde/skate-3-rust-macos (https://github.com/doriangironde/skate-3-rust-macos)
+and Hailey-Ross's audio work on SK8-ENGINE/skate-3-rust-engine (PR #32). No
+code is taken from either; setup/audio.py is written from those notes.

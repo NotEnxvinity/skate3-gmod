@@ -1,0 +1,143 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: native/patch-engine.sh
+      - run: cargo test --workspace
+      - run: cargo run -p skate-headless
+      - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/*.py
+      - name: Fetch the engine's tools for the setup tests
+        run: |
+          rev=$(sed -n 's/^ENGINE_REV=//p' setup/skate3-gmod-setup.sh)
+          git init -q engine
+          git -C engine remote add origin https://github.com/SK8-ENGINE/skate-3-rust-engine
+          git -C engine fetch -q --depth 1 origin "$rev"
+          git -C engine checkout -q FETCH_HEAD
+      - name: Setup tests, decoding with vgmstream
+        run: |
+          python3 -m pip install -q numpy==2.2.6
+          mkdir -p vgmstream
+          curl -sSfL https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz | tar xz -C vgmstream
+          SKATE3_ENGINE=$PWD/engine SKATE3_VGMSTREAM=$PWD/vgmstream/vgmstream-cli python3 -m unittest discover -s setup -p 'test_*.py'
+      - run: sudo apt-get install -y -q luajit && for f in $(find addon -name '*.lua'); do luajit -bl "$f" > /dev/null; done
+
+  # Linked against glibc 2.31 with zig, so the module loads inside the Steam
+  # Linux Runtime as well as on a current SteamOS host.
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: native/patch-engine.sh
+      - run: python3 -m pip install --user --break-system-packages ziglang==0.16.0 && cargo install --locked cargo-zigbuild
+      - run: cargo zigbuild --release -p gmod-skate -p skate-headless --target x86_64-unknown-linux-gnu.2.31
+      - run: |
+          mkdir -p out
+          cp target/x86_64-unknown-linux-gnu/release/libgmcl_skate3.so out/gmcl_skate3_linux64.dll
+          cp target/x86_64-unknown-linux-gnu/release/skate-headless out/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: out
+
+  # For Garry's Mod running under Proton.
+  windows:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-x86-64
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+      - run: native/patch-engine.sh
+      - run: cargo build --release -p gmod-skate --target x86_64-pc-windows-gnu
+      - run: mkdir -p out && cp target/x86_64-pc-windows-gnu/release/gmcl_skate3.dll out/gmcl_skate3_win64.dll
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: out
+
+  # The setup app players run once: it carries the engine's converters and
+  # both modules, takes their own Skate 3 ISO and installs everything.
+  setup-app:
+    needs: [linux, windows]
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          path: builds
+      - name: Fetch the engine's converters
+        run: |
+          rev=$(sed -n 's/^ENGINE_REV=//p' setup/skate3-gmod-setup.sh)
+          git init -q engine
+          git -C engine remote add origin https://github.com/SK8-ENGINE/skate-3-rust-engine
+          git -C engine fetch -q --depth 1 origin "$rev"
+          git -C engine checkout -q FETCH_HEAD
+      - run: python -m pip install -q pyinstaller==6.19.0 numpy==2.2.6 Pillow==11.3.0
+      # Decodes the sounds on the player's disc. Windows gets the tagged
+      # release; the Linux CLI is only published as vgmstream's nightly.
+      - name: Fetch vgmstream
+        run: |
+          mkdir -p vgmstream
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -sSfL -o vgm.zip https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip
+            unzip -q vgm.zip -d vgmstream
+          else
+            curl -sSfL -o vgm.tgz https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz
+            tar xzf vgm.tgz -C vgmstream
+            curl -sSfL -o vgmstream/COPYING https://raw.githubusercontent.com/vgmstream/vgmstream/r2117/COPYING
+          fi
+          ls vgmstream
+      - run: |
+          mkdir -p modules
+          cp builds/linux-build/gmcl_skate3_linux64.dll builds/windows-build/gmcl_skate3_win64.dll modules/
+          python setup/package.py --engine engine --modules modules --vgmstream vgmstream --out dist
+      - run: dist/skate3-gmod-setup --self-test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skate3-gmod-setup-${{ runner.os }}
+          path: dist
+
+  # One download laid out like the game folder, plus the setup tools.
+  package:
+    runs-on: ubuntu-24.04
+    needs: [linux, windows]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: builds
+      - run: |
+          root=dist/skate3-gmod
+          mkdir -p "$root/garrysmod/lua/bin" "$root/garrysmod/addons/skate3"
+          cp builds/linux-build/gmcl_skate3_linux64.dll builds/windows-build/gmcl_skate3_win64.dll "$root/garrysmod/lua/bin/"
+          cp -r addon/lua "$root/garrysmod/addons/skate3/"
+          cp builds/linux-build/skate-headless "$root/"
+          cp -r setup "$root/"
+          cp README.md NOTICE "$root/"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skate3-gmod-linux-x64
+          path: dist

@@ -1,0 +1,9 @@
+[package]
+name = "skate-bridge"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+skate-host.workspace = true
+glam.workspace = true
