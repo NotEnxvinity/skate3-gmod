@@ -2,7 +2,8 @@ name: ci
 on:
   push:
     branches: [main]
-    # A v* tag also publishes a GitHub release with the setup apps.
+    # A v* tag (or publishing a release with one) also puts the setup apps
+    # on that GitHub release.
     tags: ['v*']
   pull_request:
 jobs:
@@ -164,6 +165,14 @@ jobs:
             cp LICENSE NOTICE "$dir/"
             (cd "$dir" && zip -q -r "$GITHUB_WORKSPACE/skate3-gmod-setup-$os.zip" .)
           done
-      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skate 3 for Garry's Mod $GITHUB_REF_NAME" --generate-notes skate3-gmod-setup-Windows.zip skate3-gmod-setup-Linux.zip
+      # Publishing a release on GitHub's releases page makes the tag, so the
+      # release may already exist; then the downloads are added to it.
+      - run: |
+          files="skate3-gmod-setup-Windows.zip skate3-gmod-setup-Linux.zip"
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber $files
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skate 3 for Garry's Mod $GITHUB_REF_NAME" --generate-notes $files
+          fi
         env:
           GH_TOKEN: ${{ github.token }}
