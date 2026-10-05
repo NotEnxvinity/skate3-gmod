@@ -39,7 +39,13 @@ pub fn parse(data: &[u8]) -> Result<Solids, String> {
 
 struct Bsp<'a> {
     data: &'a [u8],
+    /// Where a lump's offset and length sit in its 16-byte header entry.
+    /// Left 4 Dead 2's version 21 maps put the lump version first.
+    fields: (usize, usize),
 }
+
+const STANDARD: (usize, usize) = (0, 4);
+const LEFT4DEAD2: (usize, usize) = (4, 8);
 
 #[derive(Clone, Copy)]
 struct Plane {
@@ -56,14 +62,43 @@ impl<'a> Bsp<'a> {
         if !(19..=21).contains(&version) {
             return Err(format!("unsupported BSP version {version}"));
         }
-        Ok(Self { data })
+        // Version 21 is both Portal 2 / CS:GO and Left 4 Dead 2, which differ
+        // only in the header's field order: take L4D2's when only it reads
+        // sensibly.
+        let standard = Self {
+            data,
+            fields: STANDARD,
+        };
+        let left4dead2 = Self {
+            data,
+            fields: LEFT4DEAD2,
+        };
+        if version == 21 && !standard.header_fits() && left4dead2.header_fits() {
+            return Ok(left4dead2);
+        }
+        Ok(standard)
+    }
+
+    /// Every lump's offset and length, unchecked.
+    fn span(&self, index: usize) -> (usize, usize) {
+        let at = 8 + index * 16;
+        let offset = i32_at(self.data, at + self.fields.0).max(0) as usize;
+        let len = i32_at(self.data, at + self.fields.1).max(0) as usize;
+        (offset, len)
+    }
+
+    /// Whether every lump with data lies after the header and inside the file.
+    fn header_fits(&self) -> bool {
+        let header = 8 + HEADER_LUMPS * 16 + 4;
+        (0..HEADER_LUMPS).all(|index| {
+            let (offset, len) = self.span(index);
+            len == 0 || (offset >= header && offset + len <= self.data.len())
+        })
     }
 
     /// One lump's bytes, checked for bounds and compression.
     fn lump(&self, index: usize, stride: usize) -> Result<&'a [u8], String> {
-        let at = 8 + index * 16;
-        let offset = i32_at(self.data, at).max(0) as usize;
-        let len = i32_at(self.data, at + 4).max(0) as usize;
+        let (offset, len) = self.span(index);
         let lump = self
             .data
             .get(offset..offset + len)
@@ -92,7 +127,10 @@ impl<'a> Bsp<'a> {
         let mut out = Vec::new();
         for brush in self.lump(LUMP_BRUSHES, 12)?.chunks_exact(12) {
             let first = i32_at(brush, 0).max(0) as usize;
-            let count = i32_at(brush, 4).max(0) as usize;
+            // Never trust a count past the sides that exist: a bad one would
+            // reserve gigabytes and take the game down with it.
+            let count =
+                (i32_at(brush, 4).max(0) as usize).min((sides.len() / 8).saturating_sub(first));
             if i32_at(brush, 8) & SOLID_CONTENTS == 0 {
                 continue;
             }
@@ -248,14 +286,19 @@ pub(crate) mod tests {
 
     /// Writes a minimal v20 BSP holding the given lumps.
     pub fn build(lumps: &[(usize, Vec<u8>)]) -> Vec<u8> {
+        build_as(20, STANDARD, lumps)
+    }
+
+    fn build_as(version: i32, fields: (usize, usize), lumps: &[(usize, Vec<u8>)]) -> Vec<u8> {
         let mut out = Vec::new();
         out.extend_from_slice(b"VBSP");
-        out.extend_from_slice(&20i32.to_le_bytes());
+        out.extend_from_slice(&version.to_le_bytes());
         out.resize(8 + HEADER_LUMPS * 16 + 4, 0);
         for (index, data) in lumps {
             let offset = out.len() as i32;
-            out[8 + index * 16..12 + index * 16].copy_from_slice(&offset.to_le_bytes());
-            out[12 + index * 16..16 + index * 16]
+            let at = 8 + index * 16;
+            out[at + fields.0..at + fields.0 + 4].copy_from_slice(&offset.to_le_bytes());
+            out[at + fields.1..at + fields.1 + 4]
                 .copy_from_slice(&(data.len() as i32).to_le_bytes());
             out.extend_from_slice(data);
         }
@@ -278,6 +321,52 @@ pub(crate) mod tests {
         let mut wrong = build(&[]);
         wrong[4] = 99;
         assert!(parse(&wrong).is_err());
+    }
+
+    fn box_brush(contents: i32, count: i32) -> Vec<(usize, Vec<u8>)> {
+        let mut planes = Vec::new();
+        for (n, d) in [
+            ([1., 0., 0.], 64.),
+            ([-1., 0., 0.], 64.),
+            ([0., 1., 0.], 64.),
+            ([0., -1., 0.], 64.),
+            ([0., 0., 1.], 16.),
+            ([0., 0., -1.], 0.),
+        ] {
+            planes.extend(plane(n, d));
+        }
+        let mut sides = Vec::new();
+        for i in 0..6u16 {
+            sides.extend_from_slice(&i.to_le_bytes());
+            sides.extend_from_slice(&[0; 6]);
+        }
+        let mut brushes = Vec::new();
+        brushes.extend_from_slice(&0i32.to_le_bytes());
+        brushes.extend_from_slice(&count.to_le_bytes());
+        brushes.extend_from_slice(&contents.to_le_bytes());
+        vec![
+            (LUMP_PLANES, planes),
+            (LUMP_BRUSHSIDES, sides),
+            (LUMP_BRUSHES, brushes),
+        ]
+    }
+
+    #[test]
+    fn reads_left_4_dead_2_maps() {
+        let data = build_as(21, LEFT4DEAD2, &box_brush(0x1, 6));
+        let solids = parse(&data).unwrap();
+        assert_eq!(solids.brushes.len(), 1);
+        assert_eq!(solids.brushes[0].len(), 6);
+        // Portal 2 and CS:GO maps share the version and keep the usual order.
+        let data = build_as(21, STANDARD, &box_brush(0x1, 6));
+        assert_eq!(parse(&data).unwrap().brushes.len(), 1);
+    }
+
+    #[test]
+    fn survives_a_brush_claiming_billions_of_sides() {
+        let data = build(&box_brush(0x1, i32::MAX));
+        let solids = parse(&data).unwrap();
+        assert_eq!(solids.brushes[0].len(), 6);
     }
 
     #[test]
