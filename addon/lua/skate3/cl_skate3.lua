@@ -179,10 +179,30 @@ local function FollowWeapon()
 	end
 end
 
+-- A health line in the console every few seconds while the mod is loaded,
+-- so a log of a crash shows what was growing in the hitches before it.
+local HEALTH_EVERY = 5
+local nextHealth = 0
+local worstFrame, hitches = 0, 0
+
+local function Health(now)
+	local dt = FrameTime()
+	worstFrame = math.max(worstFrame, dt)
+	if dt > 0.1 then hitches = hitches + 1 end
+	if now < nextHealth then return end
+	nextHealth = now + HEALTH_EVERY
+	local process = skate3.Memory and skate3.Memory()
+	print(("[skate3] health: game %s, lua %.1f MB, %d entities, worst frame %.3f s, %d hitches, %s"):format(
+		process and ("%.0f MB"):format(process) or "?", collectgarbage("count") / 1024, #ents.GetAll(),
+		worstFrame, hitches, active and (pose and pose.state or "riding") or "not riding"))
+	worstFrame, hitches = 0, 0
+end
+
 hook.Add("Think", "skate3_step", function()
 	FollowWeapon()
 	if not loaded then return end
 	local now = RealTime()
+	Health(now)
 	if now >= nextStatus then
 		nextStatus = now + 0.25
 		status = skate3.Status()

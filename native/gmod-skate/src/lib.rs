@@ -456,6 +456,20 @@ lua_fn!(version, |lua| {
     1
 });
 
+/// The game process's resident memory in MB, for the health line: from
+/// /proc on Linux, and through Wine's Z: drive under Proton. Nil elsewhere.
+lua_fn!(memory, |lua| {
+    let statm = ["/proc/self/statm", "Z:\\proc\\self\\statm"]
+        .iter()
+        .find_map(|path| std::fs::read_to_string(path).ok());
+    let resident = statm.and_then(|s| s.split_whitespace().nth(1)?.parse::<f64>().ok());
+    match resident {
+        Some(pages) => lua.push_number(pages * 4096. / (1024. * 1024.)),
+        None => lua.push_nil(),
+    }
+    1
+});
+
 /// # Safety
 /// Called by Garry's Mod with a valid Lua state when the module is required.
 #[unsafe(no_mangle)]
@@ -479,6 +493,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"GetInput", get_input),
         (c"GetSkater", get_skater),
         (c"Version", version),
+        (c"Memory", memory),
     ] {
         lua.push_function(f);
         lua.set_field(-2, name);
