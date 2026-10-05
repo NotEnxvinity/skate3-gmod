@@ -66,7 +66,7 @@ goofy), camera height, sounds and volume, and the score widget. The same as
 console variables: `skate3_stance regular` or `goofy`, `skate3_camera low`,
 `normal` or `high` (`skate3_camera_cycle` steps through them, handy on a bind),
 `skate3_sounds hl2`, `disc` (Skate 3's own sounds, which setup installs) or `off`, `skate3_volume` from 0 to 1, `skate3_score_hud 0`
-hides the trick score. For debugging, `skate3_debug_rails 1` draws the grind rails found in the
+hides the trick score, and `skate3_score_style minimal`, `world` (floating beside the skater) or `hl2` picks its look. For debugging, `skate3_debug_rails 1` draws the grind rails found in the
 map, `skate3_debug_input 1` shows the controller input, `skate3_data_path` points at converted data somewhere else, and the
 server's `skate3_enabled 0` turns the mode off.
 

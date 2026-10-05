@@ -350,6 +350,11 @@ hook.Add("PostDrawOpaqueRenderables", "skate3_board", function(_, skybox)
 	end
 end)
 
+hook.Add("PostDrawTranslucentRenderables", "skate3_score", function(_, skybox)
+	if skybox or not active or not pose or Skater.Skip.score then return end
+	Score.DrawWorld(V(pose.pos))
+end)
+
 hook.Add("PostDrawTranslucentRenderables", "skate3_rails", function(_, skybox)
 	if skybox or not cv_rails:GetBool() or not rails then return end
 	local eye = EyePos()

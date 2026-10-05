@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, convert, xdvdfs  # noqa: E402
+import audio, convert, names, xdvdfs  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -31,6 +31,7 @@ FROM_DISC = {
     'data/big/db.big',
     'data/content/createacharacter.big',
     *audio.FROM_DISC,
+    *names.FROM_DISC,
 }
 FROM_DISC_FOLDERS = ('data/anim/',)
 # The engine's top-level scripts the converters run as steps, and the ones
@@ -166,6 +167,12 @@ def install(selected, gmod, report):
     with tempfile.TemporaryDirectory(prefix='skate3-setup-', dir=data.parent) as work:
         xex = game_folder(selected, Path(work), report)
         convert.convert(engine_dir(), xex, data, report)
+        # Without these the score widget spells the trick IDs out itself.
+        try:
+            names.install(engine_dir(), xex.parent, data, report)
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t read the trick names ({error}); the score widget will spell them out.')
         # The mod plays Half-Life 2 sounds without these, so a problem here
         # doesn't undo the rest.
         try:

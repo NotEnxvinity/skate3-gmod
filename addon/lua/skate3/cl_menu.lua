@@ -38,6 +38,11 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:NumSlider("Volume", "skate3_volume", 0, 1, 2)
 
 		panel:CheckBox("Show the trick score", "skate3_score_hud")
+		Choices(panel, "Score look", "skate3_score_style", {
+			{ "Minimal, on screen", "minimal" },
+			{ "Minimal, beside the skater", "world" },
+			{ "Half-Life 2", "hl2" },
+		})
 		panel:CheckBox("Show the status line", "skate3_hud")
 	end)
 end)

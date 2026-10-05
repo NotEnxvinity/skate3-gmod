@@ -15,12 +15,19 @@ jobs:
       - run: cargo test --workspace
       - run: cargo run -p skate-headless
       - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/*.py
+      - name: Fetch the engine's tools for the setup tests
+        run: |
+          rev=$(sed -n 's/^ENGINE_REV=//p' setup/skate3-gmod-setup.sh)
+          git init -q engine
+          git -C engine remote add origin https://github.com/SK8-ENGINE/skate-3-rust-engine
+          git -C engine fetch -q --depth 1 origin "$rev"
+          git -C engine checkout -q FETCH_HEAD
       - name: Setup tests, decoding with vgmstream
         run: |
           python3 -m pip install -q numpy==2.2.6
           mkdir -p vgmstream
           curl -sSfL https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz | tar xz -C vgmstream
-          SKATE3_VGMSTREAM=$PWD/vgmstream/vgmstream-cli python3 -m unittest discover -s setup -p 'test_*.py'
+          SKATE3_ENGINE=$PWD/engine SKATE3_VGMSTREAM=$PWD/vgmstream/vgmstream-cli python3 -m unittest discover -s setup -p 'test_*.py'
       - run: sudo apt-get install -y -q luajit && for f in $(find addon -name '*.lua'); do luajit -bl "$f" > /dev/null; done
 
   # Linked against glibc 2.31 with zig, so the module loads inside the Steam

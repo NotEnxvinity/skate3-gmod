@@ -83,22 +83,27 @@ end
 -- Plays one of the game's own sound ids from a bank: one alternative, and
 -- one member from each of its groups, at the member's gain. False when setup
 -- didn't install it.
-local function PlayId(folder, id, ent, level)
+-- Plays one take of a retail sound id. A record's groups are the same hit at
+-- rising strength, so `strength` (0 to 1) picks one rather than stacking them
+-- all, and sets how loud it is.
+local function PlayId(folder, id, ent, strength)
 	local m = Manifest()
 	local ids = m and m.ids and m.ids[folder]
 	-- util.JSONToTable turns numeric keys into numbers.
 	local alternatives = ids and (ids[id] or ids[tostring(id)])
 	if not alternatives or #alternatives == 0 then return false end
-	local played = false
+	local groups = {}
 	for _, group in ipairs(alternatives[math.random(#alternatives)]) do
-		if #group > 0 then
-			local member = group[math.random(#group)]
-			local path = string.format("skate3/%s/%04d.wav", folder, member[1])
-			ent:EmitSound(path, 75, math.random(97, 103), math.Clamp(member[2], 0, 1) * level * cv_volume:GetFloat())
-			played = true
-		end
+		if #group > 0 then groups[#groups + 1] = group end
 	end
-	return played
+	if #groups == 0 then return false end
+	strength = math.Clamp(strength, 0, 1)
+	local group = groups[math.Clamp(math.floor(strength * #groups) + 1, 1, #groups)]
+	local member = group[math.random(#group)]
+	local path = string.format("skate3/%s/%04d.wav", folder, member[1])
+	local level = math.Clamp(member[2], 0, 1) * (0.3 + 0.5 * strength) * cv_volume:GetFloat()
+	ent:EmitSound(path, 70, math.random(97, 103), level)
+	return true
 end
 
 local picks = {}
@@ -125,21 +130,29 @@ end
 local function Pop(ent, speed)
 	local class = speed < 3 and 0 or speed < 6 and 1 or 2
 	local base = OnMetal(ent) and 0x44F or 0x449
-	return PlayId("collisions", base + class, ent, 1)
+	return PlayId("collisions", base + class, ent, 0.2 + class * 0.25)
 end
 
--- Skate 3's landing: the fixed impact plus a soft or hard layer by time in
--- the air (0.75 s splits them), the metal pair on metal.
+-- Under this long in the air it was a bump, not a jump: no landing.
+local BUMP = 0.15
+
+-- Skate 3's landing, by time in the air: a soft or hard layer (0.75 s splits
+-- them), and the heavy impact on top only after real air.
 local function Land(ent, air)
-	local impact = PlayId("collisions", 0x447, ent, 1)
+	if air < BUMP then return true end
+	local strength = math.Clamp(air / 1.2, 0, 1)
 	local layer = (OnMetal(ent) and 0x35E or 0x35C) + (air >= 0.75 and 1 or 0)
-	return PlayId("collisions", layer, ent, 1) or impact
+	local played = PlayId("collisions", layer, ent, strength)
+	if air >= 0.5 then played = PlayId("collisions", 0x447, ent, strength * 0.8) or played end
+	return played
 end
 
--- A grind's hit: the board on the rail, plus the rail itself when it's metal.
-local function GrindHit(ent)
-	local board = PlayId("collisions", 879, ent, 1)
-	local rail = OnMetal(ent) and PlayId("metal", 399, ent, 1)
+-- A grind's hit, harder the faster you hit it or the further you dropped: the
+-- board on the rail, plus the rail itself ringing when it's metal and it hit hard.
+local function GrindHit(ent, speed, air)
+	local strength = math.Clamp(math.max(speed / 10, (air or 0) / 1.2), 0.1, 1)
+	local board = PlayId("collisions", 879, ent, strength)
+	local rail = strength > 0.4 and OnMetal(ent) and PlayId("metal", 399, ent, strength * 0.7)
 	return board or rail
 end
 
@@ -217,6 +230,7 @@ local function Play(name, ent, level)
 end
 
 local airStart
+local landedAt = -math.huge
 
 -- Keeps the loop for `name` playing at `level` while `on`, fading it out after.
 local function Hold(name, ent, on, level)
@@ -262,15 +276,18 @@ function Sounds.Update(ent, pose)
 	local disc = Disc()
 	if last and kind ~= last then
 		if kind == "air" and (last == "ground" or last == "grind") then
+			-- Rough ground flickers in and out of the air; only a takeoff
+			-- after a moment on the ground pops.
+			if CurTime() - landedAt > BUMP * 2 and not (disc and Pop(ent, speed)) then Play("pop", ent, 0.8) end
 			airStart = CurTime()
-			if not (disc and Pop(ent, speed)) then Play("pop", ent, 0.8) end
 		elseif (kind == "ground" or kind == "grind") and last == "air" then
+			landedAt = CurTime()
 			local air = airStart and CurTime() - airStart or 0
 			-- Dropping onto a rail is the grind's hit, not a landing.
-			local hit = disc and (kind == "grind" and GrindHit(ent) or kind == "ground" and Land(ent, air))
-			if not hit then Play("land", ent, math.Clamp(0.5 + speed / 20, 0.5, 1)) end
+			local hit = disc and (kind == "grind" and GrindHit(ent, speed, air) or kind == "ground" and Land(ent, air))
+			if not hit and (kind == "grind" or air >= BUMP) then Play("land", ent, math.Clamp(0.5 + speed / 20, 0.5, 1)) end
 		elseif kind == "grind" and disc then
-			GrindHit(ent)
+			GrindHit(ent, speed)
 		elseif kind == "bail" then
 			Play("bail", ent, 1)
 		end
