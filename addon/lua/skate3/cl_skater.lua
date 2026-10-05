@@ -7,7 +7,7 @@ local Skater = {}
 -- as a list such as "board,bones". board, bones, model, score, sounds, pose,
 -- step and net.
 local cv_skip = CreateClientConVar("skate3_debug_skip", "", false, false,
-	"Debug: per-frame work to skip, comma separated (board, bones, model, score, sounds, pose, step, net)")
+	"Debug: per-frame work to skip, comma separated (board, bones, model, score, sounds, pose, step, net, view)")
 Skater.Skip = {}
 local function ReadSkip()
 	Skater.Skip = {}
