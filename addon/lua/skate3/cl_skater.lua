@@ -324,14 +324,29 @@ local function ModelFor(ply)
 	return ply:GetModel()
 end
 
+-- Rebuilding the stand-in creates an entity, and creating them every frame
+-- crashes the game (CUtlRBTree overflow). So at most one rebuild a second,
+-- and a model that can't be built isn't retried until the pick changes.
+local REBUILD_EVERY = 1
+local lastBuild = -math.huge
+local failedName
+
 function Skater.ShowModel(ply)
 	if not data then return end
 	owner = ply
 	local name = ModelFor(ply)
 	if not IsValid(model) or model.skate3Name ~= name then
+		if name == failedName or RealTime() - lastBuild < REBUILD_EVERY then return end
+		lastBuild = RealTime()
 		if IsValid(model) then model:Remove() end
 		model = ClientsideModel(name, RENDERGROUP_OPAQUE)
-		if not IsValid(model) then return end
+		if not IsValid(model) then
+			failedName = name
+			print("[skate3] couldn't load playermodel " .. tostring(name))
+			return
+		end
+		failedName = nil
+		print("[skate3] riding as " .. name)
 		-- What was asked for, not GetModel(): the two can differ in case or
 		-- slashes, which would rebuild the model every frame.
 		model.skate3Name = name
