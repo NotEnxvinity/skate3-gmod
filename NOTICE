@@ -23,3 +23,9 @@ The setup app bundles vgmstream-cli (https://github.com/vgmstream/vgmstream),
 which decodes the sounds on the player's own disc. Its licence ships beside it
 as COPYING; the Windows build's FFmpeg and codec libraries are vgmstream's own
 distribution, unchanged.
+
+Which Skate 3 sound ids play the pops, landings and grind hits, and the
+layout of the game's SPLC sound banks, come from the reverse-engineering notes
+in doriangironde/skate-3-rust-macos (https://github.com/doriangironde/skate-3-rust-macos)
+and Hailey-Ross's audio work on SK8-ENGINE/skate-3-rust-engine (PR #32). No
+code is taken from either; setup/audio.py is written from those notes.
