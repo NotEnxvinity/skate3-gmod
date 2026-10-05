@@ -153,7 +153,7 @@ def install_addon(gmod, wanted, report):
         if (local / 'lua/skate3').is_dir():
             shutil.rmtree(local, ignore_errors=True)
             report(f'Removed the old addon copy in {local}; the Workshop one is used now')
-        report('Subscribe to "Skate 3 Skateboard" on the Steam Workshop if you haven\'t yet: '
+        report('Subscribe to "Skate 3 in Gmod" on the Steam Workshop if you haven\'t yet: '
                'steamcommunity.com/sharedfiles/filedetails/?id=3814357793')
         return
     addon = addon_dir()
