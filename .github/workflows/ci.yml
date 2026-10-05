@@ -5,7 +5,7 @@ on:
   pull_request:
 jobs:
   test:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
@@ -26,7 +26,7 @@ jobs:
   # Linked against glibc 2.31 with zig, so the module loads inside the Steam
   # Linux Runtime as well as on a current SteamOS host.
   linux:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update -q && sudo apt-get install -y -q libudev-dev
@@ -46,7 +46,7 @@ jobs:
 
   # For Garry's Mod running under Proton.
   windows:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update -q && sudo apt-get install -y -q gcc-mingw-w64-x86-64
@@ -115,7 +115,7 @@ jobs:
 
   # One download laid out like the game folder, plus the setup tools.
   package:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
     needs: [linux, windows]
     steps:
       - uses: actions/checkout@v4
