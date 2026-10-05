@@ -216,6 +216,19 @@ def decode(vgmstream, inputs, report):
         report(f'Decoded {min(start + 64, len(inputs))} of {len(inputs)} sounds')
 
 
+def check(vgmstream):
+    """Decodes a short generated tone, to prove vgmstream runs here."""
+    samples = 480
+    pcm = b''.join(struct.pack('>h', (i % 40 - 20) * 500) for i in range(samples))
+    clip = struct.pack('>II', 0x02000000 | 48000, samples) + bytes([0x80]) + (8 + len(pcm)).to_bytes(3, 'big') + struct.pack('>I', samples) + pcm
+    with tempfile.TemporaryDirectory() as work:
+        path = Path(work) / 'check.snr'
+        path.write_bytes(clip)
+        decode(vgmstream, [path], lambda _: None)
+        if read_wav(Path(f'{path}.wav'))[0].shape != (samples, 1):
+            raise RuntimeError('vgmstream decoded the test sound wrongly')
+
+
 def sounds(game, report):
     """(folder, name, snr bytes) for every sound setup installs."""
     audio = Path(game) / 'data/audio'

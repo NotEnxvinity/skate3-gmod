@@ -11,7 +11,7 @@ you pick, on your own machine.
           [--gmod <garrysmod folder>]
 """
 from pathlib import Path
-import argparse, os, queue, re, runpy, shutil, subprocess, sys, tempfile, threading, traceback
+import argparse, os, queue, re, runpy, shutil, sys, tempfile, threading, traceback
 
 FROZEN = getattr(sys, 'frozen', False)
 # The packaged app carries the engine's converters and the modules here.
@@ -208,7 +208,7 @@ def self_test():
     vgmstream = audio.find_vgmstream()
     if vgmstream is None:
         raise RuntimeError('vgmstream-cli missing')
-    subprocess.run([str(vgmstream), '-V'], check=True, capture_output=True)
+    audio.check(vgmstream)
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 

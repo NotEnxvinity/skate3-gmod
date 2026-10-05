@@ -79,6 +79,10 @@ class AudioTest(unittest.TestCase):
                 self.assertEqual((w.getframerate(), w.getnframes()), (44100, 11))
 
     @unittest.skipUnless(audio.find_vgmstream(), 'vgmstream-cli not available')
+    def test_check(self):
+        audio.check(audio.find_vgmstream())
+
+    @unittest.skipUnless(audio.find_vgmstream(), 'vgmstream-cli not available')
     def test_install(self):
         with tempfile.TemporaryDirectory() as tmp:
             game(tmp)
