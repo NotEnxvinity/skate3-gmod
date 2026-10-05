@@ -186,7 +186,8 @@ def window(gmod):
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
     root.title('Skate 3 for Garry\'s Mod setup')
-    root.geometry('680x460')
+    root.geometry('720x520')
+    root.minsize(560, 420)
     frame = ttk.Frame(root, padding=20)
     frame.pack(fill='both', expand=True)
     ttk.Label(frame, text='Skate 3 for Garry\'s Mod', font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
@@ -207,7 +208,10 @@ def window(gmod):
             target.set(picked)
     ttk.Button(row, text='Change...', command=browse_gmod).pack(side='left')
 
-    log = tk.Text(frame, height=12, state='disabled', wrap='word')
+    # Above the log, so a short window can't push it out of sight.
+    button = ttk.Button(frame, text='Select your Skate 3 disc...')
+    button.pack(anchor='w', pady=(12, 0))
+    log = tk.Text(frame, height=10, state='disabled', wrap='word')
     log.pack(fill='both', expand=True, pady=12)
     progress = ttk.Progressbar(frame, mode='indeterminate')
     progress.pack(fill='x')
@@ -254,8 +258,7 @@ def window(gmod):
                     messagebox.showerror('Setup', text)
         root.after(100, poll)
 
-    button = ttk.Button(frame, text='Select your Skate 3 disc...', command=start)
-    button.pack(pady=(12, 0))
+    button.configure(command=start)
     if not gmod:
         say('Garry\'s Mod wasn\'t found automatically. Use Change... to pick its garrysmod folder.')
     poll()
