@@ -26,7 +26,8 @@ The Skate 3 host is a git dependency on
 
 ## Install (Windows, Linux or SteamOS)
 
-1. Subscribe to **Skate 3 Skateboard** on the Steam Workshop. That's the Lua
+1. Subscribe to [**Skate 3 Skateboard**](https://steamcommunity.com/sharedfiles/filedetails/?id=3814357793)
+   on the Steam Workshop. That's the Lua
    addon; the Workshop can't carry the native skate engine, so that comes from
    the setup app (the way [G64](https://github.com/ckosmic/g64) does it).
 2. Download **skate3-gmod-setup-Windows.zip** or **skate3-gmod-setup-Linux.zip**
@@ -52,6 +53,10 @@ Testing a build whose Lua isn't on the Workshop yet: tick "Also install the Lua
 addon" in setup (or pass `--with-addon`). That copy in `garrysmod/addons/skate3`
 loads instead of the Workshop one until setup runs again without it, which
 removes it.
+
+Publishing a Workshop update (the item's owner, Steam running, Garry's Mod
+closed): `workshop/publish.sh "what changed"` packs `addon/` with gmad and
+uploads it with gmpublish, through Proton when Garry's Mod runs under it.
 
 Steam Input: Garry's Mod's controller layout must be a gamepad layout (Steam →
 Garry's Mod → Controller settings → a "Gamepad" template), not keyboard and
