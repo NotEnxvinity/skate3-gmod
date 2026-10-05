@@ -463,16 +463,51 @@ lua_fn!(version, |lua| {
 /// The game process's resident memory in MB, for the health line: from
 /// /proc on Linux, and through Wine's Z: drive under Proton. Nil elsewhere.
 lua_fn!(memory, |lua| {
-    let statm = ["/proc/self/statm", "Z:\\proc\\self\\statm"]
-        .iter()
-        .find_map(|path| std::fs::read_to_string(path).ok());
-    let resident = statm.and_then(|s| s.split_whitespace().nth(1)?.parse::<f64>().ok());
-    match resident {
-        Some(pages) => lua.push_number(pages * 4096. / (1024. * 1024.)),
+    match resident_bytes() {
+        Some(bytes) => lua.push_number(bytes / (1024. * 1024.)),
         None => lua.push_nil(),
     }
     1
 });
+
+/// The game's resident memory. Under Proton this must ask Windows: Wine's
+/// view of /proc/self is not the game's.
+#[cfg(windows)]
+fn resident_bytes() -> Option<f64> {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Counters {
+        cb: u32,
+        page_fault_count: u32,
+        peak_working_set_size: usize,
+        working_set_size: usize,
+        quota_peak_paged_pool_usage: usize,
+        quota_paged_pool_usage: usize,
+        quota_peak_non_paged_pool_usage: usize,
+        quota_non_paged_pool_usage: usize,
+        pagefile_usage: usize,
+        peak_pagefile_usage: usize,
+    }
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn GetCurrentProcess() -> isize;
+        fn K32GetProcessMemoryInfo(process: isize, counters: *mut Counters, cb: u32) -> i32;
+    }
+    let mut counters = Counters {
+        cb: std::mem::size_of::<Counters>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: the counters are sized as declared in cb.
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut counters, counters.cb) };
+    (ok != 0).then_some(counters.working_set_size as f64)
+}
+
+#[cfg(not(windows))]
+fn resident_bytes() -> Option<f64> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let pages = statm.split_whitespace().nth(1)?.parse::<f64>().ok()?;
+    Some(pages * 4096.)
+}
 
 /// # Safety
 /// Called by Garry's Mod with a valid Lua state when the module is required.
