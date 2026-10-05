@@ -145,9 +145,13 @@ lua_fn!(status, |lua| {
             .map_err(|_| ())
     }) {
         let (state, triangles, rails, active, ride_error) = s;
+        if let Status::Loading(step) = state {
+            lua.push_str(step);
+            lua.set_field(-2, c"stage");
+        }
         let (name, error) = match state {
             Status::Idle => ("idle", None),
-            Status::Loading => ("loading", None),
+            Status::Loading(_) => ("loading", None),
             Status::Ready => ("ready", ride_error),
             Status::Failed(e) => ("failed", Some(e)),
         };

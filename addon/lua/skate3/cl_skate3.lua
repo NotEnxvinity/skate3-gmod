@@ -31,6 +31,7 @@ local pose
 local rails
 local status = {}
 local nextStatus = 0
+local loadStage, loadStartedAt -- the collision build's current step, for the console
 local nextSend = 0
 
 local function Say(...)
@@ -206,6 +207,16 @@ hook.Add("Think", "skate3_step", function()
 	if now >= nextStatus then
 		nextStatus = now + 0.25
 		status = skate3.Status()
+		if status.stage ~= loadStage then
+			-- Each step goes to the console as it starts, so if the game dies
+			-- mid-load the log shows which one it was.
+			loadStage = status.stage
+			loadStartedAt = loadStartedAt or now
+			local process = skate3.Memory and skate3.Memory()
+			print(("[skate3] collision: %s (%.1f s in, game %s)"):format(loadStage or status.state, now - loadStartedAt,
+				process and ("%.0f MB"):format(process) or "?"))
+			if not loadStage then loadStartedAt = nil end
+		end
 		if status.state == "ready" and not rails then
 			rails = skate3.GetRails()
 			print(("[skate3] collision ready: %d triangles, %d grind rails"):format(status.triangles, status.rails))
@@ -346,7 +357,7 @@ hook.Add("HUDPaint", "skate3_hud", function()
 	if not cv_hud:GetBool() or not loaded then return end
 	local line
 	if status.state == "loading" then
-		line = "skate3: building collision..."
+		line = "skate3: building collision (" .. (status.stage or "starting") .. ")..."
 	elseif active and pose then
 		local onFoot = pose.state and pose.state:find("^Biped")
 		line = ("skate3: %s  %.0f km/h  %s   (Y: %s)"):format(pose.state, pose.speed * 3.6, status.pad or "no controller",

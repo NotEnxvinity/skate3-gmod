@@ -36,7 +36,8 @@ pub enum Job {
 pub enum Status {
     #[default]
     Idle,
-    Loading,
+    /// Building the map's collision; the step it's on, for the console.
+    Loading(&'static str),
     Ready,
     Failed(String),
 }
@@ -127,6 +128,14 @@ impl Drop for Runtime {
     }
 }
 
+fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
+    panic
+        .downcast_ref::<&str>()
+        .copied()
+        .or_else(|| panic.downcast_ref::<String>().map(String::as_str))
+        .unwrap_or("no message")
+}
+
 /// A loaded map's collision in Skate space.
 struct MapWorld {
     assets: PathBuf,
@@ -136,10 +145,9 @@ struct MapWorld {
 
 fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let set = |f: &dyn Fn(&mut Shared)| {
-        if let Ok(mut s) = shared.lock() {
-            f(&mut s);
-        }
+        f(&mut shared.lock().unwrap_or_else(|e| e.into_inner()));
     };
+    let stage = |step: &'static str| set(&|s| s.status = Status::Loading(step));
     let mut session: Option<Session> = None;
     let mut driver = Driver::default();
     // Everything the session was fed since it was built, saved when it
@@ -156,149 +164,164 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let mut broken = false;
     while let Ok(job) = jobs.recv() {
         let riding = !matches!(job, Job::Load { .. });
-        let result: Result<(), String> = (|| {
-            match job {
-                Job::Load { assets, bsp, extra } => {
-                    set(&|s| {
-                        s.status = Status::Loading;
-                        s.active = false;
-                        s.pose = None;
-                    });
-                    let solids = crate::bsp::parse(&bsp)?;
-                    let mut triangles = solids.triangles;
-                    triangles.extend(extra);
-                    let built = world::build(&triangles, &solids.brushes);
-                    let rails: Vec<Vec<Vec3>> = built
-                        .rails
-                        .iter()
-                        .map(|r| {
-                            r.iter()
-                                .map(|p| collision::from_skate(Vec3::from_array(*p)))
-                                .collect()
-                        })
-                        .collect();
-                    let count = built.triangles.len();
-                    map = Some(MapWorld {
-                        assets: assets.clone(),
-                        triangles: built.triangles.clone(),
-                        rails: built.rails.clone(),
-                    });
-                    match session.as_mut().filter(|_| !broken) {
-                        // A new map on a warm session swaps collision only.
-                        Some(existing) => {
-                            let prepared = existing
-                                .collision_builder()
-                                .build(built.triangles, built.rails)?;
-                            existing.install_collision(prepared)?;
-                            // A replay can't swap collision mid-session.
-                            recording = None;
+        // A panic in the engine fails this job instead of silently killing
+        // the thread, which would leave the map loading forever.
+        let result: Result<(), String> =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                match job {
+                    Job::Load { assets, bsp, extra } => {
+                        set(&|s| {
+                            s.status = Status::Loading("reading the map");
+                            s.active = false;
+                            s.pose = None;
+                        });
+                        let solids = crate::bsp::parse(&bsp)?;
+                        drop(bsp);
+                        let mut triangles = solids.triangles;
+                        triangles.extend(extra);
+                        stage("finding grind rails");
+                        let built = world::build(&triangles, &solids.brushes);
+                        drop(triangles);
+                        let rails: Vec<Vec<Vec3>> = built
+                            .rails
+                            .iter()
+                            .map(|r| {
+                                r.iter()
+                                    .map(|p| collision::from_skate(Vec3::from_array(*p)))
+                                    .collect()
+                            })
+                            .collect();
+                        let count = built.triangles.len();
+                        map = Some(MapWorld {
+                            assets: assets.clone(),
+                            triangles: built.triangles.clone(),
+                            rails: built.rails.clone(),
+                        });
+                        match session.as_mut().filter(|_| !broken) {
+                            // A new map on a warm session swaps collision only.
+                            Some(existing) => {
+                                stage("swapping in the map's collision");
+                                let prepared = existing
+                                    .collision_builder()
+                                    .build(built.triangles, built.rails)?;
+                                existing.install_collision(prepared)?;
+                                // A replay can't swap collision mid-session.
+                                recording = None;
+                            }
+                            None => {
+                                stage("loading the Skate 3 data");
+                                broken = false;
+                                session = None;
+                                recording = None;
+                                session = Some(Session::new(
+                                    &assets,
+                                    built.triangles,
+                                    built.rails,
+                                    [0.; 3],
+                                    0.,
+                                )?);
+                                driver = Driver::default();
+                                recording = map
+                                    .as_ref()
+                                    .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
+                            }
                         }
-                        None => {
-                            broken = false;
+                        set(&|s| {
+                            s.status = Status::Ready;
+                            s.triangles = count;
+                            s.rails = rails.clone();
+                        });
+                    }
+                    Job::Activate {
+                        pos,
+                        yaw_degrees,
+                        aspect,
+                        goofy,
+                    } => {
+                        if broken && let Some(map) = &map {
                             session = None;
                             recording = None;
                             session = Some(Session::new(
-                                &assets,
-                                built.triangles,
-                                built.rails,
+                                &map.assets,
+                                map.triangles.clone(),
+                                map.rails.clone(),
                                 [0.; 3],
                                 0.,
                             )?);
                             driver = Driver::default();
-                            recording = map
-                                .as_ref()
-                                .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
+                            recording =
+                                Some(Recording::new(map.triangles.clone(), map.rails.clone()));
+                            broken = false;
                         }
+                        let session = session.as_mut().ok_or("the map isn't loaded yet")?;
+                        session.set_stance(goofy);
+                        record(&mut recording, Event::Stance { goofy });
+                        let spawn = collision::to_skate(pos).to_array();
+                        let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
+                        record(
+                            &mut recording,
+                            Event::Activate {
+                                spawn,
+                                heading,
+                                aspect,
+                            },
+                        );
+                        last_pos = Some(pos);
+                        let pose = driver.activate(session, spawn, heading, aspect)?;
+                        let pose = convert(&pose)?;
+                        set(&|s| {
+                            s.active = true;
+                            s.error = None;
+                            s.pose = Some(pose.clone());
+                        });
                     }
-                    set(&|s| {
-                        s.status = Status::Ready;
-                        s.triangles = count;
-                        s.rails = rails.clone();
-                    });
-                }
-                Job::Activate {
-                    pos,
-                    yaw_degrees,
-                    aspect,
-                    goofy,
-                } => {
-                    if broken && let Some(map) = &map {
-                        session = None;
-                        recording = None;
-                        session = Some(Session::new(
-                            &map.assets,
-                            map.triangles.clone(),
-                            map.rails.clone(),
-                            [0.; 3],
-                            0.,
-                        )?);
-                        driver = Driver::default();
-                        recording = Some(Recording::new(map.triangles.clone(), map.rails.clone()));
-                        broken = false;
-                    }
-                    let session = session.as_mut().ok_or("the map isn't loaded yet")?;
-                    session.set_stance(goofy);
-                    record(&mut recording, Event::Stance { goofy });
-                    let spawn = collision::to_skate(pos).to_array();
-                    let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
-                    record(
-                        &mut recording,
-                        Event::Activate {
-                            spawn,
-                            heading,
-                            aspect,
-                        },
-                    );
-                    last_pos = Some(pos);
-                    let pose = driver.activate(session, spawn, heading, aspect)?;
-                    let pose = convert(&pose)?;
-                    set(&|s| {
-                        s.active = true;
-                        s.error = None;
-                        s.pose = Some(pose.clone());
-                    });
-                }
-                Job::Step {
-                    dt,
-                    controls,
-                    aspect,
-                } => {
-                    let Some(session) = session.as_mut() else {
-                        return Ok(());
-                    };
-                    last_input = controls;
-                    record(
-                        &mut recording,
-                        Event::Step {
-                            dt,
-                            controls,
-                            aspect,
-                        },
-                    );
-                    let advanced = driver.step(session, dt, controls, aspect, |_| {})?;
-                    if advanced {
-                        let mut pose = convert(&session.pose())?;
-                        last_pos = Some(pose.pos);
-                        pose.score = session.score();
-                        if states.last().is_none_or(|(state, _)| *state != pose.state) {
-                            if states.len() == 6 {
-                                states.remove(0);
+                    Job::Step {
+                        dt,
+                        controls,
+                        aspect,
+                    } => {
+                        let Some(session) = session.as_mut() else {
+                            return Ok(());
+                        };
+                        last_input = controls;
+                        record(
+                            &mut recording,
+                            Event::Step {
+                                dt,
+                                controls,
+                                aspect,
+                            },
+                        );
+                        let advanced = driver.step(session, dt, controls, aspect, |_| {})?;
+                        if advanced {
+                            let mut pose = convert(&session.pose())?;
+                            last_pos = Some(pose.pos);
+                            pose.score = session.score();
+                            if states.last().is_none_or(|(state, _)| *state != pose.state) {
+                                if states.len() == 6 {
+                                    states.remove(0);
+                                }
+                                states.push((pose.state.clone(), pose.tick));
                             }
-                            states.push((pose.state.clone(), pose.tick));
+                            set(&|s| s.pose = Some(pose.clone()));
                         }
-                        set(&|s| s.pose = Some(pose.clone()));
+                    }
+                    Job::Suspend => {
+                        if let Some(session) = session.as_mut() {
+                            record(&mut recording, Event::Suspend);
+                            driver.suspend(session);
+                        }
+                        set(&|s| s.active = false);
                     }
                 }
-                Job::Suspend => {
-                    if let Some(session) = session.as_mut() {
-                        record(&mut recording, Event::Suspend);
-                        driver.suspend(session);
-                    }
-                    set(&|s| s.active = false);
-                }
-            }
-            Ok(())
-        })();
+                Ok(())
+            }))
+            .unwrap_or_else(|panic| {
+                Err(format!(
+                    "the skate engine crashed: {}",
+                    panic_message(&*panic)
+                ))
+            });
         if let Err(e) = result {
             if riding {
                 broken = true;
