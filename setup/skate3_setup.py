@@ -1,6 +1,6 @@
 """Skate 3 for Garry's Mod setup: pick your own Skate 3 (Xbox 360) disc image
 or extracted game, and this finds Garry's Mod, installs the skate module into
-garrysmod/lua/bin and converts the game data the mod needs into
+garrysmod/lua/bin and the addon into garrysmod/addons/skate3, and converts the game data the mod needs into
 garrysmod/data/skate3. Run it once, and again after an update.
 
 Nothing from the game is downloaded or bundled: everything comes off the disc
@@ -103,6 +103,15 @@ def module_dir():
     return None
 
 
+def addon_dir():
+    """The Lua addon: inside the app, in a source checkout, or in the CI
+    download (skate3-gmod/garrysmod/addons/skate3/lua)."""
+    for folder in (ROOT / 'addon/lua', HERE.parent / 'addon/lua', HERE.parent / 'garrysmod/addons/skate3/lua'):
+        if (folder / 'autorun').is_dir():
+            return folder
+    return None
+
+
 def engine_dir():
     """The engine's converters: bundled in the app, or SKATE3_ENGINE when
     running from source (the Linux script fetches them there)."""
@@ -141,6 +150,14 @@ def install(selected, gmod, report):
     for m in MODULES:
         shutil.copy2(modules / m, bin_dir / m)
     report(f'Installed the skate module in {bin_dir}')
+    addon = addon_dir()
+    if addon is None:
+        raise RuntimeError('The Lua addon is missing from this setup.')
+    # Replaced whole, so files an update removed don't linger.
+    lua = gmod / 'addons/skate3/lua'
+    shutil.rmtree(lua, ignore_errors=True)
+    shutil.copytree(addon, lua)
+    report(f'Installed the addon in {lua.parent}')
 
     data = gmod / 'data/skate3'
     data.parent.mkdir(parents=True, exist_ok=True)
@@ -178,6 +195,8 @@ def self_test():
             raise RuntimeError(f'{name}: {error}') from error
     if module_dir() is None:
         raise RuntimeError('skate modules missing')
+    if addon_dir() is None:
+        raise RuntimeError('Lua addon missing')
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 
@@ -193,7 +212,7 @@ def window(gmod):
     ttk.Label(frame, text='Skate 3 for Garry\'s Mod', font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
     ttk.Label(frame, justify='left', wraplength=620, text=(
         'Pick your own Skate 3 (Xbox 360) disc image (.iso), or default.xex in an extracted copy. '
-        'Setup installs the skate module and converts what the mod needs from your disc. '
+        'Setup installs the skate mod and converts what it needs from your disc. '
         'Nothing is downloaded from the game. It takes a few minutes and runs once.')).pack(anchor='w', pady=(6, 12))
 
     target = tk.StringVar(value=str(gmod) if gmod else '')

@@ -30,11 +30,11 @@ The Skate 3 host is a git dependency on
    the latest CI run and unzip it.
 2. Run `skate3-gmod-setup` and pick your Skate 3 (Xbox 360) disc image
    (`.iso`), or `default.xex` in an extracted copy. It finds Garry's Mod,
-   installs the skate module into `garrysmod/lua/bin` and converts what the
-   mod needs from your disc into `garrysmod/data/skate3`. Without a window:
-   `skate3-gmod-setup --game <iso or default.xex> [--gmod <garrysmod folder>]`.
-3. Add the addon (the `garrysmod/addons/skate3` folder from
-   **skate3-gmod-linux-x64**) and use the x86-64 branch, as in steps 3 to 5 below.
+   installs the skate module into `garrysmod/lua/bin` and the addon into
+   `garrysmod/addons/skate3`, and converts what the mod needs from your disc
+   into `garrysmod/data/skate3`. Run it again after each update. Without a
+   window: `skate3-gmod-setup --game <iso or default.xex> [--gmod <garrysmod folder>]`.
+3. Use the x86-64 branch and a controller, as in steps 4 and 5 below.
 
 ## Install (Steam Deck / SteamOS)
 

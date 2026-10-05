@@ -59,6 +59,7 @@ def main():
             '--copy-metadata', 'numpy', '--copy-metadata', 'Pillow',
             '--add-data', f'{stage / "tools"}{sep}tools',
             '--add-data', f'{bin_dir}{sep}bin',
+            '--add-data', f'{HERE.parent / "addon/lua"}{sep}addon/lua',
             '--distpath', str(args.out.resolve()),
             '--workpath', str(Path(tmp) / 'work'), '--specpath', str(Path(tmp) / 'spec'),
         ]
