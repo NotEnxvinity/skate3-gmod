@@ -330,6 +330,8 @@ local BOARD_COLOR, BODY_COLOR, RAIL_COLOR = Color(255, 200, 60), Color(120, 200,
 
 hook.Add("PostDrawOpaqueRenderables", "skate3_board", function(_, skybox)
 	if skybox or not active or not pose then return end
+	-- The skater's model draws the board itself; this covers riding without one.
+	if Skater.HasModel() and Skater.HasBoard() then return end
 	if not Skater.DrawBoard(pose) then
 		local pos = V(pose.pos)
 		render.DrawWireframeBox(pos, V(pose.forward):AngleEx(V(pose.up)), BOARD_MIN, BOARD_MAX, BOARD_COLOR, true)

@@ -354,19 +354,23 @@ function Skater.ShowModel(ply)
 		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
-		if cv_bones:GetString() == "callback" then
+		local callback = cv_bones:GetString() == "callback"
+		if callback then
 			model:AddCallback("BuildBonePositions", BuildBones)
-		else
+		end
+		model.RenderOverride = function(self, flags)
 			-- Pose the bones right before drawing, after setting up the whole
 			-- skeleton. Inside the engine's own setup (the callback) other
 			-- views like portals set up only part of it and refuse the rest.
-			model.RenderOverride = function(self, flags)
-				if pose and pose.bones then
-					self:SetupBones()
-					BuildBones(self, self:GetBoneCount())
-				end
-				self:DrawModel(flags)
+			if not callback and pose and pose.bones then
+				self:SetupBones()
+				BuildBones(self, self:GetBoneCount())
 			end
+			self:DrawModel(flags)
+			-- The board draws with the skater rather than from a render hook:
+			-- another addon's hook returning a value skips every hook after
+			-- it, which hid the board on some maps.
+			if pose then Skater.DrawBoard(pose) end
 		end
 		model:SetRenderBounds(Vector(-96, -96, -32), Vector(96, 96, 128))
 	end
@@ -392,6 +396,10 @@ end
 function Skater.HideModel()
 	pose = nil
 	if IsValid(model) then model:SetNoDraw(true) end
+end
+
+function Skater.HasBoard()
+	return data ~= nil
 end
 
 function Skater.HasModel()
