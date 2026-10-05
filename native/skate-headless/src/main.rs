@@ -2,6 +2,7 @@
 //!
 //!   skate-headless [--assets <converted data dir>] [--ticks N]
 //!   skate-headless --assets <dir> --replay <ride.sk3r>
+//!   skate-headless --assets <dir> --soak <seconds>
 //!
 //! Builds a test park (floor plus a ledge) from Source-style brushes, finds its
 //! grind rails, and with `--assets` drops a skater on it and ticks the
@@ -9,6 +10,10 @@
 //!
 //! `--replay` instead plays back a ride the mod saved when it glitched
 //! (garrysmod/data/skate3/rides), to see whether and where it breaks again.
+//!
+//! `--soak` rides the test park for that long at 60 frames a second, driven
+//! exactly as the game drives it, and prints the process's memory as it goes,
+//! to tell a leak in the simulation from one in the game.
 
 use glam::Vec3;
 use skate_bridge::bridge::{Controls, Session};
@@ -19,15 +24,17 @@ fn main() {
     let mut assets = None;
     let mut ticks = 300u32;
     let mut replay = None;
+    let mut soak = None;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--assets" => assets = args.next(),
             "--ticks" => ticks = args.next().and_then(|n| n.parse().ok()).unwrap_or(ticks),
             "--replay" => replay = args.next(),
+            "--soak" => soak = args.next().and_then(|n| n.parse::<u32>().ok()),
             _ => {
                 eprintln!(
-                    "usage: skate-headless [--assets <dir>] [--ticks N] [--replay <ride.sk3r>]"
+                    "usage: skate-headless [--assets <dir>] [--ticks N] [--replay <ride.sk3r>] [--soak <seconds>]"
                 );
                 std::process::exit(2);
             }
@@ -72,6 +79,19 @@ fn main() {
         println!("no --assets given; skipping the simulation");
         return;
     };
+    if let Some(seconds) = soak {
+        let result = std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || run_soak(&assets, park, seconds))
+            .expect("spawn skate thread")
+            .join()
+            .expect("skate thread panicked");
+        if let Err(e) = result {
+            eprintln!("skate: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     // The host decodes animation banks recursively; give it the stack the
     // mashup gives its skate thread.
     let result = std::thread::Builder::new()
@@ -134,6 +154,56 @@ fn simulate(assets: &str, park: world::World, ticks: u32) -> Result<(), String> 
         f64::from(ticks) / elapsed,
         f64::from(ticks) * f64::from(session.period()) / elapsed,
     );
+    Ok(())
+}
+
+/// Resident memory in MB, from /proc (Linux only).
+fn resident_mb() -> Option<f64> {
+    let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
+    let pages = statm.split_whitespace().nth(1)?.parse::<f64>().ok()?;
+    Some(pages * 4096. / (1024. * 1024.))
+}
+
+/// Rides the park through the Driver, as the game does every frame, and
+/// prints memory every ten seconds of riding.
+fn run_soak(assets: &str, park: world::World, seconds: u32) -> Result<(), String> {
+    let mut session = Session::new(
+        std::path::Path::new(assets),
+        park.triangles,
+        park.rails,
+        [0.; 3],
+        0.,
+    )?;
+    let mut driver = Driver::default();
+    driver.activate(
+        &mut session,
+        collision::to_skate(Vec3::ZERO).to_array(),
+        0.,
+        16. / 9.,
+    )?;
+    let mb = |label: &str| match resident_mb() {
+        Some(mb) => println!("{label}: {mb:.0} MB"),
+        None => println!("{label}: memory unknown"),
+    };
+    mb("activated");
+    let frames = seconds * 60;
+    for frame in 1..=frames {
+        let controls = Controls {
+            buttons: if frame % PUSH_EVERY < PUSH_HOLD {
+                BUTTON_A
+            } else {
+                0
+            },
+            ..Controls::default()
+        };
+        driver.step(&mut session, 1. / 60., controls, 16. / 9., |_| {})?;
+        // What the game reads back every frame.
+        let pose = session.pose();
+        let _score = session.score();
+        if frame % 600 == 0 {
+            mb(&format!("{}s, {}", frame / 60, pose.state));
+        }
+    }
     Ok(())
 }
 
