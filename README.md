@@ -18,11 +18,23 @@ Work in progress. See [docs/architecture.md](docs/architecture.md) for the plan.
 | `native/skate-headless` | CLI that runs a skater on a test park without Gmod (milestone 1) |
 | `native/gmod-skate` | `gmcl_skate3`, the binary module: Lua bindings, BSP collision, worker thread, gamepad |
 | `addon/` | The Lua addon: `skate3_toggle`, camera, server position sync |
-| `setup/` | `skate3-gmod-setup.sh`: converts your `default.xex` data on Linux |
+| `setup/` | The setup app (`skate3_setup.py`, reads ISOs with `xdvdfs.py`) and `skate3-gmod-setup.sh`, the Linux script it grew from |
 
 The Skate 3 host is a git dependency on
 [chasmlol/2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)'s
 `skate-host` (built from the engine at `cb79689`); none of its code is copied in.
+
+## Install with the setup app (Windows or Linux)
+
+1. Download **skate3-gmod-setup-Windows** or **skate3-gmod-setup-Linux** from
+   the latest CI run and unzip it.
+2. Run `skate3-gmod-setup` and pick your Skate 3 (Xbox 360) disc image
+   (`.iso`), or `default.xex` in an extracted copy. It finds Garry's Mod,
+   installs the skate module into `garrysmod/lua/bin` and converts what the
+   mod needs from your disc into `garrysmod/data/skate3`. Without a window:
+   `skate3-gmod-setup --game <iso or default.xex> [--gmod <garrysmod folder>]`.
+3. Add the addon (the `garrysmod/addons/skate3` folder from
+   **skate3-gmod-linux-x64**) and use the x86-64 branch, as in steps 3 to 5 below.
 
 ## Install (Steam Deck / SteamOS)
 

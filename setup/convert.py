@@ -9,7 +9,8 @@ chasmlol/2010-rust-rewrite-mashup (Apache-2.0).
 
     python convert.py --engine <engine checkout> --xex <default.xex> --out <folder>
 
-Writes <folder>/assets on success; progress lines go to stdout.
+Writes <folder>/assets on success, replacing only that, with the log beside
+it as <folder>/conversion.log; progress lines go to stdout.
 """
 from pathlib import Path
 import argparse, shutil, sys, tempfile, traceback
@@ -28,10 +29,10 @@ PRODUCED = [
 ]
 
 
-def convert(engine, xex, out):
+def convert(engine, xex, out, report=None):
     xex = xex.resolve()
     if xex.suffix.lower() == '.iso':
-        raise RuntimeError('ISO files are not supported. Extract the disc (extract-xiso -x) and select its default.xex.')
+        raise RuntimeError('Give the ISO to skate3_setup.py, which reads it directly, or select default.xex in an extracted copy.')
     if xex.name.lower() != 'default.xex' or not xex.is_file():
         raise RuntimeError(f'Select default.xex from an extracted Skate 3 (Xbox 360) game folder, not {xex.name}.')
     game = xex.parent
@@ -48,8 +49,9 @@ def convert(engine, xex, out):
     shutil.rmtree(stage, ignore_errors=True)
     stage.mkdir(parents=True)
 
-    def report(text):
-        print(text, flush=True)
+    if report is None:
+        def report(text):
+            print(text, flush=True)
 
     with tempfile.TemporaryDirectory(prefix='skate3-gmod-', dir=stage.parent) as work, \
             (stage / 'conversion.log').open('w', encoding='utf-8') as log:
@@ -61,8 +63,14 @@ def convert(engine, xex, out):
     for needed in PRODUCED:
         if not (assets / needed).is_file():
             raise RuntimeError(f'Conversion finished without {needed}. See {stage / "conversion.log"}.')
-    shutil.rmtree(out, ignore_errors=True)
-    stage.rename(out)
+    # Swap in only the converted data: the mod keeps its own files (error
+    # logs, saved rides) in the same folder.
+    out.mkdir(parents=True, exist_ok=True)
+    shutil.rmtree(out / 'assets', ignore_errors=True)
+    assets.rename(out / 'assets')
+    (out / 'conversion.log').unlink(missing_ok=True)
+    (stage / 'conversion.log').rename(out / 'conversion.log')
+    shutil.rmtree(stage, ignore_errors=True)
     report(f'Skate 3 data ready in {out / "assets"}')
 
 
