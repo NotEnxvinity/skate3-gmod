@@ -1,12 +1,13 @@
 -- Skate sounds, driven by the skater's state each frame: rolling and grinding
 -- loops that follow speed, and one-shots for pops, landings and bails.
 --
--- These are Half-Life 2 sounds every Garry's Mod install already has, standing
--- in until real skate sounds replace them; swap paths in SOUNDS to change one.
+-- The classic set is Half-Life 2 sounds every Garry's Mod install has. The
+-- disc set is Skate 3's own, which setup decodes from the player's disc into
+-- sound/skate3; anything it hasn't mapped yet falls back to the classic one.
 
 local Sounds = {}
 
-local SOUNDS = {
+local HL2 = {
 	roll = "physics/concrete/concrete_scrape_smooth_loop1.wav",
 	grind = "physics/metal/metal_grenade_scrape_rough_loop1.wav",
 	pop = { "physics/wood/wood_plank_impact_hard1.wav", "physics/wood/wood_plank_impact_hard4.wav" },
@@ -15,7 +16,50 @@ local SOUNDS = {
 }
 
 local cv_volume = CreateClientConVar("skate3_volume", "1", true, false, "Skate sound volume, 0 to 1", 0, 1)
-local cv_pack = CreateClientConVar("skate3_sounds", "hl2", true, false, "Skate sounds: hl2 (the classic Half-Life 2 ones) or off")
+local cv_pack = CreateClientConVar("skate3_sounds", "hl2", true, false,
+	"Skate sounds: hl2 (the classic Half-Life 2 ones), disc (Skate 3's own, installed by setup) or off")
+
+-- Skate 3 rolls on recordings of each surface, looped; Source materials map
+-- onto them here.
+local ROLL = {
+	[MAT_WOOD] = "wood_ramp_hard",
+	[MAT_METAL] = "metal_smooth_hard",
+	[MAT_GRATE] = "metal_smooth_hard",
+	[MAT_VENT] = "metal_smooth_hard",
+	[MAT_CONCRETE] = "concrete_smooth_hard",
+	[MAT_TILE] = "concrete_smooth_soft",
+	[MAT_DIRT] = "asphalt_rough_hard",
+	[MAT_SAND] = "asphalt_rough_hard",
+	[MAT_GRASS] = "asphalt_rough_hard",
+	[MAT_SNOW] = "asphalt_rough_hard",
+}
+local ROLL_DEFAULT = "asphalt_smooth_hard"
+
+function Sounds.HasDisc()
+	return file.Exists("sound/skate3/index.txt", "GAME")
+end
+
+local ground, nextTrace = ROLL_DEFAULT, 0
+
+-- The grain for what's under the board, checked a few times a second.
+local function RollSound(ent)
+	if CurTime() >= nextTrace then
+		nextTrace = CurTime() + 0.25
+		local pos = ent:GetPos()
+		local tr = util.TraceLine({ start = pos + Vector(0, 0, 8), endpos = pos - Vector(0, 0, 40), filter = ent })
+		local name = tr.Hit and ROLL[tr.MatType] or ROLL_DEFAULT
+		ground = file.Exists("sound/skate3/roll/" .. name .. ".wav", "GAME") and name or ROLL_DEFAULT
+	end
+	return "skate3/roll/" .. ground .. ".wav"
+end
+
+-- The sound to use for `name`, from the set the player picked.
+local function Path(name, ent)
+	if cv_pack:GetString() == "disc" and Sounds.HasDisc() then
+		if name == "roll" then return RollSound(ent) end
+	end
+	return HL2[name]
+end
 
 -- Which kind of contact a skater state is.
 local function Kind(state)
@@ -30,19 +74,28 @@ end
 local loops = {}
 local last
 
+-- A looping sound for `name`, swapped when its entity or sound changes (the
+-- disc's rolling sound follows the surface).
 local function Loop(name, ent)
+	local path = Path(name, ent)
 	local s = loops[name]
-	if not s or s.ent ~= ent then
+	if not s or s.ent ~= ent or s.path ~= path then
+		local volume = s and s.on and s.volume
 		if s then s.patch:Stop() end
-		s = { patch = CreateSound(ent, SOUNDS[name]), ent = ent }
+		s = { patch = CreateSound(ent, path), ent = ent, path = path }
 		loops[name] = s
+		if volume then
+			s.patch:PlayEx(volume, 100)
+			s.on, s.volume = true, volume
+		end
 	end
 	return s.patch
 end
 
 local function Play(name, ent, level)
-	local list = SOUNDS[name]
-	ent:EmitSound(list[math.random(#list)], 75, math.random(95, 105), level * cv_volume:GetFloat())
+	local list = Path(name, ent)
+	if istable(list) then list = list[math.random(#list)] end
+	ent:EmitSound(list, 75, math.random(95, 105), level * cv_volume:GetFloat())
 end
 
 -- Called every frame while skating, with the latest pose.
@@ -70,7 +123,8 @@ function Sounds.Update(ent, pose)
 			roll:PlayEx(0, 100)
 			loops.roll.on = true
 		end
-		roll:ChangeVolume(math.Clamp(speed / 10, 0.05, 0.6) * volume, 0.1)
+		loops.roll.volume = math.Clamp(speed / 10, 0.05, 0.6) * volume
+		roll:ChangeVolume(loops.roll.volume, 0.1)
 		roll:ChangePitch(math.Clamp(70 + speed * 6, 70, 130), 0.1)
 	elseif loops.roll.on then
 		roll:FadeOut(0.15)

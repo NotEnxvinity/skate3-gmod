@@ -1,10 +1,12 @@
 """Packages the setup app with PyInstaller: skate3_setup.py plus the engine's
-converters (at the revision the skate host was built from) and both skate
-modules, as one executable for the platform it runs on.
+converters (at the revision the skate host was built from), both skate
+modules and vgmstream (which decodes the disc's sounds), as one executable for
+the platform it runs on.
 
-    python setup/package.py --engine <engine checkout> --modules <folder> --out <folder>
+    python setup/package.py --engine <engine checkout> --modules <folder> --vgmstream <folder> --out <folder>
 
-`--modules` holds gmcl_skate3_win64.dll and gmcl_skate3_linux64.dll.
+`--modules` holds gmcl_skate3_win64.dll and gmcl_skate3_linux64.dll;
+`--vgmstream` holds that platform's vgmstream-cli release, with its licence.
 """
 from pathlib import Path
 import argparse, os, shutil, subprocess, sys, tempfile
@@ -37,11 +39,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--engine', type=Path, required=True)
     parser.add_argument('--modules', type=Path, required=True)
+    parser.add_argument('--vgmstream', type=Path, required=True)
     parser.add_argument('--out', type=Path, required=True)
     args = parser.parse_args()
     for m in MODULES:
         if not (args.modules / m).is_file():
             raise SystemExit(f'missing {args.modules / m}')
+    if not any((args.vgmstream / name).is_file() for name in ('vgmstream-cli', 'vgmstream-cli.exe')):
+        raise SystemExit(f'missing vgmstream-cli in {args.vgmstream}')
     with tempfile.TemporaryDirectory() as tmp:
         stage = Path(tmp) / 'stage'
         stage_tools(args.engine.resolve(), stage)
@@ -60,6 +65,7 @@ def main():
             '--add-data', f'{stage / "tools"}{sep}tools',
             '--add-data', f'{bin_dir}{sep}bin',
             '--add-data', f'{HERE.parent / "addon/lua"}{sep}addon/lua',
+            '--add-data', f'{args.vgmstream.resolve()}{sep}vgmstream',
             '--distpath', str(args.out.resolve()),
             '--workpath', str(Path(tmp) / 'work'), '--specpath', str(Path(tmp) / 'spec'),
         ]

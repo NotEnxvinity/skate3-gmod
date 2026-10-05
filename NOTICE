@@ -18,3 +18,8 @@ under the same license.
 native/patches/skate-host-hud.patch modifies that project's skate-host crate
 (at the same commit) to report the trick line in progress and set the skater's stance, under the same
 license. CI applies it to a fresh clone; none of that crate is copied here.
+
+The setup app bundles vgmstream-cli (https://github.com/vgmstream/vgmstream),
+which decodes the sounds on the player's own disc. Its licence ships beside it
+as COPYING; the Windows build's FFmpeg and codec libraries are vgmstream's own
+distribution, unchanged.

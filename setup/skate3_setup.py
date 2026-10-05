@@ -1,7 +1,7 @@
 """Skate 3 for Garry's Mod setup: pick your own Skate 3 (Xbox 360) disc image
 or extracted game, and this finds Garry's Mod, installs the skate module into
-garrysmod/lua/bin and the addon into garrysmod/addons/skate3, and converts the game data the mod needs into
-garrysmod/data/skate3. Run it once, and again after an update.
+garrysmod/lua/bin and the addon into garrysmod/addons/skate3, converts the game data the mod needs into
+garrysmod/data/skate3, and the skate sounds into garrysmod/sound/skate3. Run it once, and again after an update.
 
 Nothing from the game is downloaded or bundled: everything comes off the disc
 you pick, on your own machine.
@@ -11,7 +11,7 @@ you pick, on your own machine.
           [--gmod <garrysmod folder>]
 """
 from pathlib import Path
-import argparse, os, queue, re, runpy, shutil, sys, tempfile, threading, traceback
+import argparse, os, queue, re, runpy, shutil, subprocess, sys, tempfile, threading, traceback
 
 FROZEN = getattr(sys, 'frozen', False)
 # The packaged app carries the engine's converters and the modules here.
@@ -20,7 +20,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import convert, xdvdfs  # noqa: E402
+import audio, convert, xdvdfs  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -30,6 +30,7 @@ FROM_DISC = {
     'data/big/miscboot.big',
     'data/big/db.big',
     'data/content/createacharacter.big',
+    *audio.FROM_DISC,
 }
 FROM_DISC_FOLDERS = ('data/anim/',)
 # The engine's top-level scripts the converters run as steps, and the ones
@@ -165,6 +166,13 @@ def install(selected, gmod, report):
     with tempfile.TemporaryDirectory(prefix='skate3-setup-', dir=data.parent) as work:
         xex = game_folder(selected, Path(work), report)
         convert.convert(engine_dir(), xex, data, report)
+        # The mod plays Half-Life 2 sounds without these, so a problem here
+        # doesn't undo the rest.
+        try:
+            audio.install(xex.parent, gmod / 'sound/skate3', report)
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
     report('All set. Start Garry\'s Mod, load a map and equip the Skateboard.')
 
 
@@ -197,6 +205,10 @@ def self_test():
         raise RuntimeError('skate modules missing')
     if addon_dir() is None:
         raise RuntimeError('Lua addon missing')
+    vgmstream = audio.find_vgmstream()
+    if vgmstream is None:
+        raise RuntimeError('vgmstream-cli missing')
+    subprocess.run([str(vgmstream), '-V'], check=True, capture_output=True)
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 

@@ -15,7 +15,12 @@ jobs:
       - run: cargo test --workspace
       - run: cargo run -p skate-headless
       - run: bash -n setup/skate3-gmod-setup.sh && python3 -m py_compile setup/*.py
-      - run: python3 -m unittest discover -s setup -p 'test_*.py'
+      - name: Setup tests, decoding with vgmstream
+        run: |
+          python3 -m pip install -q numpy==2.2.6
+          mkdir -p vgmstream
+          curl -sSfL https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz | tar xz -C vgmstream
+          SKATE3_VGMSTREAM=$PWD/vgmstream/vgmstream-cli python3 -m unittest discover -s setup -p 'test_*.py'
       - run: sudo apt-get install -y -q luajit && for f in $(find addon -name '*.lua'); do luajit -bl "$f" > /dev/null; done
 
   # Linked against glibc 2.31 with zig, so the module loads inside the Steam
@@ -84,10 +89,24 @@ jobs:
           git -C engine fetch -q --depth 1 origin "$rev"
           git -C engine checkout -q FETCH_HEAD
       - run: python -m pip install -q pyinstaller==6.19.0 numpy==2.2.6 Pillow==11.3.0
+      # Decodes the sounds on the player's disc. Windows gets the tagged
+      # release; the Linux CLI is only published as vgmstream's nightly.
+      - name: Fetch vgmstream
+        run: |
+          mkdir -p vgmstream
+          if [ "$RUNNER_OS" = Windows ]; then
+            curl -sSfL -o vgm.zip https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip
+            unzip -q vgm.zip -d vgmstream
+          else
+            curl -sSfL -o vgm.tgz https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz
+            tar xzf vgm.tgz -C vgmstream
+            curl -sSfL -o vgmstream/COPYING https://raw.githubusercontent.com/vgmstream/vgmstream/r2117/COPYING
+          fi
+          ls vgmstream
       - run: |
           mkdir -p modules
           cp builds/linux-build/gmcl_skate3_linux64.dll builds/windows-build/gmcl_skate3_win64.dll modules/
-          python setup/package.py --engine engine --modules modules --out dist
+          python setup/package.py --engine engine --modules modules --vgmstream vgmstream --out dist
       - run: dist/skate3-gmod-setup --self-test
       - uses: actions/upload-artifact@v4
         with:
