@@ -185,6 +185,8 @@ end
 local HEALTH_EVERY = 5
 local nextHealth = 0
 local worstFrame, hitches = 0, 0
+local lastProcess
+local cv_skip = GetConVar("skate3_debug_skip")
 
 local function Health(now)
 	local dt = FrameTime()
@@ -193,9 +195,14 @@ local function Health(now)
 	if now < nextHealth then return end
 	nextHealth = now + HEALTH_EVERY
 	local process = skate3.Memory and skate3.Memory()
-	print(("[skate3] health: game %s, lua %.1f MB, %d entities, worst frame %.3f s, %d hitches, %s"):format(
-		process and ("%.0f MB"):format(process) or "?", collectgarbage("count") / 1024, #ents.GetAll(),
-		worstFrame, hitches, active and (pose and pose.state or "riding") or "not riding"))
+	local growth = ""
+	if process and lastProcess then growth = (" (%+.1f MB/s)"):format((process - lastProcess) / HEALTH_EVERY) end
+	lastProcess = process
+	local skipping = cv_skip:GetString()
+	print(("[skate3] health: game %s%s, lua %.1f MB, %d entities, worst frame %.3f s, %d hitches, %s%s"):format(
+		process and ("%.0f MB"):format(process) or "?", growth, collectgarbage("count") / 1024, #ents.GetAll(),
+		worstFrame, hitches, active and (pose and pose.state or "riding") or "not riding",
+		skipping ~= "" and ", skipping " .. skipping or ""))
 	worstFrame, hitches = 0, 0
 end
 
@@ -256,11 +263,12 @@ hook.Add("Think", "skate3_step", function()
 			if stepOffFrame % 20 >= 10 and stepOffFrame % 20 < 14 then press = PAD_Y end
 		end
 	end
-	skate3.Step(FrameTime(), ScrW() / ScrH(), press)
-	pose = skate3.GetPose() or pose
+	local skip = Skater.Skip
+	if not skip.step then skate3.Step(FrameTime(), ScrW() / ScrH(), press) end
+	if not skip.pose or not pose then pose = skate3.GetPose() or pose end
 	Skater.UpdateModel(pose)
-	Sounds.Update(LocalPlayer(), pose)
-	if pose and now >= nextSend then
+	if skip.sounds then Sounds.Stop() else Sounds.Update(LocalPlayer(), pose) end
+	if pose and now >= nextSend and not skip.net then
 		nextSend = now + 0.05
 		net.Start("skate3_move")
 		net.WriteVector(V(pose.pos))
@@ -365,7 +373,7 @@ hook.Add("HUDPaint", "skate3_hud", function()
 		line = ("skate3: %s  %.0f km/h  %s   (Y: %s)"):format(pose.state, pose.speed * 3.6, status.pad or "no controller",
 			onFoot and "get on the board" or "step off")
 	end
-	if active then Score.Draw(pose) end
+	if active and not Skater.Skip.score then Score.Draw(pose) end
 	if line then
 		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 48, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
 	end

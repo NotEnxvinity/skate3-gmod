@@ -3,6 +3,19 @@
 
 local Skater = {}
 
+-- For hunting a leak: parts of the per-frame work to switch off while riding,
+-- as a list such as "board,bones". board, bones, model, score, sounds, pose,
+-- step and net.
+local cv_skip = CreateClientConVar("skate3_debug_skip", "", false, false,
+	"Debug: per-frame work to skip, comma separated (board, bones, model, score, sounds, pose, step, net)")
+Skater.Skip = {}
+local function ReadSkip()
+	Skater.Skip = {}
+	for word in cv_skip:GetString():gmatch("[%w_]+") do Skater.Skip[word:lower()] = true end
+end
+ReadSkip()
+cvars.AddChangeCallback("skate3_debug_skip", ReadSkip, "skate3")
+
 -- Rows of a 3x4 transform, as the module returns them.
 local function Mat(t)
 	return Matrix({
@@ -362,15 +375,15 @@ function Skater.ShowModel(ply)
 			-- Pose the bones right before drawing, after setting up the whole
 			-- skeleton. Inside the engine's own setup (the callback) other
 			-- views like portals set up only part of it and refuse the rest.
-			if not callback and pose and pose.bones then
+			if not callback and pose and pose.bones and not Skater.Skip.bones then
 				self:SetupBones()
 				BuildBones(self, self:GetBoneCount())
 			end
-			self:DrawModel(flags)
+			if not Skater.Skip.model then self:DrawModel(flags) end
 			-- The board draws with the skater rather than from a render hook:
 			-- another addon's hook returning a value skips every hook after
 			-- it, which hid the board on some maps.
-			if pose then Skater.DrawBoard(pose) end
+			if pose and not Skater.Skip.board then Skater.DrawBoard(pose) end
 		end
 		model:SetRenderBounds(Vector(-96, -96, -32), Vector(96, 96, 128))
 	end
