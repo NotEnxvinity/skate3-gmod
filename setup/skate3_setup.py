@@ -1,7 +1,8 @@
 """Skate 3 for Garry's Mod setup: pick your own Skate 3 (Xbox 360) disc image
 or extracted game, and this finds Garry's Mod, installs the skate module into
-garrysmod/lua/bin and the addon into garrysmod/addons/skate3, converts the game data the mod needs into
+garrysmod/lua/bin, converts the game data the mod needs into
 garrysmod/data/skate3, and the skate sounds into garrysmod/sound/skate3. Run it once, and again after an update.
+The Lua addon itself comes from the Steam Workshop.
 
 Nothing from the game is downloaded or bundled: everything comes off the disc
 you pick, on your own machine.
@@ -9,6 +10,9 @@ you pick, on your own machine.
     skate3-gmod-setup                    the setup window
     skate3-gmod-setup --game <iso|xex>   the same without a window
           [--gmod <garrysmod folder>]
+          [--with-addon]                 also install the Lua addon, for
+                                         testing a build the Workshop
+                                         doesn't have yet
 """
 from pathlib import Path
 import argparse, os, queue, re, runpy, shutil, sys, tempfile, threading, traceback
@@ -140,7 +144,27 @@ def game_folder(selected, work, report):
     return selected
 
 
-def install(selected, gmod, report):
+def install_addon(gmod, wanted, report):
+    """The Lua normally comes from the Workshop. A copy in addons/skate3 (from
+    an older setup, or a test build) would load instead of it, so it's only
+    kept when asked for."""
+    local = gmod / 'addons/skate3'
+    if not wanted:
+        if (local / 'lua/skate3').is_dir():
+            shutil.rmtree(local, ignore_errors=True)
+            report(f'Removed the old addon copy in {local}; the Workshop one is used now')
+        report('Subscribe to "Skate 3 Skateboard" on the Steam Workshop if you haven\'t yet')
+        return
+    addon = addon_dir()
+    if addon is None:
+        raise RuntimeError('The Lua addon is missing from this setup.')
+    # Replaced whole, so files an update removed don't linger.
+    shutil.rmtree(local / 'lua', ignore_errors=True)
+    shutil.copytree(addon, local / 'lua')
+    report(f'Installed the addon in {local}; it loads instead of the Workshop one until setup runs without it')
+
+
+def install(selected, gmod, report, with_addon=False):
     gmod = Path(gmod)
     if not (gmod / 'gameinfo.txt').is_file() and not (gmod / 'lua').is_dir():
         raise RuntimeError(f"{gmod} doesn't look like a garrysmod folder.")
@@ -152,14 +176,7 @@ def install(selected, gmod, report):
     for m in MODULES:
         shutil.copy2(modules / m, bin_dir / m)
     report(f'Installed the skate module in {bin_dir}')
-    addon = addon_dir()
-    if addon is None:
-        raise RuntimeError('The Lua addon is missing from this setup.')
-    # Replaced whole, so files an update removed don't linger.
-    lua = gmod / 'addons/skate3/lua'
-    shutil.rmtree(lua, ignore_errors=True)
-    shutil.copytree(addon, lua)
-    report(f'Installed the addon in {lua.parent}')
+    install_addon(gmod, with_addon, report)
 
     data = gmod / 'data/skate3'
     data.parent.mkdir(parents=True, exist_ok=True)
@@ -231,7 +248,8 @@ def window(gmod):
     ttk.Label(frame, text='Skate 3 for Garry\'s Mod', font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
     ttk.Label(frame, justify='left', wraplength=620, text=(
         'Pick your own Skate 3 (Xbox 360) disc image (.iso), or default.xex in an extracted copy. '
-        'Setup installs the skate mod and converts what it needs from your disc. '
+        'Setup installs the skate engine and converts what it needs from your disc; '
+        'the addon itself comes from the Steam Workshop. '
         'Nothing is downloaded from the game. It takes a few minutes and runs once.')).pack(anchor='w', pady=(6, 12))
 
     target = tk.StringVar(value=str(gmod) if gmod else '')
@@ -245,6 +263,10 @@ def window(gmod):
         if picked:
             target.set(picked)
     ttk.Button(row, text='Change...', command=browse_gmod).pack(side='left')
+
+    with_addon = tk.BooleanVar(value=False)
+    ttk.Checkbutton(frame, variable=with_addon, text=(
+        'Also install the Lua addon (only for testing a build that isn\'t on the Workshop yet)')).pack(anchor='w', pady=(10, 0))
 
     # Above the log, so a short window can't push it out of sight.
     button = ttk.Button(frame, text='Select your Skate 3 disc...')
@@ -271,10 +293,11 @@ def window(gmod):
             return
         button.configure(state='disabled')
         progress.start()
+        wanted = with_addon.get()
 
         def work():
             try:
-                install(picked, target.get(), lambda text: messages.put(('log', text)))
+                install(picked, target.get(), lambda text: messages.put(('log', text)), wanted)
                 messages.put(('done', None))
             except Exception as error:
                 traceback.print_exc()
@@ -310,6 +333,8 @@ def main():
     parser = argparse.ArgumentParser(description='Skate 3 for Garry\'s Mod setup')
     parser.add_argument('--game', type=Path, help='your Skate 3 disc image (.iso) or extracted default.xex')
     parser.add_argument('--gmod', type=Path, help='the garrysmod folder (found automatically if left out)')
+    parser.add_argument('--with-addon', action='store_true',
+                        help='also install the Lua addon, for testing a build the Workshop doesn\'t have yet')
     parser.add_argument('--self-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.self_test:
@@ -323,7 +348,7 @@ def main():
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
         return 2
     try:
-        install(args.game, gmod, lambda text: print(text, flush=True))
+        install(args.game, gmod, lambda text: print(text, flush=True), args.with_addon)
     except Exception as error:
         traceback.print_exc()
         print(f'error: {error}', file=sys.stderr)

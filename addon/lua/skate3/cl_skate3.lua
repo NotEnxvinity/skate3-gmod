@@ -48,7 +48,7 @@ local function Load()
 		return
 	end
 	if not file.Exists("lua/bin/" .. MODULE, "MOD") then
-		Say("The skate module is missing: put " .. MODULE .. " in garrysmod/lua/bin.")
+		Say("Skate 3 mode needs its setup app, run once with your own Skate 3 disc: github.com/NotEnxvinity/skate3-gmod/releases")
 		return
 	end
 	local ok, err = pcall(require, "skate3")
@@ -294,7 +294,10 @@ concommand.Add("skate3_camera_cycle", function()
 end, nil, "Switch the skate camera between low, normal and high")
 
 hook.Add("CalcView", "skate3_view", function()
-	if not active or not pose or not pose.camera then return end
+	if not active or not pose or not pose.camera or Skater.Skip.view then return end
+	-- Looking through something else, such as the camera tool's camera, so
+	-- leave the view to it.
+	if GetViewEntity() ~= LocalPlayer() then return end
 	local c = pose.camera
 	local origin, forward, up = V(c.pos), V(c.forward), V(c.up)
 	local lift = CAMERA_HEIGHTS[cv_camera:GetString()] or 0
