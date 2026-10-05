@@ -153,6 +153,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     // Everything the session was fed since it was built, saved when it
     // breaks so skate-headless can replay it.
     let mut recording: Option<Recording> = None;
+    let mut recording_full = false;
     let mut last_input = Controls::default();
     let mut last_pos: Option<Vec3> = None;
     // The skater's last few states and the tick each began, for error reports.
@@ -224,6 +225,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                                 recording = map
                                     .as_ref()
                                     .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
+                                recording_full = false;
                             }
                         }
                         set(&|s| {
@@ -251,15 +253,17 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             driver = Driver::default();
                             recording =
                                 Some(Recording::new(map.triangles.clone(), map.rails.clone()));
+                            recording_full = false;
                             broken = false;
                         }
                         let session = session.as_mut().ok_or("the map isn't loaded yet")?;
                         session.set_stance(goofy);
-                        record(&mut recording, Event::Stance { goofy });
+                        record(&mut recording, &mut recording_full, Event::Stance { goofy });
                         let spawn = collision::to_skate(pos).to_array();
                         let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
                         record(
                             &mut recording,
+                            &mut recording_full,
                             Event::Activate {
                                 spawn,
                                 heading,
@@ -286,6 +290,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         last_input = controls;
                         record(
                             &mut recording,
+                            &mut recording_full,
                             Event::Step {
                                 dt,
                                 controls,
@@ -308,7 +313,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     }
                     Job::Suspend => {
                         if let Some(session) = session.as_mut() {
-                            record(&mut recording, Event::Suspend);
+                            record(&mut recording, &mut recording_full, Event::Suspend);
                             driver.suspend(session);
                         }
                         set(&|s| s.active = false);
@@ -342,11 +347,17 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 if let Some(p) = last_pos {
                     e += &format!(" at setpos {:.0} {:.0} {:.0}", p.x, p.y, p.z);
                 }
-                if let (Some(rec), Some(map)) = (recording.take(), &map) {
-                    match save_ride(&rec, &map.assets) {
+                match (recording.take(), &map) {
+                    (Some(rec), Some(map)) => match save_ride(&rec, &map.assets) {
                         Ok(name) => e += &format!("; ride saved as data/skate3/rides/{name}"),
                         Err(why) => e += &format!("; couldn't save the ride: {why}"),
+                    },
+                    // Every frame is one event, so a high frame rate fills
+                    // the recording sooner.
+                    _ if recording_full => {
+                        e += "; ride not saved: it outgrew the recorder (fps_max 120 makes room)"
                     }
+                    _ => e += "; ride not saved: this session wasn't recorded",
                 }
                 states.clear();
                 if let Some(session) = session.as_mut() {
@@ -369,11 +380,12 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
 
 /// Adds to the recording, dropping it once it is full: a replay needs every
 /// event from the session's start.
-fn record(recording: &mut Option<Recording>, event: Event) {
+fn record(recording: &mut Option<Recording>, full: &mut bool, event: Event) {
     if let Some(rec) = recording
         && !rec.push(event)
     {
         *recording = None;
+        *full = true;
     }
 }
 
