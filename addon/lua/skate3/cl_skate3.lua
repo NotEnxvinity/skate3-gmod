@@ -2,6 +2,7 @@ local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
 include("skate3/cl_menu.lua")
+local Park = include("skate3/cl_park.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -34,6 +35,7 @@ local status = {}
 local nextStatus = 0
 local loadStage, loadStartedAt -- the collision build's current step, for the console
 local nextSend = 0
+local mapBsp -- kept to rebuild the collision when park pieces change
 
 local function Say(...)
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white, ...)
@@ -69,7 +71,8 @@ local function Load()
 		Say("Couldn't read this map's .bsp.")
 		return
 	end
-	local started, loadErr = skate3.LoadMap(bsp)
+	mapBsp = bsp
+	local started, loadErr = skate3.LoadMap(bsp, Park.Triangles())
 	if not started then
 		Say(loadErr)
 		return
@@ -132,6 +135,34 @@ local function Start()
 	SetActive(true)
 	Skater.ShowModel(ply)
 end
+
+-- Placing, moving or removing park pieces rebuilds the map's skate
+-- collision with their triangles. A ride in progress stops for it and
+-- picks up where it was once the new collision is ready.
+local function RebuildCollision()
+	if not loaded or not mapBsp then return end
+	local endedAt, endedOnFoot
+	if active then
+		endedAt = pose and V(pose.pos)
+		endedOnFoot = pose and pose.state and pose.state:find("^Biped") ~= nil
+		Stop()
+	end
+	local extra = Park.Triangles()
+	local ok, err = skate3.LoadMap(mapBsp, extra)
+	if not ok then
+		Say(err)
+		return
+	end
+	rails = nil
+	status = { state = "loading" }
+	print(("[skate3] rebuilding collision with %d park piece triangles"):format(#extra / 9))
+	if endedAt and boardHeld then
+		rideWhenReady = true
+		resumeAt = endedAt
+		resumeOnFoot = endedOnFoot or false
+	end
+end
+hook.Add("Skate3RebuildCollision", "skate3", RebuildCollision)
 
 concommand.Add("skate3_toggle", function()
 	if active then Stop() else Start() end
