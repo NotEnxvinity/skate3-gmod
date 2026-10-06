@@ -258,7 +258,7 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"state");
     lua.push_number(p.tick as f64);
     lua.set_field(-2, c"tick");
-    // Only the bones Lua draws or retargets; the rest are faces and helpers.
+    // Only the bones Lua draws or retargets; the rest are fingers and faces.
     if let Ok(wanted) = WANTED_BONES.lock() {
         lua.new_table();
         for (name, m) in p.bones.iter().filter(|(n, _)| wanted.contains(n)) {
@@ -327,40 +327,6 @@ const BODY_BONES: [&str; 23] = [
     "RIGHTTOEBASE",
 ];
 
-/// The skater's finger joints, which the playermodel's fingers follow.
-const FINGER_BONES: [&str; 30] = [
-    "LEFTHANDTHUMB1",
-    "LEFTHANDTHUMB2",
-    "LEFTHANDTHUMB3",
-    "LEFTHANDINDEX1",
-    "LEFTHANDINDEX2",
-    "LEFTHANDINDEX3",
-    "LEFTHANDMIDDLE1",
-    "LEFTHANDMIDDLE2",
-    "LEFTHANDMIDDLE3",
-    "LEFTHANDRING1",
-    "LEFTHANDRING2",
-    "LEFTHANDRING3",
-    "LEFTHANDPINKY1",
-    "LEFTHANDPINKY2",
-    "LEFTHANDPINKY3",
-    "RIGHTHANDTHUMB1",
-    "RIGHTHANDTHUMB2",
-    "RIGHTHANDTHUMB3",
-    "RIGHTHANDINDEX1",
-    "RIGHTHANDINDEX2",
-    "RIGHTHANDINDEX3",
-    "RIGHTHANDMIDDLE1",
-    "RIGHTHANDMIDDLE2",
-    "RIGHTHANDMIDDLE3",
-    "RIGHTHANDRING1",
-    "RIGHTHANDRING2",
-    "RIGHTHANDRING3",
-    "RIGHTHANDPINKY1",
-    "RIGHTHANDPINKY2",
-    "RIGHTHANDPINKY3",
-];
-
 /// Bones `GetPose` returns: the body's, plus whichever carry board parts.
 static WANTED_BONES: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
@@ -396,12 +362,7 @@ lua_fn!(get_skater, |lua| {
     };
     if let Ok(mut wanted) = WANTED_BONES.lock() {
         wanted.clear();
-        wanted.extend(
-            BODY_BONES
-                .iter()
-                .chain(&FINGER_BONES)
-                .map(|s| s.to_string()),
-        );
+        wanted.extend(BODY_BONES.iter().map(|s| s.to_string()));
         for part in &skater.parts {
             if !wanted.contains(&part.bone) {
                 wanted.push(part.bone.clone());
