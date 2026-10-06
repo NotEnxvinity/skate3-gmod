@@ -26,6 +26,7 @@ local lastRemount = -math.huge
 local resumeAt -- where a glitched ride ended, for hopping back on
 local stepOffUntil -- tapping Y until then, to start off the board
 local resumeOnFoot = false -- the glitched ride ended on foot
+local resumeYaw -- the heading to start at instead of the view's
 local stepOffFrame = 0
 local pose
 local rails
@@ -102,8 +103,8 @@ local function Stop()
 end
 
 local function Start()
-	local at = resumeAt
-	resumeAt = nil
+	local at, yaw = resumeAt, resumeYaw
+	resumeAt, resumeYaw = nil, nil
 	if not loaded then
 		Say("Skate 3 mode isn't available; check the console for why.")
 		return
@@ -122,7 +123,7 @@ local function Start()
 	local ply = LocalPlayer()
 	if not ply:Alive() or ply:InVehicle() then return end
 	local pos = at or ply:GetPos()
-	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, ply:EyeAngles().y, ScrW() / ScrH(),
+	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, yaw or ply:EyeAngles().y, ScrW() / ScrH(),
 		cv_stance:GetString() == "regular" and 0 or 1)
 	if not ok then
 		Say(err)
@@ -206,6 +207,54 @@ local function Health(now)
 	worstFrame, hitches = 0, 0
 end
 
+-- Session markers, as in Skate 3: D-pad down drops one where the skater is
+-- (rolling on four wheels or standing), and holding D-pad up goes back to it,
+-- the hold taking longer the further away it is. Returns true when it just
+-- took the skater back, which restarts the ride.
+local PAD_DPAD_UP, PAD_DPAD_DOWN = 0x0001, 0x0002
+local marker -- { pos, yaw, onFoot }
+local lastButtons = 0
+local holdingSince
+local function SessionMarker(now)
+	local input = skate3.GetInput and skate3.GetInput()
+	local buttons = input and input.buttons or 0
+	local pressed = bit.band(buttons, bit.bnot(lastButtons))
+	lastButtons = buttons
+	if bit.band(pressed, PAD_DPAD_DOWN) ~= 0 and pose and pose.camera then
+		local state = pose.state or ""
+		if state == "PhysicsGround" or state:find("^Biped") then
+			marker = { pos = V(pose.pos), yaw = V(pose.camera.forward):Angle().y, onFoot = state:find("^Biped") ~= nil }
+			Score.Marker("Marker set")
+		else
+			Score.Marker("Can't set a marker here")
+		end
+	end
+	if not marker or bit.band(buttons, PAD_DPAD_UP) == 0 or not pose then
+		if holdingSince then Score.MarkerHold(0) end
+		holdingSince = nil
+		return false
+	end
+	-- Skate 3's timing: a fifth of a second up to 100 m away, a second past
+	-- a kilometre, and nothing within half a metre.
+	local metres = V(pose.pos):Distance(marker.pos) * 0.0254
+	if metres < 0.5 then return false end
+	holdingSince = holdingSince or now
+	local duration = math.Clamp(0.2 + (metres - 100) * 0.8 / 900, 0.2, 1)
+	local progress = math.min((now - holdingSince) / duration, 1)
+	Score.MarkerHold(progress)
+	if progress < 1 then return false end
+	holdingSince = nil
+	Stop()
+	resumeAt, resumeYaw = marker.pos, marker.yaw
+	Start()
+	if active and marker.onFoot then
+		stepOffUntil = RealTime() + STEP_OFF_FOR
+		stepOffFrame = 0
+	end
+	Score.Marker("Back at marker")
+	return true
+end
+
 hook.Add("Think", "skate3_step", function()
 	FollowWeapon()
 	if not loaded then return end
@@ -265,6 +314,7 @@ hook.Add("Think", "skate3_step", function()
 	end
 	local skip = Skater.Skip
 	if not skip.step then skate3.Step(FrameTime(), ScrW() / ScrH(), press) end
+	if SessionMarker(now) then return end
 	if not skip.pose or not pose then pose = skate3.GetPose() or pose end
 	Skater.UpdateModel(pose)
 	if skip.sounds then Sounds.Stop() else Sounds.Update(LocalPlayer(), pose) end

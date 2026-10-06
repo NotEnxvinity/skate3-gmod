@@ -46,6 +46,8 @@ The Skate 3 host is a git dependency on
 5. Plug in a controller, load a map, and equip the **Skateboard** (spawn menu →
    Weapons → Skate 3). You start on foot with the board in hand; **Y** gets
    on and off it, as in Skate 3. Switch weapons to leave skate mode.
+   **D-pad down** drops a session marker; hold **D-pad up** to go back to it
+   (the hold gets longer the further away you are, like Skate 3).
    `skate3_toggle` in the console starts and ends it without the weapon (bind
    it: `bind j skate3_toggle`).
 
