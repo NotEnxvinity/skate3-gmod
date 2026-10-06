@@ -198,36 +198,26 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             triangles: built.triangles.clone(),
                             rails: built.rails.clone(),
                         });
-                        match session.as_mut().filter(|_| !broken) {
-                            // A new map on a warm session swaps collision only.
-                            Some(existing) => {
-                                stage("swapping in the map's collision");
-                                let prepared = existing
-                                    .collision_builder()
-                                    .build(built.triangles, built.rails)?;
-                                existing.install_collision(prepared)?;
-                                // A replay can't swap collision mid-session.
-                                recording = None;
-                            }
-                            None => {
-                                stage("loading the Skate 3 data");
-                                broken = false;
-                                session = None;
-                                recording = None;
-                                session = Some(Session::new(
-                                    &assets,
-                                    built.triangles,
-                                    built.rails,
-                                    [0.; 3],
-                                    0.,
-                                )?);
-                                driver = Driver::default();
-                                recording = map
-                                    .as_ref()
-                                    .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
-                                recording_full = false;
-                            }
-                        }
+                        // A fresh session for every map, even one already
+                        // running: a replay starts from a new session, so one
+                        // whose collision was swapped mid-way couldn't be saved.
+                        stage("loading the Skate 3 data");
+                        broken = false;
+                        session = None;
+                        recording = None;
+                        states.clear();
+                        session = Some(Session::new(
+                            &assets,
+                            built.triangles,
+                            built.rails,
+                            [0.; 3],
+                            0.,
+                        )?);
+                        driver = Driver::default();
+                        recording = map
+                            .as_ref()
+                            .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
+                        recording_full = false;
                         set(&|s| {
                             s.status = Status::Ready;
                             s.triangles = count;
@@ -284,7 +274,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         controls,
                         aspect,
                     } => {
-                        let Some(session) = session.as_mut() else {
+                        // Frames the game sent before it noticed the ride
+                        // stopped: stepping the broken simulation would only
+                        // fail again and bury the first error's report.
+                        let Some(session) = session.as_mut().filter(|_| !broken) else {
                             return Ok(());
                         };
                         last_input = controls;
@@ -312,7 +305,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         }
                     }
                     Job::Suspend => {
-                        if let Some(session) = session.as_mut() {
+                        if let Some(session) = session.as_mut().filter(|_| !broken) {
                             record(&mut recording, &mut recording_full, Event::Suspend);
                             driver.suspend(session);
                         }
