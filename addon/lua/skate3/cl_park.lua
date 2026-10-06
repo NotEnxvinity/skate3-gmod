@@ -21,10 +21,13 @@ spawnmenu.AddCreationTab("Skate 3 Park", function()
 		label:SetWrap(true)
 		label:SetAutoStretchVertical(true)
 		label:SetText("No park pieces yet. Run the Skate 3 setup app again with your disc, and it converts "
-			.. "Skate 3's create-a-park pieces and the Mega Park stadium for this tab.")
+			.. "Skate 3's create-a-park pieces and skateparks for this tab.")
 		return scroll
 	end
-	local categories, order = {}, {}
+	local categories, order = { Presets = {} }, { "Presets" }
+	for _, preset in ipairs(Park.Presets) do
+		table.insert(categories.Presets, { preset = preset.id, name = preset.name, tip = preset.tip })
+	end
 	for _, p in ipairs(index) do
 		if not categories[p.category] then
 			categories[p.category] = {}
@@ -37,7 +40,7 @@ spawnmenu.AddCreationTab("Skate 3 Park", function()
 		cat:Dock(TOP)
 		cat:DockMargin(4, 4, 4, 0)
 		cat:SetLabel(NAMES[name] or name)
-		cat:SetExpanded(name == "Mega" or name == "Stadium")
+		cat:SetExpanded(name == "Mega" or name == "Maps" or name == "Presets")
 		local layout = vgui.Create("DIconLayout", cat)
 		layout:SetSpaceX(4)
 		layout:SetSpaceY(4)
@@ -47,10 +50,18 @@ spawnmenu.AddCreationTab("Skate 3 Park", function()
 			local b = layout:Add("DButton")
 			b:SetText(p.name)
 			b:SetSize(150, 28)
-			b:SetTooltip(("%s (%.0f x %.0f x %.0f)"):format(p.name,
-				p.bounds[2][1] - p.bounds[1][1], p.bounds[2][2] - p.bounds[1][2], p.bounds[2][3] - p.bounds[1][3]))
+			if p.preset then
+				b:SetTooltip(p.tip)
+			else
+				b:SetTooltip(("%s (%.0f x %.0f x %.0f)"):format(p.name,
+					p.bounds[2][1] - p.bounds[1][1], p.bounds[2][2] - p.bounds[1][2], p.bounds[2][3] - p.bounds[1][3]))
+			end
 			b.DoClick = function()
-				RunConsoleCommand("skate3_spawn_piece", p.id)
+				if p.preset then
+					RunConsoleCommand("skate3_spawn_preset", p.preset)
+				else
+					RunConsoleCommand("skate3_spawn_piece", p.id)
+				end
 				surface.PlaySound("ui/buttonclickrelease.wav")
 			end
 		end

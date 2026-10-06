@@ -17,6 +17,7 @@ class ParkTest(unittest.TestCase):
 
     def test_disc_paths_are_lowercased_for_images(self):
         self.assertIn('data/content/worlddist_megapark.big', park.FROM_DISC)
+        self.assertIn('data/content/worlddist_maloofmoneycup.big', park.FROM_DISC)
 
 
 if __name__ == '__main__':

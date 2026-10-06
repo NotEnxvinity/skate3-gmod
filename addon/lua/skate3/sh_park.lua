@@ -21,6 +21,27 @@ function Park.Index()
 	return index or nil
 end
 
+-- Set pieces built from park pieces. Offsets are metres along the preset
+-- (x runs back from where it starts, y across, z up); every piece keeps its
+-- own Skate 3 collision, so they ride as one.
+local PAD = "2c701707000304e5" -- Mega Park Filler Pad X Lrg, 12 x 12 x 6 m
+Park.Presets = {
+	{
+		id = "megaramp",
+		name = "Mega Ramp",
+		tip = "A 12 m start deck and roll-in, a 6 m runway to a 9 m kicker, a 16 m gap, the landing and a 9 m quarter pipe. About 125 m long.",
+		pieces = {
+			{ PAD, 6, 0, 0 }, { PAD, 6, 0, 6 }, -- start deck
+			{ PAD, -6, 0, 0 }, { "2c701707000303c5", 0, 0, 6 }, -- roll-in
+			{ PAD, -18, 0, 0 }, { PAD, -30, 0, 0 }, { PAD, -42, 0, 0 }, -- runway
+			{ "2c701707000303c4", -36, 0, 6 }, -- kicker
+			{ "2c701707000303cf", -88, 0, 0 }, -- landing
+			{ "2c701707000303ce", -100, 0, 0 }, -- quarter pipe
+		},
+	},
+}
+for _, p in ipairs(Park.Presets) do Park.Presets[p.id] = p end
+
 -- A piece's whole data, read once.
 function Park.Get(id)
 	if cache[id] == nil then

@@ -24,9 +24,19 @@ from skate3_formats.retail_collision_mesh import decode_rx2_clustered_meshes  # 
 from skate3_formats.skate3_streams import read_atoc, read_sfil  # noqa: E402
 
 PIECES = 'data/content/parkassets.big'
-STADIUM = 'data/content/worldDIST_MegaPark.big'
+# The skateparks the game keeps as small self-contained worlds, each turned
+# into one big piece: (file, piece id, name).
+MAPS = (
+    ('worldDIST_MegaPark.big', 'megapark_stadium', 'Mega Park Stadium'),
+    ('worldDIST_MaloofMoneyCup.big', 'map_maloof', 'Maloof Money Cup'),
+    ('worldDIST_BlackBoxPark.big', 'map_blackbox', 'Black Box Park'),
+    ('worldDIST_DownTownSkatePark.big', 'map_downtown_park', 'Downtown Skate Park'),
+    ('worldDIST_IndustrialSkatePark.big', 'map_industrial_park', 'Industrial Skate Park'),
+    ('worldDIST_SkateSchool.big', 'map_skate_school', 'Skate School'),
+    ('worldDIST_StartPark.big', 'map_start_park', 'Start Park'),
+)
 # Lowercased, as setup matches paths on a disc image.
-FROM_DISC = {PIECES.lower(), STADIUM.lower()}
+FROM_DISC = {PIECES.lower()} | {('data/content/' + m[0]).lower() for m in MAPS}
 INCHES = 39.3701
 # The park editor's groups, in the order the spawn menu lists them.
 CATEGORIES = ('Mega', 'Vert', 'Street', 'Rails', 'Hubbas', 'Plaza', 'PreMade', 'OTS',
@@ -136,23 +146,28 @@ def pieces(game, report):
             failed += 1
             print(f'park piece {name}: {error}', file=sys.stderr)
     report(f'Converted {len(made)} park pieces' + (f' ({failed} not supported yet)' if failed else ''))
-    try:
-        made.append(stadium(Path(game) / STADIUM, textures))
-        report('Converted the Mega Park stadium')
-    except Exception as error:
-        traceback.print_exc()
-        report(f'Couldn\'t convert the Mega Park stadium ({error}); the park pieces still work.')
+    for file, pid, name in MAPS:
+        path = Path(game) / 'data/content' / file
+        if not path.is_file():
+            continue
+        try:
+            made.append(world(path, pid, name, textures))
+            report(f'Converted {name}')
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t convert {name} ({error}); the rest still works.')
     return made, textures
 
 
-def stadium(path, textures):
-    """The Mega Park stadium: its world stream's render models and collision
-    as one piece, with its origin in the middle of the floor."""
+def world(path, pid, name, textures):
+    """A whole skatepark world (the Mega Park stadium, Maloof, ...): its
+    stream's render models and collision as one piece, with its origin in
+    the middle of the floor."""
     archive = BigArchive(path)
     with tempfile.TemporaryDirectory(prefix='skate3-stadium-') as work:
         work = Path(work)
-        for name in archive.entries:
-            (work / name.rsplit('/', 1)[-1]).write_bytes(archive.read(name))
+        for member in archive.entries:
+            (work / member.rsplit('/', 1)[-1]).write_bytes(archive.read(member))
         assets = {}
         for table in work.glob('*.xst'):
             stream = table.stem.rsplit('_', 1)[1]
@@ -186,7 +201,9 @@ def stadium(path, textures):
             surfaces += s
         except ValueError:
             pass
-    return piece('megapark_stadium', 'Mega Park Stadium', 'Stadium', groups, tris, surfaces)
+    if not groups:
+        raise ValueError('no render models in its stream')
+    return piece(pid, name, 'Maps', groups, tris, surfaces)
 
 
 def install(game, gmod, report=print):
@@ -212,7 +229,7 @@ def install(game, gmod, report=print):
         # extensions; .json is one.
         (data_out / f'{p["id"]}.json').write_text(json.dumps(p, separators=(',', ':')))
         index.append({k: p[k] for k in ('id', 'name', 'category', 'bounds')})
-    order = {c: i for i, c in enumerate(('Stadium',) + CATEGORIES)}
+    order = {c: i for i, c in enumerate(('Maps',) + CATEGORIES)}
     index.sort(key=lambda p: (order.get(p['category'], len(order)), p['name']))
     (data_out / 'index.json').write_text(json.dumps(index, separators=(',', ':')))
     report(f'Installed {len(made)} park pieces and {len(used & set(textures))} textures in {data_out.parent}')
