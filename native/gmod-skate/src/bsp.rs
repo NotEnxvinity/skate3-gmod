@@ -1,14 +1,23 @@
 //! The solid parts of a Source `.bsp`: brushes as plane sets and displacement
 //! surfaces as triangles, in map units (Z up, inches).
 //!
-//! Brushes come from the world's brush list, so brush entities (doors,
-//! func_brush) are treated as static where the map compiled them. Static and
-//! physics props are not in this data; Lua hands those over separately.
+//! Brushes are the world's plus those of solid brush entities (doors,
+//! func_brush, func_wall), which are treated as static where the map compiled
+//! them. Triggers and other non-solid brush entities (spawn zones, buy zones,
+//! func_illusionary) share the brush list with contents that read as solid, so
+//! they're told apart by walking each model's BSP tree and reading the entity
+//! that owns it. Static and physics props are not in this data; Lua hands
+//! those over separately.
 
 use glam::Vec3;
 
 const HEADER_LUMPS: usize = 64;
+const LUMP_ENTITIES: usize = 0;
 const LUMP_PLANES: usize = 1;
+const LUMP_NODES: usize = 5;
+const LUMP_LEAFS: usize = 10;
+const LUMP_MODELS: usize = 14;
+const LUMP_LEAFBRUSHES: usize = 17;
 const LUMP_VERTEXES: usize = 3;
 const LUMP_FACES: usize = 7;
 const LUMP_EDGES: usize = 12;
@@ -32,7 +41,7 @@ pub fn parse(data: &[u8]) -> Result<Solids, String> {
     let bsp = Bsp::new(data)?;
     let planes = bsp.planes()?;
     Ok(Solids {
-        brushes: bsp.brushes(&planes)?,
+        brushes: bsp.brushes(&planes, bsp.solid_brushes().as_ref())?,
         triangles: bsp.displacements(&planes)?,
     })
 }
@@ -122,10 +131,67 @@ impl<'a> Bsp<'a> {
             .collect())
     }
 
-    fn brushes(&self, planes: &[Plane]) -> Result<Vec<Vec<[f32; 4]>>, String> {
+    /// Which brushes belong to the world or a solid brush entity, or None
+    /// when the map's tree can't be read, in which case every brush counts.
+    fn solid_brushes(&self) -> Option<Vec<bool>> {
+        let count = self.lump(LUMP_BRUSHES, 12).ok()?.len() / 12;
+        let models = self.lump(LUMP_MODELS, 48).ok()?;
+        let nodes = self.lump(LUMP_NODES, 32).ok()?;
+        // Version 19 leaves still carry their ambient light cube.
+        let stride = if i32_at(self.data, 4) == 19 { 56 } else { 32 };
+        let leaves = self.lump(LUMP_LEAFS, stride).ok()?;
+        let leaf_brushes = self.lump(LUMP_LEAFBRUSHES, 2).ok()?;
+        let solid_models = self
+            .lump(LUMP_ENTITIES, 1)
+            .map(solid_brush_models)
+            .unwrap_or_default();
+        let mut keep = vec![false; count];
+        let mut seen = vec![false; nodes.len() / 32];
+        for model in std::iter::once(0).chain(solid_models) {
+            let Some(m) = models.get(model * 48..model * 48 + 48) else {
+                continue;
+            };
+            let mut stack = vec![i32_at(m, 36)];
+            while let Some(child) = stack.pop() {
+                if child >= 0 {
+                    let node = child as usize;
+                    // A node visited twice would mean a cycle in a bad file.
+                    if node >= seen.len() || std::mem::replace(&mut seen[node], true) {
+                        continue;
+                    }
+                    let n = &nodes[node * 32..node * 32 + 32];
+                    stack.extend([i32_at(n, 4), i32_at(n, 8)]);
+                } else {
+                    let leaf = (-1 - child) as usize;
+                    let Some(l) = leaves.get(leaf * stride..leaf * stride + stride) else {
+                        continue;
+                    };
+                    let first = u16_at(l, 24) as usize;
+                    for i in first..first + u16_at(l, 26) as usize {
+                        if let Some(b) = leaf_brushes.get(i * 2..i * 2 + 2)
+                            && let Some(k) = keep.get_mut(u16_at(b, 0) as usize)
+                        {
+                            *k = true;
+                        }
+                    }
+                }
+            }
+        }
+        // A world with no brushes at all means the tree didn't read right.
+        keep.contains(&true).then_some(keep)
+    }
+
+    fn brushes(
+        &self,
+        planes: &[Plane],
+        keep: Option<&Vec<bool>>,
+    ) -> Result<Vec<Vec<[f32; 4]>>, String> {
         let sides = self.lump(LUMP_BRUSHSIDES, 8)?;
         let mut out = Vec::new();
-        for brush in self.lump(LUMP_BRUSHES, 12)?.chunks_exact(12) {
+        for (index, brush) in self.lump(LUMP_BRUSHES, 12)?.chunks_exact(12).enumerate() {
+            if keep.is_some_and(|k| !k.get(index).copied().unwrap_or(false)) {
+                continue;
+            }
             let first = i32_at(brush, 0).max(0) as usize;
             // Never trust a count past the sides that exist: a bad one would
             // reserve gigabytes and take the game down with it.
@@ -264,6 +330,67 @@ impl<'a> Bsp<'a> {
     }
 }
 
+/// Brush entities a skater should hit, by model number (`"model" "*3"`):
+/// the func_ ones that stay solid. Triggers and the rest are zones.
+fn solid_brush_models(entities: &[u8]) -> Vec<usize> {
+    const NOT_SOLID: &[&str] = &[
+        "func_illusionary",
+        "func_areaportal",
+        "func_areaportalwindow",
+        "func_clip_vphysics",
+        "func_occluder",
+        "func_dustmotes",
+        "func_dustcloud",
+        "func_smokevolume",
+        "func_precipitation",
+        "func_buyzone",
+        "func_bomb_target",
+        "func_hostage_rescue",
+        "func_no_defuse",
+        "func_nav_blocker",
+        "func_nav_avoid",
+        "func_nav_prefer",
+        "func_ladder",
+        "func_ladderendpoint",
+        "func_water_analog",
+        "func_physbox",
+        "func_physbox_multiplayer",
+        "func_vehicleclip",
+        "func_fish_pool",
+        "func_respawnroom",
+        "func_respawnroomvisualizer",
+        "func_nobuild",
+        "func_regenerate",
+        "func_capturezone",
+        "func_upgradestation",
+    ];
+    let text = String::from_utf8_lossy(entities);
+    let mut out = Vec::new();
+    for block in text.split('{').skip(1) {
+        let block = block.split('}').next().unwrap_or("");
+        let mut fields = block.split('"').skip(1).step_by(2);
+        let (mut class, mut model, mut never_solid) = ("", None, false);
+        while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
+            match key.to_ascii_lowercase().as_str() {
+                "classname" => class = value,
+                "model" => model = value.strip_prefix('*').and_then(|n| n.parse().ok()),
+                // func_brush set to "Never Solid".
+                "solidity" => never_solid = value == "1",
+                _ => {}
+            }
+        }
+        let class = class.to_ascii_lowercase();
+        if let Some(model) = model
+            && class.starts_with("func_")
+            && !NOT_SOLID.contains(&class.as_str())
+            && !never_solid
+        {
+            out.push(model);
+        }
+    }
+    out
+}
+
 fn i32_at(b: &[u8], at: usize) -> i32 {
     i32::from_le_bytes(b[at..at + 4].try_into().unwrap())
 }
@@ -349,6 +476,63 @@ pub(crate) mod tests {
             (LUMP_BRUSHSIDES, sides),
             (LUMP_BRUSHES, brushes),
         ]
+    }
+
+    /// Two box brushes: the world's (model 0) and model 1's, owned by the
+    /// entity in `entities`.
+    fn world_and_entity(entities: &str) -> Vec<u8> {
+        let mut lumps = box_brush(0x1, 6);
+        let brushes = lumps[2].1.clone();
+        lumps[2].1.extend(brushes);
+        let mut models = vec![0u8; 96];
+        models[36..40].copy_from_slice(&0i32.to_le_bytes());
+        models[48 + 36..48 + 40].copy_from_slice(&(-2i32).to_le_bytes());
+        // Node 0, the world's head, has leaf 0 on both sides.
+        let mut node = vec![0u8; 32];
+        node[4..8].copy_from_slice(&(-1i32).to_le_bytes());
+        node[8..12].copy_from_slice(&(-1i32).to_le_bytes());
+        let mut leaves = vec![0u8; 64];
+        for (leaf, brush) in [(0usize, 0u16), (1, 1)] {
+            leaves[leaf * 32 + 24..leaf * 32 + 26].copy_from_slice(&brush.to_le_bytes());
+            leaves[leaf * 32 + 26..leaf * 32 + 28].copy_from_slice(&1u16.to_le_bytes());
+        }
+        let leaf_brushes = [0u16, 1].iter().flat_map(|b| b.to_le_bytes()).collect();
+        lumps.extend([
+            (LUMP_ENTITIES, entities.as_bytes().to_vec()),
+            (LUMP_MODELS, models),
+            (LUMP_NODES, node),
+            (LUMP_LEAFS, leaves),
+            (LUMP_LEAFBRUSHES, leaf_brushes),
+        ]);
+        build(&lumps)
+    }
+
+    #[test]
+    fn keeps_solid_brush_entities_and_drops_zones() {
+        let world = "{\n\"classname\" \"worldspawn\"\n}\n";
+        let with = |entity: &str| {
+            let data = world_and_entity(&format!("{world}{{\n{entity}\n}}\n"));
+            parse(&data).unwrap().brushes.len()
+        };
+        assert_eq!(with(r#""classname" "trigger_multiple" "model" "*1""#), 1);
+        assert_eq!(with(r#""model" "*1" "classname" "func_respawnroom""#), 1);
+        assert_eq!(
+            with(r#""classname" "func_brush" "Solidity" "1" "model" "*1""#),
+            1
+        );
+        assert_eq!(with(r#""classname" "func_wall" "model" "*1""#), 2);
+        assert_eq!(
+            with(r#""classname" "func_brush" "Solidity" "0" "model" "*1""#),
+            2
+        );
+    }
+
+    #[test]
+    fn keeps_every_brush_when_the_tree_is_missing() {
+        let mut lumps = box_brush(0x1, 6);
+        let brushes = lumps[2].1.clone();
+        lumps[2].1.extend(brushes);
+        assert_eq!(parse(&build(&lumps)).unwrap().brushes.len(), 2);
     }
 
     #[test]
