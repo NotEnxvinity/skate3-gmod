@@ -171,7 +171,8 @@ end
 -- Ported from chasmlol/2010-rust-rewrite-mashup (Apache-2.0) at f608f85,
 -- crates/render_anim/src/skate/rig.rs: each ValveBiped bone's bind segment is
 -- aligned onto the skater's, then follows that skater bone's motion. Unmapped
--- bones (fingers, neck, head) ride their nearest mapped ancestor.
+-- bones (faces, helpers, anything a model lacks) ride their nearest mapped
+-- ancestor.
 
 -- ValveBiped bone, Skate 3 bone, and the child pair that aims the segment.
 local MAP = {
@@ -179,6 +180,9 @@ local MAP = {
 	{ "Spine", "SPINE", "Spine1", "SPINE1" },
 	{ "Spine1", "SPINE1", "Spine2", "SPINE2" },
 	{ "Spine2", "SPINE2", "Spine4", "SPINE3" },
+	{ "Spine4", "SPINE3", "Neck1", "NECK" },
+	{ "Neck1", "NECK", "Head1", "HEAD" },
+	{ "Head1", "HEAD" },
 	{ "L_Clavicle", "LEFTSHOULDER", "L_UpperArm", "LEFTARM" },
 	{ "L_UpperArm", "LEFTARM", "L_Forearm", "LEFTFOREARM" },
 	{ "L_Forearm", "LEFTFOREARM", "L_Hand", "LEFTHAND" },
@@ -196,6 +200,19 @@ local MAP = {
 	{ "R_Foot", "RIGHTFOOT", "R_Toe0", "RIGHTTOEBASE" },
 	{ "R_Toe0", "RIGHTTOEBASE" },
 }
+
+-- Fingers: ValveBiped's Finger0 (thumb) to Finger4 (pinky), three joints each
+-- (Finger1, Finger11, Finger12), onto the skater's THUMB1 to PINKY3.
+for _, side in ipairs({ { "L", "LEFT" }, { "R", "RIGHT" } }) do
+	for n, finger in ipairs({ "THUMB", "INDEX", "MIDDLE", "RING", "PINKY" }) do
+		local valve = side[1] .. "_Finger" .. (n - 1)
+		local skate = side[2] .. "HAND" .. finger
+		local joints = { valve, valve .. "1", valve .. "2" }
+		for j = 1, 3 do
+			MAP[#MAP + 1] = { joints[j], skate .. j, joints[j + 1], joints[j + 1] and skate .. (j + 1) }
+		end
+	end
+end
 
 -- Playermodels face +X at rest; the skater's bind faces -Y.
 local FACING = Angle(0, -90, 0)
