@@ -138,13 +138,13 @@ local function Update(pose)
 
 	if last then
 		if sc.banked > last.banked + 0.5 then
-			flash = { text = "+" .. Points(sc.banked - last.banked), good = true, at = now }
+			flash = { text = "+" .. Points(sc.banked - last.banked), value = sc.banked - last.banked, good = true, at = now }
 		elseif last.active and not sc.active then
 			if bailing then
-				flash = { text = "Bail", good = false, at = now }
+				flash = { text = "Bail", value = shown, good = false, at = now } -- the score lost
 			elseif sc.line <= last.line + 0.5 and last.sequence > 0.5 then
 				-- A trick on its own, not part of a line: it scores but never banks.
-				flash = { text = "+" .. Points(last.sequence), good = true, at = now }
+				flash = { text = "+" .. Points(last.sequence), value = last.sequence, good = true, at = now }
 			end
 		end
 	end
@@ -169,6 +169,8 @@ local function Update(pose)
 		timer = live and sc.timer or 0,
 		multiplier = live and sc.multiplier or 1,
 		points = showFlash and flash.text or Points(shown),
+		-- The same as a bare number, for fonts with only digits.
+		value = math.floor((showFlash and flash.value or shown) + 0.5),
 		good = not showFlash or flash.good,
 		trick = TrickName(lastTrick),
 	}
@@ -189,8 +191,11 @@ local function Minimal(v, cx, cy, s)
 	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, WHITE, alpha, TEXT_ALIGN_LEFT)
 end
 
--- Half-Life 2's HUD: a dim rounded panel with the yellow label and numbers,
--- the line timer as the aux power bar's segments.
+-- Half-Life 2's HUD, laid out like its HEALTH panel on the same row: a dim
+-- rounded box with the label low on the left and the big number beside it,
+-- the multiplier above the label and the line timer as aux power segments
+-- along the bottom. HudNumbers only has digits, so the number goes in bare and
+-- everything else in the label font.
 local HL2_FG = Color(255, 220, 0, 230)
 local HL2_DIM = Color(255, 220, 0, 50)
 local HL2_RED = Color(255, 0, 0, 230)
@@ -201,29 +206,28 @@ local function HL2(v)
 	local a = v.alpha
 	local s = ScrH() / 480
 	local fg = v.good and HL2_FG or HL2_RED
-	local mult = Multiplier(v.multiplier)
-	surface.SetFont("HudNumbers")
-	local numW = surface.GetTextSize(v.points)
-	surface.SetFont("HudNumbersSmall")
-	local multW = surface.GetTextSize(mult)
+	local label = not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
+	local mult = v.live and "x" .. Multiplier(v.multiplier):sub(1, -2) or ""
+	local number = tostring(v.value)
 	surface.SetFont("HudSelectionText")
-	local trickW = surface.GetTextSize(v.trick:upper())
-	local pad = 8 * s
-	local w = math.max(numW + multW + 3 * pad, trickW + 2 * pad, 110 * s)
-	local h = 56 * s
-	local x, y = math.floor(ScrW() * 0.5 - w * 0.5), math.floor(ScrH() - 16 * s - h)
+	local labelW = math.max(surface.GetTextSize(label), surface.GetTextSize(mult))
+	surface.SetFont("HudNumbers")
+	local numW = surface.GetTextSize(number)
+	local pad, gap = 8 * s, 10 * s
+	-- HEALTH's box: 36 tall, its bottom 12 above the screen's at 480 lines.
+	local w, h = math.max(pad + labelW + gap + numW + pad, 102 * s), 36 * s
+	local x, y = math.floor(ScrW() * 0.5 - w * 0.5), math.floor(ScrH() - 12 * s - h)
 	draw.RoundedBox(8, x, y, w, h, ColorAlpha(HL2_BG, HL2_BG.a * a))
-	draw.SimpleText(v.trick ~= "" and v.trick:upper() or "TRICK", "HudSelectionText", x + pad, y + 4 * s,
-		ColorAlpha(HL2_FG, HL2_FG.a * a))
-	draw.SimpleText(v.points, "HudNumbers", x + pad, y + 12 * s, ColorAlpha(fg, fg.a * a))
-	draw.SimpleText(mult, "HudNumbersSmall", x + w - pad, y + 26 * s, ColorAlpha(HL2_FG, HL2_FG.a * a), TEXT_ALIGN_RIGHT)
-	-- The line timer, as the aux power bar's segments along the bottom.
-	local gap = 2 * s
-	local segW = (w - 2 * pad - gap * (SEGMENTS - 1)) / SEGMENTS
+	draw.SimpleText(mult, "HudSelectionText", x + pad, y + 6 * s, ColorAlpha(HL2_FG, HL2_FG.a * a))
+	draw.SimpleText(label, "HudSelectionText", x + pad, y + 20 * s, ColorAlpha(fg, fg.a * a))
+	draw.SimpleText(number, "HudNumbers", x + w - pad, y + 2 * s, ColorAlpha(fg, fg.a * a), TEXT_ALIGN_RIGHT)
+	if not v.live then return end
+	local segGap = 2 * s
+	local segW = (w - 2 * pad - segGap * (SEGMENTS - 1)) / SEGMENTS
 	for i = 1, SEGMENTS do
 		local color = v.timer > (i - 1) / SEGMENTS and HL2_FG or HL2_DIM
 		surface.SetDrawColor(ColorAlpha(color, color.a * a))
-		surface.DrawRect(x + pad + (i - 1) * (segW + gap), y + h - 8 * s, segW, 3 * s)
+		surface.DrawRect(x + pad + (i - 1) * (segW + segGap), y + h - 4 * s, segW, 2 * s)
 	end
 end
 

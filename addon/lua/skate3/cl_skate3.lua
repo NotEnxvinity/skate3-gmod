@@ -383,7 +383,8 @@ hook.Add("HUDPaint", "skate3_hud", function()
 	end
 	if active and not Skater.Skip.score then Score.Draw(pose) end
 	if line then
-		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 48, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
+		-- Under Half-Life 2's HUD row, which the HL2 score look sits in.
+		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)
 	end
 	if cv_input:GetBool() and skate3 then
 		local i, err = skate3.GetInput()
