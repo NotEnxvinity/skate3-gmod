@@ -12,7 +12,7 @@ its own Skate 3 collision mesh. Everything is converted to Source units
     python park.py --game <extracted game folder> --gmod <garrysmod folder>
 """
 from pathlib import Path
-import argparse, json, re, shutil, sys, tempfile, traceback
+import argparse, json, re, shutil, struct, sys, tempfile, traceback, zlib
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -121,6 +121,24 @@ def textures_of(archive, report):
     return found
 
 
+def cutout(png):
+    """Whether a texture is a cutout (leaves, fences, grates): some of it is
+    see-through. Textures whose alpha is only a soft mask for something else
+    have no clear pixels and stay solid. Reads the plain RGBA PNGs
+    world_textures writes."""
+    width, height = struct.unpack_from('>2I', png, 16)
+    at, data = 8, b''
+    while at < len(png):
+        size, kind = struct.unpack_from('>I4s', png, at)
+        if kind == b'IDAT':
+            data += png[at + 8:at + 8 + size]
+        at += size + 12
+    rows = zlib.decompress(data)
+    stride = width * 4 + 1
+    clear = sum(1 for y in range(height) for a in rows[y * stride + 4:(y + 1) * stride:4] if a < 16)
+    return clear >= 0.01 * width * height
+
+
 def piece(pid, name, category, groups, tris, surfaces):
     return {'id': pid, 'name': label(name), 'category': category, 'bounds': bounds(groups),
             'groups': groups, 'collision': tris, 'surfaces': surfaces}
@@ -221,10 +239,13 @@ def install(game, gmod, report=print):
     for guid in sorted(used & set(textures)):
         (tex_out / f'{guid}.png').write_bytes(textures[guid])
     index = []
+    cut = {guid for guid in used & set(textures) if cutout(textures[guid])}
     for p in made:
         for g in p['groups']:
             if g['tex'] not in textures:
                 g['tex'] = None
+            if g['tex'] in cut:
+                g['cut'] = True
         # Gmod's file.Read only reaches data/ files with whitelisted
         # extensions; .json is one.
         (data_out / f'{p["id"]}.json').write_text(json.dumps(p, separators=(',', ':')))

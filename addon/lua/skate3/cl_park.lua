@@ -12,15 +12,21 @@ local NAMES = {
 
 local materials = {}
 
-local function MaterialFor(guid)
+-- Cutout textures (leaves, fences, grates) are alpha tested and drawn from
+-- both sides, like Skate 3's foliage cards.
+local function MaterialFor(guid, cut)
 	if not guid then return Material("models/debug/debugwhite") end
-	if materials[guid] then return materials[guid] end
+	local key = guid .. (cut and "_cut" or "")
+	if materials[key] then return materials[key] end
 	local png = Material("skate3/park/" .. guid .. ".png", "smooth mips")
-	local mat = CreateMaterial("skate3park_" .. guid, "VertexLitGeneric", {
+	local mat = CreateMaterial("skate3park_" .. key, "VertexLitGeneric", {
 		["$basetexture"] = "models/debug/debugwhite",
+		["$alphatest"] = cut and "1" or nil,
+		["$alphatestreference"] = cut and "0.5" or nil,
+		["$nocull"] = cut and "1" or nil,
 	})
 	if not png:IsError() then mat:SetTexture("$basetexture", png:GetTexture("$basetexture")) end
-	materials[guid] = mat
+	materials[key] = mat
 	return mat
 end
 
@@ -54,14 +60,14 @@ local function BuildMeshes(piece)
 			if #verts >= MAX_TRIS * 3 then
 				local m = Mesh()
 				m:BuildFromTriangles(verts)
-				built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex) }
+				built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex, g.cut) }
 				verts = {}
 			end
 		end
 		if #verts > 0 then
 			local m = Mesh()
 			m:BuildFromTriangles(verts)
-			built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex) }
+			built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex, g.cut) }
 		end
 	end
 	return built

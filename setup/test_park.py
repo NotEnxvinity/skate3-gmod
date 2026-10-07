@@ -19,6 +19,15 @@ class ParkTest(unittest.TestCase):
         self.assertIn('data/content/worlddist_megapark.big', park.FROM_DISC)
         self.assertIn('data/content/worlddist_maloofmoneycup.big', park.FROM_DISC)
 
+    def test_cutout_needs_clear_pixels(self):
+        from skate3_formats.world_textures import png
+        solid = png(2, 2, bytes([9, 9, 9, 255]) * 4)
+        leaf = png(2, 2, bytes([9, 9, 9, 255]) * 3 + bytes([9, 9, 9, 0]))
+        mask = png(2, 2, bytes([9, 9, 9, 128]) * 4)
+        self.assertFalse(park.cutout(solid))
+        self.assertTrue(park.cutout(leaf))
+        self.assertFalse(park.cutout(mask))
+
 
 if __name__ == '__main__':
     unittest.main()
