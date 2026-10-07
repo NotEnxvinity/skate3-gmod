@@ -98,6 +98,10 @@ duplicator.RegisterEntityClass("skate3_piece", function(ply, data)
 end, "Data")
 
 -- The physgun moves pieces, but letting go never leaves one loose.
+hook.Add("OnPhysgunPickup", "skate3_park_freeze", function(_, ent)
+	if IsValid(ent) and ent:GetClass() == "skate3_piece" then ent.held = true end
+end)
+
 hook.Add("PhysgunDrop", "skate3_park_freeze", function(_, ent)
 	if IsValid(ent) and ent:GetClass() == "skate3_piece" then
 		local phys = ent:GetPhysicsObject()
@@ -105,6 +109,8 @@ hook.Add("PhysgunDrop", "skate3_park_freeze", function(_, ent)
 			phys:EnableMotion(false)
 			phys:Sleep()
 		end
+		ent.held = nil
+		ent.home = { ent:GetPos(), ent:GetAngles() }
 	end
 end)
 
