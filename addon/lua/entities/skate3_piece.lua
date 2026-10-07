@@ -75,63 +75,6 @@ if SERVER then
 	return
 end
 
-local materials = {}
-
-local function MaterialFor(guid)
-	if not guid then return Material("models/debug/debugwhite") end
-	if materials[guid] then return materials[guid] end
-	local png = Material("skate3/park/" .. guid .. ".png", "smooth mips")
-	local mat = CreateMaterial("skate3park_" .. guid, "VertexLitGeneric", {
-		["$basetexture"] = "models/debug/debugwhite",
-	})
-	if not png:IsError() then mat:SetTexture("$basetexture", png:GetTexture("$basetexture")) end
-	materials[guid] = mat
-	return mat
-end
-
--- IMeshes hold at most 65535 vertices; the stadium's groups stay well under,
--- but a group is still cut into pieces of this many triangles to be safe.
-local MAX_TRIS = 20000
-
-local function BuildMeshes(piece)
-	local built = {}
-	for _, g in ipairs(piece.groups) do
-		local verts = {}
-		local pos, uv, idx = g.pos, g.uv, g.idx
-		for t = 1, #idx, 3 do
-			local corner = {}
-			for k = 0, 2 do
-				local i = idx[t + k]
-				corner[k + 1] = {
-					pos = Vector(pos[i * 3 + 1], pos[i * 3 + 2], pos[i * 3 + 3]),
-					u = uv[i * 2 + 1] or 0,
-					v = 1 - (uv[i * 2 + 2] or 0),
-				}
-			end
-			-- Skate 3's winding, after the axis swap, faces out clockwise,
-			-- like Source's.
-			local normal = (corner[3].pos - corner[1].pos):Cross(corner[2].pos - corner[1].pos)
-			normal:Normalize()
-			for k = 1, 3 do
-				corner[k].normal = normal
-				verts[#verts + 1] = corner[k]
-			end
-			if #verts >= MAX_TRIS * 3 then
-				local m = Mesh()
-				m:BuildFromTriangles(verts)
-				built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex) }
-				verts = {}
-			end
-		end
-		if #verts > 0 then
-			local m = Mesh()
-			m:BuildFromTriangles(verts)
-			built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex) }
-		end
-	end
-	return built
-end
-
 -- The client's copy of the physics doesn't follow the entity by itself; left
 -- at the world origin, player movement prediction disagrees with the server
 -- and the player sticks to the piece. Keep it where the piece is.
@@ -155,7 +98,7 @@ function ENT:Think()
 	local piece = Park.Get(id)
 	if not piece then return end
 	self.loadedId = id
-	self.meshes = BuildMeshes(piece)
+	self.meshes = Park.Meshes(id)
 	local b = piece.bounds
 	self:SetRenderBounds(Vector(b[1][1], b[1][2], b[1][3]), Vector(b[2][1], b[2][2], b[2][3]))
 	-- The same physics client side, so walking on it predicts properly.
@@ -164,11 +107,9 @@ function ENT:Think()
 	hook.Run("Skate3ParkChanged")
 end
 
+-- The meshes are shared by every copy of the piece (and the tool gun's
+-- ghost), so they stay built.
 function ENT:OnRemove()
-	if self.meshes then
-		for _, m in ipairs(self.meshes) do m.mesh:Destroy() end
-		self.meshes = nil
-	end
 	hook.Run("Skate3ParkChanged")
 end
 

@@ -2,9 +2,9 @@
 
 local Park = include("skate3/sh_park.lua")
 
-concommand.Add("skate3_spawn_piece", function(ply, _, args)
-	if not IsValid(ply) then return end
-	local id = args[1]
+-- Places one piece for a player, with undo and the props limit. Returns the
+-- piece, or nil (after telling the player why).
+function Park.Spawn(ply, id, pos, ang)
 	local index = Park.Index()
 	local info = index and index[id]
 	if not info then
@@ -17,16 +17,11 @@ concommand.Add("skate3_spawn_piece", function(ply, _, args)
 		ply:ChatPrint("[skate3] Only admins can spawn whole parks.")
 		return
 	end
-	local tr = util.TraceLine({
-		start = ply:EyePos(),
-		endpos = ply:EyePos() + ply:GetAimVector() * 4096,
-		filter = ply,
-	})
 	local ent = ents.Create("skate3_piece")
 	if not IsValid(ent) then return end
 	ent:SetPieceId(id)
-	ent:SetPos(tr.HitPos)
-	ent:SetAngles(Angle(0, math.Round(ply:EyeAngles().y / 15) * 15 + 180, 0))
+	ent:SetPos(pos)
+	ent:SetAngles(ang)
 	ent:Spawn()
 	if not IsValid(ent) then return end
 	ent:SetCreator(ply)
@@ -37,6 +32,17 @@ concommand.Add("skate3_spawn_piece", function(ply, _, args)
 	undo.Finish()
 	ply:AddCleanup("props", ent)
 	ply:AddCount("props", ent)
+	return ent
+end
+
+concommand.Add("skate3_spawn_piece", function(ply, _, args)
+	if not IsValid(ply) then return end
+	local tr = util.TraceLine({
+		start = ply:EyePos(),
+		endpos = ply:EyePos() + ply:GetAimVector() * 4096,
+		filter = ply,
+	})
+	Park.Spawn(ply, args[1], tr.HitPos, Angle(0, math.Round(ply:EyeAngles().y / 15) * 15 + 180, 0))
 end)
 
 local INCHES = 39.3701

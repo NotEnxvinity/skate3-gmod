@@ -10,6 +10,75 @@ local NAMES = {
 	DMO_Misc = "Props: Misc",
 }
 
+local materials = {}
+
+local function MaterialFor(guid)
+	if not guid then return Material("models/debug/debugwhite") end
+	if materials[guid] then return materials[guid] end
+	local png = Material("skate3/park/" .. guid .. ".png", "smooth mips")
+	local mat = CreateMaterial("skate3park_" .. guid, "VertexLitGeneric", {
+		["$basetexture"] = "models/debug/debugwhite",
+	})
+	if not png:IsError() then mat:SetTexture("$basetexture", png:GetTexture("$basetexture")) end
+	materials[guid] = mat
+	return mat
+end
+
+-- IMeshes hold at most 65535 vertices; the stadium's groups stay well under,
+-- but a group is still cut into pieces of this many triangles to be safe.
+local MAX_TRIS = 20000
+
+local function BuildMeshes(piece)
+	local built = {}
+	for _, g in ipairs(piece.groups) do
+		local verts = {}
+		local pos, uv, idx = g.pos, g.uv, g.idx
+		for t = 1, #idx, 3 do
+			local corner = {}
+			for k = 0, 2 do
+				local i = idx[t + k]
+				corner[k + 1] = {
+					pos = Vector(pos[i * 3 + 1], pos[i * 3 + 2], pos[i * 3 + 3]),
+					u = uv[i * 2 + 1] or 0,
+					v = 1 - (uv[i * 2 + 2] or 0),
+				}
+			end
+			-- Skate 3's winding, after the axis swap, faces out clockwise,
+			-- like Source's.
+			local normal = (corner[3].pos - corner[1].pos):Cross(corner[2].pos - corner[1].pos)
+			normal:Normalize()
+			for k = 1, 3 do
+				corner[k].normal = normal
+				verts[#verts + 1] = corner[k]
+			end
+			if #verts >= MAX_TRIS * 3 then
+				local m = Mesh()
+				m:BuildFromTriangles(verts)
+				built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex) }
+				verts = {}
+			end
+		end
+		if #verts > 0 then
+			local m = Mesh()
+			m:BuildFromTriangles(verts)
+			built[#built + 1] = { mesh = m, mat = MaterialFor(g.tex) }
+		end
+	end
+	return built
+end
+
+-- A piece's render meshes, built once and shared by every copy of it, so
+-- spawning the same ramp twenty times costs one set of meshes.
+local meshes = {}
+
+function Park.Meshes(id)
+	if meshes[id] == nil then
+		local piece = Park.Get(id)
+		meshes[id] = piece and BuildMeshes(piece) or false
+	end
+	return meshes[id] or nil
+end
+
 spawnmenu.AddCreationTab("Skate 3 Park", function()
 	local scroll = vgui.Create("DScrollPanel")
 	local index = Park.Index()
