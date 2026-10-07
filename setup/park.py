@@ -51,10 +51,16 @@ def source(x, y, z):
     return (x * INCHES, z * INCHES, y * INCHES)
 
 
+# Typos in Skate 3's own piece names.
+TYPOS = {'quater': 'quarter', 'legdes': 'ledges', 'lampost': 'lamppost', 'stantion': 'stanchion'}
+
+
 def label(name):
     """'ab_MegaParkRollIn' -> 'Mega Park Roll In'."""
     name = re.sub(r'^[a-z]{1,3}_', '', name).replace('_', ' ')
     name = re.sub(r'(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])', ' ', name)
+    for typo, fixed in TYPOS.items():
+        name = re.sub(typo, lambda m: fixed.capitalize() if m[0][0].isupper() else fixed, name, flags=re.I)
     return re.sub(r'\s+', ' ', name).strip()
 
 

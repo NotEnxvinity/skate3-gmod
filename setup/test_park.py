@@ -6,7 +6,7 @@ import park
 class ParkTest(unittest.TestCase):
     def test_labels_read_like_the_park_editor(self):
         self.assertEqual(park.label('ab_MegaParkRollIn'), 'Mega Park Roll In')
-        self.assertEqual(park.label('ai_MegaQuaterPipe90Corner'), 'Mega Quater Pipe90 Corner')
+        self.assertEqual(park.label('ai_MegaQuaterPipe90Corner'), 'Mega Quarter Pipe90 Corner')
         self.assertEqual(park.label('bd_DMO_UN_DumpsterOpen'), 'DMO UN Dumpster Open')
 
     def test_skate_metres_y_up_become_source_inches_z_up(self):
@@ -27,6 +27,10 @@ class ParkTest(unittest.TestCase):
         self.assertFalse(park.cutout(solid))
         self.assertTrue(park.cutout(leaf))
         self.assertFalse(park.cutout(mask))
+
+    def test_label_fixes_typos(self):
+        self.assertEqual(park.label('ab_MegaQuaterPipe'), 'Mega Quarter Pipe')
+        self.assertEqual(park.label('quaterpipeescalator'), 'quarterpipeescalator')
 
 
 if __name__ == '__main__':
