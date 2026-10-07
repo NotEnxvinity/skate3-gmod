@@ -22,6 +22,7 @@ function ENT:BuildPhysics(piece)
 	self:SetSolid(SOLID_VPHYSICS)
 	self:SetMoveType(MOVETYPE_VPHYSICS)
 	self:EnableCustomCollisions(true)
+	self:SetCustomCollisionCheck(true)
 	local phys = self:GetPhysicsObject()
 	if IsValid(phys) then
 		phys:EnableMotion(false)

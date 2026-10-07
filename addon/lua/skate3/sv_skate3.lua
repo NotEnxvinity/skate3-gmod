@@ -11,6 +11,9 @@ local MAX_STEP = 600
 local function SetSkating(ply, on)
 	ply.Skate3 = on
 	ply:SetMoveType(on and MOVETYPE_NONE or MOVETYPE_WALK)
+	-- Park pieces ignore a skater's Gmod body (see sh_park.lua).
+	ply:SetNW2Bool("skate3_riding", on)
+	ply:CollisionRulesChanged()
 end
 
 local function ForceStop(ply)

@@ -71,4 +71,14 @@ function Park.Soup(piece)
 	return soup
 end
 
+-- The board rides a piece through the skate module's own copy of its
+-- collision. The skater's Gmod body is moved into place each update, and
+-- would otherwise shove the frozen piece, so the two never collide.
+hook.Add("ShouldCollide", "skate3_park", function(a, b)
+	if a:GetClass() ~= "skate3_piece" then a, b = b, a end
+	if a:GetClass() == "skate3_piece" and b:IsPlayer() and b:GetNW2Bool("skate3_riding") then
+		return false
+	end
+end)
+
 return Park

@@ -146,10 +146,16 @@ function Park.Triangles()
 	for _, ent in ipairs(ents.FindByClass("skate3_piece")) do
 		local piece = ent.loadedId and Park.Get(ent.loadedId)
 		if piece then
-			for _, v in ipairs(Park.Soup(piece)) do
-				local w = ent:LocalToWorld(v)
-				out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
-				n = n + 3
+			-- Skate 3's triangles face out clockwise once in Source axes;
+			-- the module wants them counterclockwise, or the board only
+			-- collides from inside and falls straight through.
+			local soup = Park.Soup(piece)
+			for t = 1, #soup - 2, 3 do
+				for _, k in ipairs({ 0, 2, 1 }) do
+					local w = ent:LocalToWorld(soup[t + k])
+					out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
+					n = n + 3
+				end
 			end
 		end
 	end
