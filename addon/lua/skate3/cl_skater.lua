@@ -246,19 +246,66 @@ local function BindPose(ent, ragdoll)
 		for i, bone in pairs(bones) do shifted[i - 1] = bone end
 		bones = shifted
 	end
-	-- Which way round the matrices come isn't documented; the right way puts
-	-- the pelvis near where the "ragdoll" sequence has it.
-	local pelvis = ent:LookupBone("ValveBiped.Bip01_Pelvis")
-	local b = pelvis and bones[pelvis]
-	if not (b and b.matrix and ragdoll[pelvis]) then return nil end
-	local want = ragdoll[pelvis]:GetTranslation()
-	local invert = b.matrix:GetInverse():GetTranslation():DistToSqr(want)
-		< b.matrix:GetTranslation():DistToSqr(want)
-	local out = {}
-	for i, bone in pairs(bones) do
-		if bone.matrix then out[i] = invert and bone.matrix:GetInverse() or Matrix(bone.matrix) end
+	-- Which way round the matrices come isn't documented, and reading them
+	-- one way twisted every limb. So try each reading: the right one puts
+	-- the pelvis near where the "ragdoll" sequence has it and turns the bones
+	-- most like that sequence does (the trick models' proportions differ,
+	-- their bones' turns barely do).
+	local function Transposed(m)
+		local t = m:ToTable()
+		return Matrix({
+			{ t[1][1], t[2][1], t[3][1], t[4][1] },
+			{ t[1][2], t[2][2], t[3][2], t[4][2] },
+			{ t[1][3], t[2][3], t[3][3], t[4][3] },
+			{ t[1][4], t[2][4], t[3][4], t[4][4] },
+		})
 	end
-	return out
+	local function TurnFlipped(m)
+		-- The rotation transposed, the position kept.
+		local r = Transposed(m)
+		r:SetTranslation(m:GetTranslation())
+		r:SetField(4, 1, 0) r:SetField(4, 2, 0) r:SetField(4, 3, 0) r:SetField(4, 4, 1)
+		return r
+	end
+	local readings = {
+		{ "as is", function(m) return Matrix(m) end },
+		{ "inverted", function(m) return m:GetInverse() end },
+		{ "turn flipped", function(m) return TurnFlipped(m) end },
+		{ "inverted, turn flipped", function(m) return TurnFlipped(m:GetInverse()) end },
+		{ "transposed", function(m) return Transposed(m) end },
+		{ "transposed, inverted", function(m) return Transposed(m):GetInverse() end },
+	}
+	local pelvis = ent:LookupBone("ValveBiped.Bip01_Pelvis")
+	if not (pelvis and ragdoll[pelvis]) then return nil end
+	local want = ragdoll[pelvis]:GetTranslation()
+	local best, bestScore
+	for _, reading in ipairs(readings) do
+		local out, ok2 = {}, true
+		for i, bone in pairs(bones) do
+			if bone.matrix then
+				local good, m = pcall(reading[2], bone.matrix)
+				if good and m then out[i] = m else ok2 = false break end
+			end
+		end
+		local p = ok2 and out[pelvis]
+		if p and p:GetTranslation():Distance(want) < 32 then
+			local score, n = 0, 0
+			for i, m in pairs(out) do
+				local r = ragdoll[i]
+				if r then
+					score = score + (m:GetForward() - r:GetForward()):Length()
+						+ (m:GetUp() - r:GetUp()):Length()
+					n = n + 1
+				end
+			end
+			score = n > 0 and score / n or math.huge
+			if not bestScore or score < bestScore then
+				best, bestScore = { out = out, name = reading[1] }, score
+			end
+		end
+	end
+	if not best then return nil end
+	return best.out, ("%s, turn mismatch %.2f"):format(best.name, bestScore)
 end
 
 local cv_rest = CreateClientConVar("skate3_rest_pose", "bind", true, false,
@@ -280,8 +327,10 @@ local function CaptureRest(ent)
 	-- with the proportion trick (Halo Infinite's Master Chief, Doom Guy) get
 	-- the stock Valve skeleton in that sequence, with the neck down inside
 	-- the chest, and their heads ended up there.
-	local bindPose = cv_rest:GetString() ~= "ragdoll" and BindPose(ent, ragdoll) or nil
-	restFrom = bindPose and "bind pose" or "ragdoll sequence"
+	local bindPose, how
+	if cv_rest:GetString() ~= "ragdoll" then bindPose, how = BindPose(ent, ragdoll) end
+	restFrom = bindPose and ("bind pose (" .. how .. ")") or "ragdoll sequence"
+	print("[skate3] rest pose from the " .. restFrom)
 	rest = {}
 	writable = {}
 	for i = 0, ent:GetBoneCount() - 1 do
