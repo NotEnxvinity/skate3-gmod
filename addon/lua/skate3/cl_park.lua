@@ -128,12 +128,15 @@ spawnmenu.AddCreationTab("Skate 3 Park", function()
 			if p.preset then
 				b:SetTooltip(p.tip)
 			else
-				b:SetTooltip(("%s (%.0f x %.0f x %.0f)"):format(p.name,
+				b:SetTooltip(("%s%s (%.0f x %.0f x %.0f)"):format(p.name, p.category == "Maps" and ": loads as a map" or "",
 					p.bounds[2][1] - p.bounds[1][1], p.bounds[2][2] - p.bounds[1][2], p.bounds[2][3] - p.bounds[1][3]))
 			end
 			b.DoClick = function()
 				if p.preset then
 					RunConsoleCommand("skate3_spawn_preset", p.preset)
+				elseif p.category == "Maps" then
+					-- A whole skatepark loads as its own map.
+					RunConsoleCommand("skate3_park_load", p.id)
 				else
 					RunConsoleCommand("skate3_spawn_piece", p.id)
 				end

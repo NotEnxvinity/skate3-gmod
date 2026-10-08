@@ -127,3 +127,86 @@ end)
 hook.Add("CanPlayerUnfreeze", "skate3_park_freeze", function(_, ent)
 	if IsValid(ent) and ent:GetClass() == "skate3_piece" then return false end
 end)
+
+-- Skateparks as maps: picking one of the disc's skateparks loads a plain
+-- open map, builds the park in the middle of it and drops everyone on it.
+-- Which park to build survives the map change in this file.
+local cv_base = CreateConVar("skate3_park_map", "gm_flatgrass", FCVAR_ARCHIVE, "The open map skateparks are built on")
+local PENDING = "skate3/pending_park.txt"
+
+local function ClearParks()
+	for _, ent in ipairs(ents.FindByClass("skate3_piece")) do
+		if ent.skate3Park then ent:Remove() end
+	end
+end
+
+-- Builds the park with its lowest point just above the ground, so the base
+-- map's floor never cuts through a bowl, and returns where to stand.
+local function BuildPark(id)
+	local index = Park.Index()
+	local info = index and index[id]
+	if not info or info.category ~= "Maps" then return end
+	ClearParks()
+	-- Centred on the map's player spawn, which is always inside the map.
+	local start = ents.FindByClass("info_player_start")[1]
+	local from = IsValid(start) and start:GetPos() + Vector(0, 0, 32) or Vector(0, 0, 0)
+	local ground = util.TraceLine({ start = from, endpos = from - Vector(0, 0, 32768), mask = MASK_SOLID_BRUSHONLY })
+	local origin = Vector(from.x, from.y, ground.HitPos.z - info.bounds[1][3] + 8)
+	local ent = ents.Create("skate3_piece")
+	if not IsValid(ent) then return end
+	ent:SetPieceId(id)
+	ent:SetPos(origin)
+	ent:SetAngles(Angle(0, 0, 0))
+	ent:Spawn()
+	if not IsValid(ent) then return end
+	ent.skate3Park = true
+	-- Stand on whatever is under the park's middle, its floor or a ramp.
+	local top = origin + Vector(0, 0, info.bounds[2][3] + 64)
+	local spot = util.TraceLine({ start = top, endpos = origin + Vector(0, 0, info.bounds[1][3] - 64), filter = function(e) return e == ent end, ignoreworld = true })
+	return spot.Hit and spot.HitPos + Vector(0, 0, 8) or origin + Vector(0, 0, 8)
+end
+
+local spawnAt
+
+local function DropOnPark(ply)
+	if spawnAt and IsValid(ply) then
+		ply:SetPos(spawnAt)
+		ply:SetVelocity(-ply:GetVelocity())
+	end
+end
+
+concommand.Add("skate3_park_load", function(ply, _, args)
+	if IsValid(ply) and not ply:IsAdmin() then
+		ply:ChatPrint("[skate3] Only admins can load a skatepark.")
+		return
+	end
+	local id = args[1] or ""
+	local index = Park.Index()
+	local info = index and index[id]
+	if not info or info.category ~= "Maps" then
+		if IsValid(ply) then ply:ChatPrint("[skate3] No skatepark " .. id .. ". Run the setup app to convert them from your disc.") end
+		return
+	end
+	if game.GetMap() == cv_base:GetString() then
+		spawnAt = BuildPark(id)
+		for _, p in ipairs(player.GetAll()) do DropOnPark(p) end
+		return
+	end
+	file.CreateDir("skate3")
+	file.Write(PENDING, id)
+	PrintMessage(HUD_PRINTTALK, "[skate3] Loading " .. info.name .. "...")
+	timer.Simple(0.5, function() RunConsoleCommand("changelevel", cv_base:GetString()) end)
+end)
+
+hook.Add("InitPostEntity", "skate3_park_load", function()
+	local id = file.Read(PENDING, "DATA")
+	if not id then return end
+	file.Delete(PENDING)
+	if game.GetMap() ~= cv_base:GetString() then return end
+	spawnAt = BuildPark(id)
+end)
+
+-- Everyone arriving, or respawning, starts on the park.
+hook.Add("PlayerSpawn", "skate3_park_load", function(ply)
+	if spawnAt then timer.Simple(0, function() DropOnPark(ply) end) end
+end)
