@@ -247,8 +247,11 @@ local function CaptureRest(ent)
 	rest = {}
 	writable = {}
 	for i = 0, ent:GetBoneCount() - 1 do
-		rest[i] = ent:GetBoneMatrix(i) or Matrix()
-		writable[i] = ent:BoneHasFlag(i, USED)
+		-- A bone the engine didn't set up has no rest pose. Guessing one (the
+		-- identity) dropped everything weighted to it by its own height, which
+		-- sank some playermodels' heads into their chests, so it's left alone.
+		rest[i] = ent:GetBoneMatrix(i)
+		writable[i] = rest[i] ~= nil and ent:BoneHasFlag(i, USED)
 	end
 end
 
@@ -299,14 +302,20 @@ local cv_bones = CreateClientConVar("skate3_bone_mode", "override", true, false,
 local function BuildBones(ent, count)
 	if not pose or not pose.bones then return end
 	local skins = {}
+	-- Root bones that come before the pelvis (a "root" or "Bip01" some ports
+	-- add) ride it too, so find it first.
 	local pelvis
+	for i = 0, count - 1 do
+		local fit = fits[i]
+		local posed = fit and pose.bones[fit.skate]
+		if posed then pelvis = Mat(posed) * fit.pre break end
+	end
 	for i = 0, count - 1 do
 		local fit = fits[i]
 		local posed = fit and pose.bones[fit.skate]
 		local skin
 		if posed then
 			skin = Mat(posed) * fit.pre
-			pelvis = pelvis or skin
 		else
 			local parent = ent:GetBoneParent(i)
 			skin = parent >= 0 and skins[parent] or pelvis
@@ -340,6 +349,11 @@ end
 -- Rebuilding the stand-in creates an entity, and creating them every frame
 -- crashes the game (CUtlRBTree overflow). So at most one rebuild a second,
 -- and a model that can't be built isn't retried until the pick changes.
+local function SameModel(a, b)
+	local function Norm(m) return (m or ""):lower():gsub("\\", "/") end
+	return Norm(a) == Norm(b)
+end
+
 local REBUILD_EVERY = 1
 local lastBuild = -math.huge
 local failedName
@@ -387,13 +401,46 @@ function Skater.ShowModel(ply)
 		end
 		model:SetRenderBounds(Vector(-96, -96, -32), Vector(96, 96, 128))
 	end
-	model:SetSkin(ply:GetSkin())
-	for i = 0, ply:GetNumBodyGroups() - 1 do
-		model:SetBodygroup(i, ply:GetBodygroup(i))
+	-- Skin and bodygroups only carry over when the player really wears this
+	-- model; another model's bodygroup numbers can switch off a helmet or head.
+	if SameModel(ply:GetModel(), name) then
+		model:SetSkin(ply:GetSkin())
+		for i = 0, ply:GetNumBodyGroups() - 1 do
+			model:SetBodygroup(i, ply:GetBodygroup(i))
+		end
 	end
 	model.GetPlayerColor = function() return ply:GetPlayerColor() end
 	model:SetNoDraw(false)
 end
+
+-- What the retarget does with each of the playermodel's bones, for working
+-- out why a model looks wrong. Prints to the console and saves
+-- data/skate3/bone_report.txt.
+concommand.Add("skate3_bone_report", function()
+	if not IsValid(model) then print("[skate3] get on the board first, then run this") return end
+	local ply = LocalPlayer()
+	local lines = {
+		"model " .. tostring(model.skate3Name) .. ", player wears " .. tostring(ply:GetModel()),
+		("%d bones, %d bodygroups"):format(model:GetBoneCount(), model:GetNumBodyGroups()),
+	}
+	for i = 0, model:GetNumBodyGroups() - 1 do
+		lines[#lines + 1] = ("bodygroup %d %s = %d (player %d)"):format(i, model:GetBodygroupName(i),
+			model:GetBodygroup(i), ply:GetBodygroup(i))
+	end
+	for i = 0, model:GetBoneCount() - 1 do
+		local parent = model:GetBoneParent(i)
+		local how = fits[i] and ("follows " .. fits[i].skate) or "rides parent"
+		if not rest[i] then how = "NO REST POSE"
+		elseif not writable[i] then how = "not written" end
+		local p = rest[i] and rest[i]:GetTranslation() or vector_origin
+		lines[#lines + 1] = ("%3d %-36s parent %3d  %-20s rest %.1f %.1f %.1f"):format(i,
+			model:GetBoneName(i), parent, how, p.x, p.y, p.z)
+	end
+	file.CreateDir("skate3")
+	file.Write("skate3/bone_report.txt", table.concat(lines, "\n"))
+	for _, l in ipairs(lines) do print("[skate3] " .. l) end
+	print("[skate3] saved garrysmod/data/skate3/bone_report.txt")
+end)
 
 function Skater.UpdateModel(p)
 	pose = p
