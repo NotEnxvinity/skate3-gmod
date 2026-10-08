@@ -427,7 +427,7 @@ local pose
 local cv_bones = CreateClientConVar("skate3_bone_mode", "override", true, false,
 	"How the playermodel is posed: override (default) or callback (the older way)")
 
-local headBone, headSkin -- for the eyes: the head bone and its last skin
+local eyesAttachment -- the model's "eyes" attachment, for aiming the eyes
 
 local function BuildBones(ent, count)
 	if not pose or not pose.bones then return end
@@ -451,7 +451,6 @@ local function BuildBones(ent, count)
 			skin = parent >= 0 and skins[parent] or pelvis
 		end
 		skins[i] = skin
-		if i == headBone then headSkin = skin end
 		if skin and rest[i] and writable[i] then
 			ent:SetBoneMatrix(i, skin * rest[i])
 		end
@@ -512,7 +511,8 @@ function Skater.ShowModel(ply)
 		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
-		headBone, headSkin = model:LookupBone("ValveBiped.Bip01_Head1"), nil
+		eyesAttachment = model:LookupAttachment("eyes")
+		if not eyesAttachment or eyesAttachment <= 0 then eyesAttachment = nil end
 		local callback = cv_bones:GetString() == "callback"
 		if callback then
 			model:AddCallback("BuildBonePositions", BuildBones)
@@ -525,17 +525,16 @@ function Skater.ShowModel(ply)
 				self:SetupBones()
 				BuildBones(self, self:GetBoneCount())
 			end
-			-- Eyes look at a world point, which a clientside model leaves at
-			-- the map's origin, so they stared one way whatever the skater
-			-- did. Aim them ahead of the face instead: the model faces +X at
-			-- rest, so the head's skin turns +X into where the face points.
-			if headSkin and headBone and rest[headBone] then
-				local eye = Matrix(headSkin * rest[headBone]):GetTranslation()
-				local ahead = Vector(1, 0, 0)
-				local turn = Matrix(headSkin)
-				turn:SetTranslation(vector_origin)
-				ahead = turn * ahead
-				self:SetEyeTarget(eye + ahead * 64)
+			-- Eyes look at a world point, worked out against the model's
+			-- "eyes" attachment. That attachment is cached from the engine's
+			-- own bone setup, before the skater's pose is written, so it never
+			-- turns with the skater and a point picked from the posed head
+			-- had the eyes staring off to one side. So the target is picked
+			-- from that same cached attachment: straight ahead of it is
+			-- straight ahead of the face once posed.
+			if eyesAttachment then
+				local att = self:GetAttachment(eyesAttachment)
+				if att then self:SetEyeTarget(att.Pos + att.Ang:Forward() * 64) end
 			end
 			if not Skater.Skip.model then self:DrawModel(flags) end
 			-- The board draws with the skater rather than from a render hook:
