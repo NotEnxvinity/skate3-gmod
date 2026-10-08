@@ -523,18 +523,18 @@ function Skater.ShowModel(ply)
 			-- views like portals set up only part of it and refuse the rest.
 			if not callback and pose and pose.bones and not Skater.Skip.bones then
 				self:SetupBones()
+				-- Eyes look at a world point, worked out against the model's
+				-- "eyes" attachment as the engine set it up, before the
+				-- skater's pose is written, so it never turns with the
+				-- skater. So the target is picked straight ahead of that same
+				-- attachment, which is straight ahead of the face once posed.
+				-- It has to be read here: reading it after posing makes the
+				-- engine set the skeleton up again over the pose.
+				if eyesAttachment then
+					local att = self:GetAttachment(eyesAttachment)
+					if att then self:SetEyeTarget(att.Pos + att.Ang:Forward() * 64) end
+				end
 				BuildBones(self, self:GetBoneCount())
-			end
-			-- Eyes look at a world point, worked out against the model's
-			-- "eyes" attachment. That attachment is cached from the engine's
-			-- own bone setup, before the skater's pose is written, so it never
-			-- turns with the skater and a point picked from the posed head
-			-- had the eyes staring off to one side. So the target is picked
-			-- from that same cached attachment: straight ahead of it is
-			-- straight ahead of the face once posed.
-			if eyesAttachment then
-				local att = self:GetAttachment(eyesAttachment)
-				if att then self:SetEyeTarget(att.Pos + att.Ang:Forward() * 64) end
 			end
 			if not Skater.Skip.model then self:DrawModel(flags) end
 			-- The board draws with the skater rather than from a render hook:
