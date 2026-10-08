@@ -427,6 +427,8 @@ local pose
 local cv_bones = CreateClientConVar("skate3_bone_mode", "override", true, false,
 	"How the playermodel is posed: override (default) or callback (the older way)")
 
+local headBone, headSkin -- for the eyes: the head bone and its last skin
+
 local function BuildBones(ent, count)
 	if not pose or not pose.bones then return end
 	local skins = {}
@@ -449,6 +451,7 @@ local function BuildBones(ent, count)
 			skin = parent >= 0 and skins[parent] or pelvis
 		end
 		skins[i] = skin
+		if i == headBone then headSkin = skin end
 		if skin and rest[i] and writable[i] then
 			ent:SetBoneMatrix(i, skin * rest[i])
 		end
@@ -509,6 +512,7 @@ function Skater.ShowModel(ply)
 		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
+		headBone, headSkin = model:LookupBone("ValveBiped.Bip01_Head1"), nil
 		local callback = cv_bones:GetString() == "callback"
 		if callback then
 			model:AddCallback("BuildBonePositions", BuildBones)
@@ -520,6 +524,18 @@ function Skater.ShowModel(ply)
 			if not callback and pose and pose.bones and not Skater.Skip.bones then
 				self:SetupBones()
 				BuildBones(self, self:GetBoneCount())
+			end
+			-- Eyes look at a world point, which a clientside model leaves at
+			-- the map's origin, so they stared one way whatever the skater
+			-- did. Aim them ahead of the face instead: the model faces +X at
+			-- rest, so the head's skin turns +X into where the face points.
+			if headSkin and headBone and rest[headBone] then
+				local eye = Matrix(headSkin * rest[headBone]):GetTranslation()
+				local ahead = Vector(1, 0, 0)
+				local turn = Matrix(headSkin)
+				turn:SetTranslation(vector_origin)
+				ahead = turn * ahead
+				self:SetEyeTarget(eye + ahead * 64)
 			end
 			if not Skater.Skip.model then self:DrawModel(flags) end
 			-- The board draws with the skater rather than from a render hook:
