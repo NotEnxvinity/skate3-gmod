@@ -175,7 +175,11 @@ end
 
 -- ValveBiped bone, Skate 3 bone, and the child pair that aims the segment.
 local MAP = {
-	{ "Pelvis", "HIPS", "Spine", "SPINE" },
+	-- The pelvis isn't aimed at the spine: that segment is a few units long
+	-- and leans every which way between rigs (41 degrees back on one suit
+	-- model), so aiming it tipped the hips and pushed the belly out. It
+	-- keeps its own upright rest and just follows the skater's hips.
+	{ "Pelvis", "HIPS" },
 	{ "Spine", "SPINE", "Spine1", "SPINE1" },
 	{ "Spine1", "SPINE1", "Spine2", "SPINE2" },
 	{ "Spine2", "SPINE2", "Spine4", "SPINE3" },
