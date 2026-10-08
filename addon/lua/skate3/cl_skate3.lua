@@ -249,6 +249,15 @@ local function Health(now)
 	worstFrame, hitches = 0, 0
 end
 
+-- Whether a climbing "lua" figure is a leak or garbage the collector hasn't
+-- reached yet: a full collection frees garbage, and whatever stays is held.
+concommand.Add("skate3_gc", function()
+	local before = collectgarbage("count") / 1024
+	collectgarbage("collect")
+	local after = collectgarbage("count") / 1024
+	print(("[skate3] lua %.1f MB before a full collection, %.1f MB after (%.1f MB was garbage)"):format(before, after, before - after))
+end)
+
 -- Session markers, as in Skate 3: D-pad down drops one where the skater is
 -- (rolling on four wheels or standing), and holding D-pad up goes back to it,
 -- the hold taking longer the further away it is. Returns true when it just
