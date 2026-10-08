@@ -235,6 +235,36 @@ local writable = {}
 local USED = BONE_USED_BY_ANYTHING or 0x7FF00
 local fits = {} -- bone index -> { skate = name, pre = Matrix }
 
+-- The model's bind pose, the shape its mesh was built in, as bone -> model
+-- matrices. Nil when the engine won't give it.
+local function BindPose(ent, ragdoll)
+	local ok, _, bones = pcall(util.GetModelMeshes, ent:GetModel(), 0, 0)
+	if not ok or not bones then return nil end
+	-- Bone indices start at 0; shift a table numbered from 1.
+	if bones[0] == nil and bones[ent:GetBoneCount()] ~= nil then
+		local shifted = {}
+		for i, bone in pairs(bones) do shifted[i - 1] = bone end
+		bones = shifted
+	end
+	-- Which way round the matrices come isn't documented; the right way puts
+	-- the pelvis near where the "ragdoll" sequence has it.
+	local pelvis = ent:LookupBone("ValveBiped.Bip01_Pelvis")
+	local b = pelvis and bones[pelvis]
+	if not (b and b.matrix and ragdoll[pelvis]) then return nil end
+	local want = ragdoll[pelvis]:GetTranslation()
+	local invert = b.matrix:GetInverse():GetTranslation():DistToSqr(want)
+		< b.matrix:GetTranslation():DistToSqr(want)
+	local out = {}
+	for i, bone in pairs(bones) do
+		if bone.matrix then out[i] = invert and bone.matrix:GetInverse() or Matrix(bone.matrix) end
+	end
+	return out
+end
+
+local cv_rest = CreateClientConVar("skate3_rest_pose", "bind", true, false,
+	"What the playermodel's rest pose is read from: bind (default) or ragdoll (the older way). Takes effect on the next model change.")
+local restFrom = "" -- what the rest pose was read from, for the bone report
+
 -- The model's rest pose, read once with the entity at the origin.
 local function CaptureRest(ent)
 	ent:SetPos(vector_origin)
@@ -244,13 +274,19 @@ local function CaptureRest(ent)
 	ent:SetCycle(0)
 	ent:InvalidateBoneCache()
 	ent:SetupBones()
+	local ragdoll = {}
+	for i = 0, ent:GetBoneCount() - 1 do ragdoll[i] = ent:GetBoneMatrix(i) end
+	-- The bind pose rather than the "ragdoll" sequence: playermodels made
+	-- with the proportion trick (Halo Infinite's Master Chief, Doom Guy) get
+	-- the stock Valve skeleton in that sequence, with the neck down inside
+	-- the chest, and their heads ended up there.
+	local bindPose = cv_rest:GetString() ~= "ragdoll" and BindPose(ent, ragdoll) or nil
+	restFrom = bindPose and "bind pose" or "ragdoll sequence"
 	rest = {}
 	writable = {}
 	for i = 0, ent:GetBoneCount() - 1 do
-		-- A bone the engine didn't set up has no rest pose. Guessing one (the
-		-- identity) dropped everything weighted to it by its own height, which
-		-- sank some playermodels' heads into their chests, so it's left alone.
-		rest[i] = ent:GetBoneMatrix(i)
+		-- A bone with no rest pose is left to the engine rather than guessed.
+		rest[i] = bindPose and bindPose[i] or ragdoll[i]
 		writable[i] = rest[i] ~= nil and ent:BoneHasFlag(i, USED)
 	end
 end
@@ -421,7 +457,8 @@ concommand.Add("skate3_bone_report", function()
 	local ply = LocalPlayer()
 	local lines = {
 		"model " .. tostring(model.skate3Name) .. ", player wears " .. tostring(ply:GetModel()),
-		("%d bones, %d bodygroups"):format(model:GetBoneCount(), model:GetNumBodyGroups()),
+		("%d bones, %d bodygroups, rest pose from the %s"):format(model:GetBoneCount(),
+			model:GetNumBodyGroups(), restFrom),
 	}
 	for i = 0, model:GetNumBodyGroups() - 1 do
 		lines[#lines + 1] = ("bodygroup %d %s = %d (player %d)"):format(i, model:GetBodygroupName(i),
