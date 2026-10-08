@@ -187,7 +187,14 @@ concommand.Add("skate3_park_load", function(ply, _, args)
 		if IsValid(ply) then ply:ChatPrint("[skate3] No skatepark " .. id .. ". Run the setup app to convert them from your disc.") end
 		return
 	end
-	if game.GetMap() == cv_base:GetString() then
+	-- The park's own map, when the addon has it.
+	local own = Park.Maps[id]
+	if own and own ~= game.GetMap() and file.Exists("maps/" .. own .. ".bsp", "GAME") then
+		PrintMessage(HUD_PRINTTALK, "[skate3] Loading " .. info.name .. "...")
+		timer.Simple(0.5, function() RunConsoleCommand("changelevel", own) end)
+		return
+	end
+	if game.GetMap() == cv_base:GetString() or game.GetMap() == own then
 		spawnAt = BuildPark(id)
 		for _, p in ipairs(player.GetAll()) do DropOnPark(p) end
 		return
@@ -199,6 +206,22 @@ concommand.Add("skate3_park_load", function(ply, _, args)
 end)
 
 hook.Add("InitPostEntity", "skate3_park_load", function()
+	-- A skatepark's own map builds its park; a park picked on another map
+	-- is built on the base map once it has loaded.
+	local own = Park.ParkOfMap(game.GetMap())
+	if own then
+		file.Delete(PENDING)
+		spawnAt = BuildPark(own)
+		if not spawnAt then
+			print("[skate3] This map's skatepark isn't converted yet. Run the setup app with your Skate 3 disc.")
+			hook.Add("PlayerInitialSpawn", "skate3_park_missing", function(ply)
+				timer.Simple(5, function()
+					if IsValid(ply) then ply:ChatPrint("[skate3] This map's skatepark comes from your own Skate 3 disc: run the setup app to convert it.") end
+				end)
+			end)
+		end
+		return
+	end
 	local id = file.Read(PENDING, "DATA")
 	if not id then return end
 	file.Delete(PENDING)

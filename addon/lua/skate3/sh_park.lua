@@ -42,6 +42,25 @@ Park.Presets = {
 }
 for _, p in ipairs(Park.Presets) do Park.Presets[p.id] = p end
 
+-- The addon's own maps for the disc's skateparks (setup/bspmap.py writes
+-- them): an empty grass field the park is built in when the map loads.
+Park.Maps = {
+	megapark_stadium = "gm_skate3_megapark",
+	map_maloof = "gm_skate3_maloof",
+	map_blackbox = "gm_skate3_blackbox",
+	map_downtown_park = "gm_skate3_downtown_park",
+	map_industrial_park = "gm_skate3_industrial_park",
+	map_skate_school = "gm_skate3_skate_school",
+	map_start_park = "gm_skate3_start_park",
+}
+
+-- The park a map was made for, or nil.
+function Park.ParkOfMap(map)
+	for id, name in pairs(Park.Maps) do
+		if name == map then return id end
+	end
+end
+
 -- A piece's whole data, read once.
 function Park.Get(id)
 	if cache[id] == nil then
