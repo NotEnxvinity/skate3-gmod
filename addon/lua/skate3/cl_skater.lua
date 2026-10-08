@@ -275,37 +275,75 @@ local function BindPose(ent, ragdoll)
 		{ "transposed", function(m) return Transposed(m) end },
 		{ "transposed, inverted", function(m) return Transposed(m):GetInverse() end },
 	}
+	-- The bind pose came out with every bone turned on every model, even
+	-- with its positions right: either the whole pose sits in the space the
+	-- model was authored in, or each bone's axes follow another convention.
+	-- So each reading is also tried under the 24 right-angle turns, applied
+	-- to the whole pose (positions turn too) or to each bone's own axes.
+	local turns = {}
+	local axes = { Vector(1, 0, 0), Vector(0, 1, 0), Vector(0, 0, 1) }
+	for a = 1, 3 do
+		for b = 1, 3 do
+			if a ~= b then
+				for _, sa in ipairs({ 1, -1 }) do
+					for _, sb in ipairs({ 1, -1 }) do
+						local x, y = axes[a] * sa, axes[b] * sb
+						local z = x:Cross(y)
+						turns[#turns + 1] = Matrix({
+							{ x.x, y.x, z.x, 0 },
+							{ x.y, y.y, z.y, 0 },
+							{ x.z, y.z, z.z, 0 },
+							{ 0, 0, 0, 1 },
+						})
+					end
+				end
+			end
+		end
+	end
 	local pelvis = ent:LookupBone("ValveBiped.Bip01_Pelvis")
 	if not (pelvis and ragdoll[pelvis]) then return nil end
 	local want = ragdoll[pelvis]:GetTranslation()
 	local best, bestScore
 	for _, reading in ipairs(readings) do
-		local out, ok2 = {}, true
+		local read, ok2 = {}, true
 		for i, bone in pairs(bones) do
 			if bone.matrix then
 				local good, m = pcall(reading[2], bone.matrix)
-				if good and m then out[i] = m else ok2 = false break end
+				if good and m then read[i] = m else ok2 = false break end
 			end
 		end
-		local p = ok2 and out[pelvis]
-		if p and p:GetTranslation():Distance(want) < 32 then
-			local score, n = 0, 0
-			for i, m in pairs(out) do
-				local r = ragdoll[i]
-				if r then
-					score = score + (m:GetForward() - r:GetForward()):Length()
-						+ (m:GetUp() - r:GetUp()):Length()
-					n = n + 1
+		for t = 1, ok2 and #turns * 2 or 0 do
+			local whole = t <= #turns
+			local turn = turns[whole and t or t - #turns]
+			local function Apply(m) return whole and turn * m or m * turn end
+			local p = read[pelvis] and Apply(read[pelvis])
+			if p and p:GetTranslation():Distance(want) < 32 then
+				local score, n = 0, 0
+				for i, m in pairs(read) do
+					local r = ragdoll[i]
+					if r then
+						m = Apply(m)
+						score = score + (m:GetForward() - r:GetForward()):Length()
+							+ (m:GetUp() - r:GetUp()):Length()
+						n = n + 1
+					end
 				end
-			end
-			score = n > 0 and score / n or math.huge
-			if not bestScore or score < bestScore then
-				best, bestScore = { out = out, name = reading[1] }, score
+				score = n > 0 and score / n or math.huge
+				if not bestScore or score < bestScore then
+					best, bestScore = { read = read, apply = Apply, name = reading[1],
+						turn = (whole and "whole " or "bone ") .. (whole and t or t - #turns) }, score
+				end
 			end
 		end
 	end
 	if not best then return nil end
-	return best.out, ("%s, turn mismatch %.2f"):format(best.name, bestScore)
+	-- No reading lines up: a twisted body is worse than the old way.
+	if bestScore > 1 then
+		return nil, ("%s, %s, mismatch %.2f"):format(best.name, best.turn, bestScore)
+	end
+	local out = {}
+	for i, m in pairs(best.read) do out[i] = best.apply(m) end
+	return out, ("%s, %s, mismatch %.2f"):format(best.name, best.turn, bestScore)
 end
 
 local cv_rest = CreateClientConVar("skate3_rest_pose", "bind", true, false,
@@ -329,7 +367,8 @@ local function CaptureRest(ent)
 	-- the chest, and their heads ended up there.
 	local bindPose, how
 	if cv_rest:GetString() ~= "ragdoll" then bindPose, how = BindPose(ent, ragdoll) end
-	restFrom = bindPose and ("bind pose (" .. how .. ")") or "ragdoll sequence"
+	restFrom = bindPose and ("bind pose (" .. how .. ")")
+		or ("ragdoll sequence" .. (how and (" (bind pose didn't line up: " .. how .. ")") or ""))
 	print("[skate3] rest pose from the " .. restFrom)
 	rest = {}
 	writable = {}
