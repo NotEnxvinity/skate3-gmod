@@ -3,6 +3,7 @@ local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
 include("skate3/cl_menu.lua")
 local Park = include("skate3/cl_park.lua")
+local Props = include("skate3/cl_props.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -45,6 +46,16 @@ local function V(t)
 	return Vector(t[1], t[2], t[3])
 end
 
+-- Triangles the .bsp's brushes don't cover: the map's props and park pieces.
+local function ExtraTriangles(bsp)
+	local out = {}
+	for _, list in ipairs({ Props.Triangles(bsp), Park.Triangles() }) do
+		local n = #out
+		for i = 1, #list do out[n + i] = list[i] end
+	end
+	return out
+end
+
 local function Load()
 	if jit.arch ~= "x64" then
 		Say("Skate 3 mode needs 64-bit Garry's Mod (the x86-64 beta branch).")
@@ -72,7 +83,7 @@ local function Load()
 		return
 	end
 	mapBsp = bsp
-	local started, loadErr = skate3.LoadMap(bsp, Park.Triangles())
+	local started, loadErr = skate3.LoadMap(bsp, ExtraTriangles(bsp))
 	if not started then
 		Say(loadErr)
 		return
@@ -147,7 +158,7 @@ local function RebuildCollision()
 		endedOnFoot = pose and pose.state and pose.state:find("^Biped") ~= nil
 		Stop()
 	end
-	local extra = Park.Triangles()
+	local extra = ExtraTriangles(mapBsp)
 	local ok, err = skate3.LoadMap(mapBsp, extra)
 	if not ok then
 		Say(err)
@@ -155,7 +166,7 @@ local function RebuildCollision()
 	end
 	rails = nil
 	status = { state = "loading" }
-	print(("[skate3] rebuilding collision with %d park piece triangles"):format(#extra / 9))
+	print(("[skate3] rebuilding collision with %d prop and park piece triangles"):format(#extra / 9))
 	if endedAt and boardHeld then
 		rideWhenReady = true
 		resumeAt = endedAt
