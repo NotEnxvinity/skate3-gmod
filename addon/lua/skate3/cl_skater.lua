@@ -503,7 +503,7 @@ local pickedName, pickedPath -- the last cl_playermodel looked up
 -- the player's own pick arrives, so there the pick itself wins.
 local function ModelFor(ply)
 	-- Posing the real body: it's whatever model the player has.
-	if cv_body:GetString() ~= "copy" and Body.Ready() then return ply:GetModel() end
+	if cv_body:GetString() ~= "copy" then return ply:GetModel() end
 	local pick = GetConVar("cl_playermodel")
 	pick = pick and pick:GetString() or ""
 	if GAMEMODE and GAMEMODE.IsSandboxDerived and pick ~= "" and pick ~= "none" then
@@ -553,7 +553,7 @@ function Skater.ShowModel(ply)
 		CaptureRest(model)
 		Fit(model)
 		local real, why = cv_body:GetString() ~= "copy", nil
-		if real then real, why = Body.Ready() end
+		if real then real, why = Body.Ready(model) end
 		if cv_body:GetString() ~= "copy" and not real then
 			print("[skate3] can't pose your own body here (" .. tostring(why) .. "), using a copy of it instead")
 		end

@@ -79,7 +79,7 @@ return function(Skater)
 			if not IsValid(ply) or not ply:Alive() or not ply:GetNW2Bool("skate3_riding")
 				or now - frames[#frames].t > STALE then
 				Let(ply)
-			elseif Body.Ready() then
+			elseif Body.Ready(ply:GetModel()) then
 				local f = FrameAt(frames, now - DELAY)
 				local turns, offsets = {}, {}
 				for _, bone in ipairs(f.bones) do turns[bone.i] = Body.QuatMatrix(bone.q) end

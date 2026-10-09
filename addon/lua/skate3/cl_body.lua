@@ -82,8 +82,8 @@ Body.RotOnly = RotOnly
 -- it, and keep whichever reading matches (the same trick that sorted out the
 -- bind pose).
 
-local conv -- { pre, perm, inverse, space }, or false when nothing matched
-local convError
+local conv -- { pre, perm, inverse, space } once measured
+local convError -- why the last measurement failed
 
 local PERMS = { { 1, 2, 3 }, { 1, 3, 2 }, { 2, 1, 3 }, { 2, 3, 1 }, { 3, 1, 2 }, { 3, 2, 1 } }
 
@@ -105,45 +105,57 @@ local function RotDiff(a, b)
 		+ (a:GetRight() - b:GetRight()):Length()
 end
 
-local CALIBRATE_MODEL = "models/player/kleiner.mdl"
+-- Bones to try the test turn on, the first the model has (with a parent).
+local TEST_BONES = { "ValveBiped.Bip01_Spine1", "ValveBiped.Bip01_Spine2", "ValveBiped.Bip01_Spine",
+	"ValveBiped.Bip01_L_Forearm", "ValveBiped.Bip01_R_Forearm", "ValveBiped.Bip01_Head1" }
 
-local function Calibrate()
-	conv = false
-	local ent = ClientsideModel(CALIBRATE_MODEL, RENDERGROUP_OPAQUE)
-	if not IsValid(ent) then
-		convError = "couldn't load " .. CALIBRATE_MODEL
-		return
+-- Measured on a model that's already loaded and set up fine: the player's
+-- own (a stock model made on the spot wasn't always ready yet, and the test
+-- then failed). source is that entity, or a model path for a stand-in.
+local function Calibrate(source)
+	local ent, made = source, false
+	if isstring(source) then
+		ent, made = ClientsideModel(source, RENDERGROUP_OPAQUE), true
+		if not IsValid(ent) then return "couldn't load " .. source end
+		ent:SetNoDraw(true)
 	end
-	ent:SetNoDraw(true)
+	if not IsValid(ent) then return "no model to measure on" end
+	local function Done(why)
+		if made then ent:Remove() end
+		return why
+	end
 	ent:SetPos(vector_origin)
 	ent:SetAngles(angle_zero)
 	local seq = ent:LookupSequence("idle_all_01")
-	ent:ResetSequence(seq >= 0 and seq or 0)
+	ent:ResetSequence(seq and seq >= 0 and seq or 0)
 	ent:SetCycle(0)
 	ent:SetPlaybackRate(0)
-	local bone = ent:LookupBone("ValveBiped.Bip01_Spine1")
-	local parent = bone and ent:GetBoneParent(bone)
-	if not bone or not parent or parent < 0 then
-		ent:Remove()
-		convError = "no spine on " .. CALIBRATE_MODEL
-		return
+	local bone, parent
+	for _, name in ipairs(TEST_BONES) do
+		local b = ent:LookupBone(name)
+		local p = b and ent:GetBoneParent(b)
+		if b and p and p >= 0 then bone, parent = b, p break end
 	end
+	if not bone then return Done("no spine or arm bones on " .. tostring(ent:GetModel())) end
 	local function Read()
 		ent:InvalidateBoneCache()
 		ent:SetupBones()
 		return ent:GetBoneMatrix(parent), ent:GetBoneMatrix(bone)
 	end
+	local oldAng, oldPos = ent:GetManipulateBoneAngles(bone), ent:GetManipulateBonePosition(bone)
+	ent:ManipulateBoneAngles(bone, angle_zero)
+	ent:ManipulateBonePosition(bone, vector_origin)
 	local P0, B0 = Read()
 	local TEST_ANG, TEST_POS = Angle(25, 40, -15), Vector(3, -2, 4)
 	ent:ManipulateBoneAngles(bone, TEST_ANG)
 	local P1, B1 = Read()
 	ent:ManipulateBonePosition(bone, TEST_POS)
 	local _, B2 = Read()
-	ent:Remove()
-	if not (P0 and B0 and P1 and B1 and B2) then
-		convError = "the test bone wasn't set up"
-		return
-	end
+	ent:ManipulateBoneAngles(bone, oldAng or angle_zero)
+	ent:ManipulateBonePosition(bone, oldPos or vector_origin)
+	ent:InvalidateBoneCache()
+	Done()
+	if not (P0 and B0 and P1 and B1 and B2) then return "the test bone wasn't set up" end
 	local L0 = RotOnly(P0):GetInverseTR() * RotOnly(B0) -- local turn, untouched
 	local L1 = RotOnly(P1):GetInverseTR() * RotOnly(B1) -- local turn, manipulated
 	local post = L0:GetInverseTR() * L1 -- if the manipulation comes after the animation
@@ -159,8 +171,7 @@ local function Calibrate()
 		end
 	end
 	if bestErr > 0.05 then
-		convError = ("no reading of the test turn matched (closest off by %.2f)"):format(bestErr)
-		return
+		return ("no reading of the test turn matched (closest off by %.2f)"):format(bestErr)
 	end
 	-- The offset: in the parent's axes, the bone's before its turn, or after.
 	local moved = B2:GetTranslation() - B1:GetTranslation()
@@ -175,8 +186,7 @@ local function Calibrate()
 		if not spaceErr or err < spaceErr then bestSpace, spaceErr = name, err end
 	end
 	if spaceErr > 0.5 then
-		convError = ("the test offset landed off by %.1f units"):format(spaceErr)
-		return
+		return ("the test offset landed off by %.1f units"):format(spaceErr)
 	end
 	best.space = bestSpace
 	conv = best
@@ -186,10 +196,22 @@ local function Calibrate()
 		best.inverse and " inverted" or "", axes[bestSpace]))
 end
 
--- Whether real-body posing can work here at all; the reason when it can't.
-function Body.Ready()
-	if conv == nil then Calibrate() end
-	return conv ~= false, convError
+-- Whether real-body posing works here; the reason when it doesn't. The
+-- first call measures it, on source (an entity of a loaded model, or a model
+-- path); a failed measurement is retried with the next model, at most every
+-- few seconds. Without source it only reports.
+local retryAt = 0
+function Body.Ready(source)
+	if conv then return true end
+	if source and RealTime() >= retryAt then
+		local why = Calibrate(source)
+		if why then
+			convError = why
+			retryAt = RealTime() + 5
+			print("[skate3] couldn't measure how bone turns apply: " .. why)
+		end
+	end
+	return conv and true or false, convError
 end
 
 function Body.Conv()
