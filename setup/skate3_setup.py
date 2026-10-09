@@ -247,7 +247,7 @@ def self_test():
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 
-def window(gmod):
+def window(gmod, with_addon_default=False):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
@@ -275,7 +275,7 @@ def window(gmod):
             target.set(picked)
     ttk.Button(row, text='Change...', command=browse_gmod).pack(side='left')
 
-    with_addon = tk.BooleanVar(value=False)
+    with_addon = tk.BooleanVar(value=with_addon_default)
     ttk.Checkbutton(frame, variable=with_addon, text=(
         'Also install the Lua addon (only for testing a build that isn\'t on the Workshop yet)')).pack(anchor='w', pady=(10, 0))
 
@@ -353,7 +353,7 @@ def main():
         return 0
     gmod = args.gmod or find_gmod()
     if args.game is None:
-        window(gmod)
+        window(gmod, args.with_addon)
         return 0
     if gmod is None:
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)

@@ -4,6 +4,11 @@ modules and vgmstream (which decodes the disc's sounds), as one executable for
 the platform it runs on.
 
     python setup/package.py --engine <engine checkout> --modules <folder> --vgmstream <folder> --out <folder>
+    python setup/package.py --folder --modules <folder> --out <folder>
+
+--folder makes a plain folder of our own source instead, run by
+skate3-setup.sh with the system's Python; the launcher fetches the engine's
+converters and vgmstream on the player's machine.
 
 `--modules` holds gmcl_skate3_win64.dll and gmcl_skate3_linux64.dll;
 `--vgmstream` holds that platform's vgmstream-cli release, with its licence.
@@ -35,16 +40,37 @@ def stage_tools(engine, stage):
         shutil.copy2(path, out)
 
 
+def stage_folder(modules, out):
+    shutil.rmtree(out, ignore_errors=True)
+    out.mkdir(parents=True)
+    for path in HERE.glob('*.py'):
+        if not path.name.startswith('test_') and path.name != 'package.py':
+            shutil.copy2(path, out / path.name)
+    shutil.copytree(HERE / 'skate3_formats', out / 'skate3_formats',
+                    ignore=shutil.ignore_patterns('__pycache__', 'test_*'))
+    shutil.copy2(HERE / 'skate3-setup.sh', out / 'skate3-setup.sh')
+    (out / 'bin').mkdir()
+    for m in MODULES:
+        shutil.copy2(modules / m, out / 'bin' / m)
+    shutil.copytree(HERE.parent / 'addon/lua', out / 'addon/lua')
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--engine', type=Path, required=True)
+    parser.add_argument('--engine', type=Path)
     parser.add_argument('--modules', type=Path, required=True)
-    parser.add_argument('--vgmstream', type=Path, required=True)
+    parser.add_argument('--vgmstream', type=Path)
     parser.add_argument('--out', type=Path, required=True)
+    parser.add_argument('--folder', action='store_true')
     args = parser.parse_args()
     for m in MODULES:
         if not (args.modules / m).is_file():
             raise SystemExit(f'missing {args.modules / m}')
+    if args.folder:
+        stage_folder(args.modules, args.out.resolve())
+        return
+    if args.engine is None or args.vgmstream is None:
+        parser.error('--engine and --vgmstream are needed for the executable')
     if not any((args.vgmstream / name).is_file() for name in ('vgmstream-cli', 'vgmstream-cli.exe')):
         raise SystemExit(f'missing vgmstream-cli in {args.vgmstream}')
     with tempfile.TemporaryDirectory() as tmp:
