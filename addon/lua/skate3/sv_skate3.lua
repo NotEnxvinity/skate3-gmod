@@ -1,5 +1,8 @@
 util.AddNetworkString("skate3_state")
 util.AddNetworkString("skate3_move")
+util.AddNetworkString("skate3_pose")
+
+local Pose = include("skate3/sh_pose.lua")
 
 local cv_enabled = CreateConVar("skate3_enabled", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY, "Allow players to use Skate 3 mode")
 
@@ -47,6 +50,27 @@ end)
 -- its footsteps would sound in place; the skate sounds play the real ones.
 hook.Add("PlayerFootstep", "skate3_quiet", function(ply)
 	if ply.Skate3 then return true end
+end)
+
+-- A skater's pose, passed on to everyone near them (their game runs the
+-- skating; the others pose that player's body from this).
+local POSE_EVERY = 1 / 30
+net.Receive("skate3_pose", function(len, ply)
+	if not ply.Skate3 or len > 16000 then return end
+	local now = SysTime()
+	if now - (ply.skate3PoseAt or 0) < POSE_EVERY then return end
+	ply.skate3PoseAt = now
+	local f = Pose.Read()
+	if not f or f.origin:DistToSqr(ply:GetPos()) > MAX_STEP * MAX_STEP then return end
+	local to = RecipientFilter()
+	to:AddPVS(f.origin)
+	to:RemovePlayer(ply)
+	if to:GetCount() == 0 then return end
+	-- Unreliable: a late frame is useless, a newer one follows.
+	net.Start("skate3_pose", true)
+	net.WriteEntity(ply)
+	Pose.Write(f)
+	net.Send(to)
 end)
 
 hook.Add("PlayerDeath", "skate3_stop", ForceStop)

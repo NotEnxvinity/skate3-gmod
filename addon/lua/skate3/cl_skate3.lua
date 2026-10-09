@@ -4,6 +4,8 @@ local Score = include("skate3/cl_score.lua")
 include("skate3/cl_menu.lua")
 local Park = include("skate3/cl_park.lua")
 local Props = include("skate3/cl_props.lua")
+local Pose = include("skate3/sh_pose.lua")
+include("skate3/cl_others.lua")(Skater)
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -374,6 +376,13 @@ hook.Add("Think", "skate3_step", function()
 		net.Start("skate3_move")
 		net.WriteVector(V(pose.pos))
 		net.SendToServer()
+		-- Other players see your body posed from this.
+		local frame = Skater.NetFrame()
+		if frame then
+			net.Start("skate3_pose", true)
+			Pose.Write(frame)
+			net.SendToServer()
+		end
 	end
 end)
 
@@ -417,14 +426,15 @@ hook.Add("CalcView", "skate3_view", function()
 		origin = origin,
 		angles = forward:AngleEx(up),
 		fov = c.fov,
-		drawviewer = false,
+		-- Your own body is the skater (unless it's posed as a copy).
+		drawviewer = Skater.RealBody(),
 	}
 end)
 
--- The skater stands in for the player while skating; the player's own model
--- would otherwise show up in mirrors and portals.
+-- With skate3_body copy, the copy stands in for the player while skating;
+-- the player's own model would otherwise show up in mirrors and portals.
 hook.Add("PrePlayerDraw", "skate3_hide", function(ply)
-	if active and ply == LocalPlayer() then return true end
+	if active and ply == LocalPlayer() and not Skater.RealBody() then return true end
 end)
 
 -- The skate camera replaces the first-person view, so no hands or weapon.

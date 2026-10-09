@@ -2,12 +2,15 @@
 -- and their playermodel posed from the skater's skeleton.
 
 local Skater = {}
+local Body = include("skate3/cl_body.lua")
+Skater.Body = Body
+local Anim = include("skate3/cl_skater_anim.lua")
 
 -- For hunting a leak: parts of the per-frame work to switch off while riding,
 -- as a list such as "board,bones". board, bones, model, score, sounds, pose,
 -- step and net.
 local cv_skip = CreateClientConVar("skate3_debug_skip", "", false, false,
-	"Debug: per-frame work to skip, comma separated (board, bones, model, score, sounds, pose, step, net, view)")
+	"Debug: per-frame work to skip, comma separated (board, bones, model, score, sounds, pose, step, net, view, anim)")
 Skater.Skip = {}
 local function ReadSkip()
 	Skater.Skip = {}
@@ -171,7 +174,8 @@ end
 -- Ported from chasmlol/2010-rust-rewrite-mashup (Apache-2.0) at f608f85,
 -- crates/render_anim/src/skate/rig.rs: each ValveBiped bone's bind segment is
 -- aligned onto the skater's, then follows that skater bone's motion. Unmapped
--- bones (fingers, neck, head) ride their nearest mapped ancestor.
+-- bones (fingers, hair, tails) ride their nearest mapped ancestor; the hands
+-- are closed and the feet set on the board afterwards, in cl_skater_anim.lua.
 
 -- ValveBiped bone, Skate 3 bone, and the child pair that aims the segment.
 local MAP = {
@@ -183,6 +187,11 @@ local MAP = {
 	{ "Spine", "SPINE", "Spine1", "SPINE1" },
 	{ "Spine1", "SPINE1", "Spine2", "SPINE2" },
 	{ "Spine2", "SPINE2", "Spine4", "SPINE3" },
+	-- Neck and head turn with the skater's rather than staying locked to the
+	-- chest (skate3_pose_head 0 for the old way).
+	{ "Spine4", "SPINE3", "Neck1", "NECK", head = true },
+	{ "Neck1", "NECK", "Head1", "HEAD", head = true },
+	{ "Head1", "HEAD", head = true },
 	{ "L_Clavicle", "LEFTSHOULDER", "L_UpperArm", "LEFTARM" },
 	{ "L_UpperArm", "LEFTARM", "L_Forearm", "LEFTFOREARM" },
 	{ "L_Forearm", "LEFTFOREARM", "L_Hand", "LEFTHAND" },
@@ -193,13 +202,23 @@ local MAP = {
 	{ "R_Hand", "RIGHTHAND" },
 	{ "L_Thigh", "LEFTUPLEG", "L_Calf", "LEFTLEG" },
 	{ "L_Calf", "LEFTLEG", "L_Foot", "LEFTFOOT" },
-	{ "L_Foot", "LEFTFOOT", "L_Toe0", "LEFTTOEBASE" },
-	{ "L_Toe0", "LEFTTOEBASE" },
+	{ "L_Foot", "LEFTFOOT", "L_Toe0", "LEFTTOEBASE", flat = true },
+	{ "L_Toe0", "LEFTTOEBASE", flat = true },
 	{ "R_Thigh", "RIGHTUPLEG", "R_Calf", "RIGHTLEG" },
 	{ "R_Calf", "RIGHTLEG", "R_Foot", "RIGHTFOOT" },
-	{ "R_Foot", "RIGHTFOOT", "R_Toe0", "RIGHTTOEBASE" },
-	{ "R_Toe0", "RIGHTTOEBASE" },
+	{ "R_Foot", "RIGHTFOOT", "R_Toe0", "RIGHTTOEBASE", flat = true },
+	{ "R_Toe0", "RIGHTTOEBASE", flat = true },
 }
+
+-- Feet aren't aimed at the toe: where the toe bone sits differs between
+-- models, and aiming at it stood some (Master Chief, TB3) on tiptoe. A flat
+-- foot copies how the skater's foot turns from its rest instead, so a model
+-- that stands flat at rest stands flat on the board (skate3_foot_mode aim
+-- for the old way).
+local cv_footMode = CreateClientConVar("skate3_foot_mode", "flat", true, false,
+	"How the playermodel's feet follow the skater's: flat (default) or aim (the older way, aimed at the toe)")
+local cv_head = CreateClientConVar("skate3_pose_head", "1", true, false,
+	"Neck and head follow the skater's (0 = locked to the chest, the older way)")
 
 -- Playermodels face +X at rest; the skater's bind faces -Y.
 local FACING = Angle(0, -90, 0)
@@ -231,7 +250,11 @@ local function Facing(v)
 	return v
 end
 
-local model -- the clientside stand-in for the local player
+local model -- the clientside copy of the local player's model (drawn only with skate3_body copy)
+local frozen -- the model's frozen frame, from Body.FrozenLocals, when posing the real body
+local pelvis -- the pelvis bone index, the one bone that's also shifted
+local extras = {} -- bone index -> a local turn Matrix for bones the retarget leaves alone
+local skeleton = {} -- bone index -> true for the model's ValveBiped bones
 local rest = {} -- bone index -> the model's bind Matrix at the origin
 -- Bones the engine sets up at all. Writing any other (unused helper bones on
 -- some playermodels) logs "Bone is unwriteable" every frame.
@@ -389,22 +412,27 @@ local function Fit(ent)
 		local i = ent:LookupBone("ValveBiped.Bip01_" .. name)
 		return i and rest[i] and rest[i]:GetTranslation(), i
 	end
+	local flat = cv_footMode:GetString() ~= "aim"
 	for _, row in ipairs(MAP) do
 		local from, index = Pos(row[1])
 		local skate = bind[row[2]]
+		if row.head and not cv_head:GetBool() then skate = nil end
 		if from and skate then
 			local to = skate:GetTranslation()
 			local a, b
 			local child = row[3] and Pos(row[3])
 			local skateChild = row[4] and bind[row[4]]
-			if child and skateChild then
+			if row.flat and flat then
+				-- No aiming: just the facing turn, below.
+			elseif child and skateChild then
 				a, b = Facing(child - from), skateChild:GetTranslation() - to
 			else
 				-- Ends of chains keep their parent's alignment.
 				local parent = ent:GetBoneParent(index)
 				local parentRow
 				for _, r in ipairs(MAP) do
-					if ent:LookupBone("ValveBiped.Bip01_" .. r[1]) == parent then parentRow = r end
+					if ent:LookupBone("ValveBiped.Bip01_" .. r[1]) == parent
+						and not (r.head and not cv_head:GetBool()) then parentRow = r end
 				end
 				if parentRow and rest[parent] and bind[parentRow[2]] then
 					a, b = Facing(from - rest[parent]:GetTranslation()), to - bind[parentRow[2]]:GetTranslation()
@@ -424,8 +452,11 @@ local function Fit(ent)
 end
 
 local pose
+local cv_body = CreateClientConVar("skate3_body", "real", true, false,
+	"Which body skates: real (your own playermodel, posed) or copy (the older way: a copy of it, posed; you're hidden)")
+local lastWorld -- the last posed skeleton, for skate3_anim_report
 local cv_bones = CreateClientConVar("skate3_bone_mode", "override", true, false,
-	"How the playermodel is posed: override (default) or callback (the older way)")
+	"With skate3_body copy, how the copy is posed: override (default) or callback")
 
 local function BuildBones(ent, count)
 	if not pose or not pose.bones then return end
@@ -438,6 +469,7 @@ local function BuildBones(ent, count)
 		local posed = fit and pose.bones[fit.skate]
 		if posed then pelvis = Mat(posed) * fit.pre break end
 	end
+	local world = {}
 	for i = 0, count - 1 do
 		local fit = fits[i]
 		local posed = fit and pose.bones[fit.skate]
@@ -449,10 +481,19 @@ local function BuildBones(ent, count)
 			skin = parent >= 0 and skins[parent] or pelvis
 		end
 		skins[i] = skin
-		if skin and rest[i] and writable[i] then
-			ent:SetBoneMatrix(i, skin * rest[i])
-		end
+		if skin and rest[i] then world[i] = skin * rest[i] end
 	end
+	-- Feet onto the board and hands around it.
+	if not Skater.Skip.anim then Anim.PostPose(ent, world, pose) end
+	lastWorld = world
+	for i = 0, count - 1 do
+		if world[i] and writable[i] then ent:SetBoneMatrix(i, world[i]) end
+	end
+end
+
+-- Refit when the foot or head mode changes, no need to change models.
+for _, name in ipairs({ "skate3_foot_mode", "skate3_pose_head" }) do
+	cvars.AddChangeCallback(name, function() if IsValid(model) then Fit(model) end end, "skate3_anim")
 end
 
 local owner
@@ -461,6 +502,8 @@ local pickedName, pickedPath -- the last cl_playermodel looked up
 -- The model to ride as. Sandbox can spawn the first life as Kleiner before
 -- the player's own pick arrives, so there the pick itself wins.
 local function ModelFor(ply)
+	-- Posing the real body: it's whatever model the player has.
+	if cv_body:GetString() ~= "copy" and Body.Ready() then return ply:GetModel() end
 	local pick = GetConVar("cl_playermodel")
 	pick = pick and pick:GetString() or ""
 	if GAMEMODE and GAMEMODE.IsSandboxDerived and pick ~= "" and pick ~= "none" then
@@ -509,11 +552,31 @@ function Skater.ShowModel(ply)
 		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
-		local callback = cv_bones:GetString() == "callback"
+		local real, why = cv_body:GetString() ~= "copy", nil
+		if real then real, why = Body.Ready() end
+		if cv_body:GetString() ~= "copy" and not real then
+			print("[skate3] can't pose your own body here (" .. tostring(why) .. "), using a copy of it instead")
+		end
+		model.skate3Real = real
+		if real then
+			-- This copy is only measured, never drawn: your own body skates.
+			model:SetNoDraw(true)
+			frozen = Body.FrozenLocals(model)
+			pelvis = model:LookupBone("ValveBiped.Bip01_Pelvis")
+			skeleton = {}
+			for i = 0, model:GetBoneCount() - 1 do
+				skeleton[i] = (model:GetBoneName(i) or ""):find("^ValveBiped%.Bip01_") ~= nil
+			end
+			print(("[skate3] posing your own body, frozen on %s"):format(frozen.sequence))
+		end
+		local callback = not real and cv_bones:GetString() == "callback"
+		-- The finishing touches work on whichever body is drawn.
+		model.skate3AnimEnt = real and ply or model
+		Anim.Setup(model.skate3AnimEnt, rest, data)
 		if callback then
 			model:AddCallback("BuildBonePositions", BuildBones)
 		end
-		model.RenderOverride = function(self, flags)
+		if not real then model.RenderOverride = function(self, flags)
 			-- Pose the bones right before drawing, after setting up the whole
 			-- skeleton. Inside the engine's own setup (the callback) other
 			-- views like portals set up only part of it and refuse the rest.
@@ -526,7 +589,7 @@ function Skater.ShowModel(ply)
 			-- another addon's hook returning a value skips every hook after
 			-- it, which hid the board on some maps.
 			if pose and not Skater.Skip.board then Skater.DrawBoard(pose) end
-		end
+		end end
 		model:SetRenderBounds(Vector(-96, -96, -32), Vector(96, 96, 128))
 	end
 	-- Skin and bodygroups only carry over when the player really wears this
@@ -538,7 +601,7 @@ function Skater.ShowModel(ply)
 		end
 	end
 	model.GetPlayerColor = function() return ply:GetPlayerColor() end
-	model:SetNoDraw(false)
+	if not model.skate3Real then model:SetNoDraw(false) end
 end
 
 -- What the retarget does with each of the playermodel's bones, for working
@@ -551,6 +614,8 @@ concommand.Add("skate3_bone_report", function()
 		"model " .. tostring(model.skate3Name) .. ", player wears " .. tostring(ply:GetModel()),
 		("%d bones, %d bodygroups, rest pose from the %s"):format(model:GetBoneCount(),
 			model:GetNumBodyGroups(), restFrom),
+		model.skate3Real and ("posing your own body, frozen on %s"):format(frozen and frozen.sequence or "?")
+			or "posing a copy (skate3_body copy, or your own body couldn't be posed)",
 	}
 	for i = 0, model:GetNumBodyGroups() - 1 do
 		lines[#lines + 1] = ("bodygroup %d %s = %d (player %d)"):format(i, model:GetBodygroupName(i),
@@ -571,20 +636,189 @@ concommand.Add("skate3_bone_report", function()
 	print("[skate3] saved garrysmod/data/skate3/bone_report.txt")
 end)
 
+-- A bone the retarget doesn't move (a finger, say) turned by local rotation
+-- m (nil to stop), on top of the frozen frame. Only with the real body.
+function Skater.SetExtra(bone, m)
+	extras[bone] = m
+end
+
+-- The turn and offset of every posed bone of the real body, for the skater's
+-- pose p, and the same as a frame to send other players.
+local lastFrame
+local pelvisWant -- where the hips should have ended up last frame
+local offFrames, offWarned = 0, false
+
+-- Whether the engine put the body where we asked: the hips from last
+-- frame's setup against where they were meant to go. Said once per ride in
+-- the console when it's off for a second, since that means this Gmod
+-- places players differently than expected.
+local function CheckLanding()
+	if not (pelvisWant and pelvis and IsValid(owner)) or offWarned then return end
+	local got = owner:GetBoneMatrix(pelvis)
+	if not got then return end
+	local off = got:GetTranslation():Distance(pelvisWant:GetTranslation())
+	local turn = (got:GetForward() - pelvisWant:GetForward()):Length() + (got:GetUp() - pelvisWant:GetUp()):Length()
+	offFrames = (off > 6 or turn > 0.3) and offFrames + 1 or 0
+	if offFrames > 60 then
+		offWarned = true
+		print(("[skate3] your body isn't landing on the skater: hips %.0f units away, turned off by %.2f. Tell the thread; skate3_body copy goes back to the old way."):format(off, turn))
+	end
+end
+
+local function RealFrame(p)
+	local conv = Body.Conv()
+	local origin = Vector(p.pos[1], p.pos[2], p.pos[3])
+	local forward = Vector(p.forward[1], p.forward[2], p.forward[3])
+	local up = Vector(p.up[1], p.up[2], p.up[3])
+	local yaw = forward:Angle().y
+	local E = Matrix()
+	E:SetAngles(Angle(0, yaw, 0))
+	E:SetTranslation(origin)
+	local locals, parents = frozen.locals, frozen.parents
+	-- The whole skeleton the way the copy gets it first, so the finishing
+	-- touches (feet on the board, hands round it) can work on it.
+	local world, skins, driven = {}, {}, {}
+	local hips
+	for i = 0, frozen.count - 1 do
+		local fit = fits[i]
+		local posed = fit and p.bones[fit.skate]
+		if posed then hips = Mat(posed) * fit.pre break end
+	end
+	for i = 0, frozen.count - 1 do
+		local fit = fits[i]
+		local posed = fit and p.bones[fit.skate]
+		local skin
+		if posed then
+			skin = Mat(posed) * fit.pre
+			driven[i] = true
+		else
+			local par = parents[i]
+			skin = par >= 0 and skins[par] or hips
+		end
+		skins[i] = skin
+		if skin and rest[i] then world[i] = skin * rest[i] end
+	end
+	if not Skater.Skip.anim then
+		local before = {}
+		for i, m in pairs(world) do before[i] = m end
+		Anim.PostPose(owner, world, p)
+		-- What it moved of the ValveBiped skeleton (fingers, legs) is turned
+		-- too; hair, tails and capes below those stay the engine's, so they
+		-- keep swinging.
+		for i, m in pairs(world) do
+			if before[i] ~= m and skeleton[i] then driven[i] = true end
+		end
+	end
+	lastWorld = world
+	local F, turns, offsets, sent = {}, {}, {}, {}
+	for i = 0, frozen.count - 1 do
+		local par = parents[i]
+		local Fp = par >= 0 and F[par] or E
+		local L = locals[i]
+		if L and driven[i] and world[i] then
+			-- Turn it so its world rotation is the retarget's (the same one
+			-- the copy gets), whatever its parents did.
+			local want = world[i]
+			local wantRot = Body.RotOnly(want)
+			local base, lr = Body.RotOnly(Fp), Body.RotOnly(L)
+			local R
+			if conv.pre then
+				R = base:GetInverseTR() * wantRot * lr:GetInverseTR()
+			else
+				R = (base * lr):GetInverseTR() * wantRot
+			end
+			turns[i] = R
+			sent[#sent + 1] = { i = i, q = Body.Quat(R) }
+			local Fi = Body.Chain(Fp, L, R)
+			if i == pelvis then
+				-- The hips also move, so the body sits where the skater is.
+				local at = want:GetTranslation()
+				offsets[i] = Body.OffsetAxes(Fp, L, Fi):GetInverseTR() * (at - Fi:GetTranslation())
+				Fi:SetTranslation(at)
+				pelvisWant = Fi
+			end
+			F[i] = Fi
+		else
+			local extra = L and extras[i]
+			if extra then
+				turns[i] = extra
+				sent[#sent + 1] = { i = i, q = Body.Quat(extra) }
+			end
+			F[i] = L and Body.Chain(Fp, L, extra or nil) or Fp
+		end
+	end
+	local board = {}
+	for _, part in ipairs(data and data.parts or {}) do
+		local m = p.bones[part.bone]
+		if m and not board[part.bone] then
+			board[part.bone] = true
+			local mm = Mat(m)
+			board[#board + 1] = { name = part.bone, pos = mm:GetTranslation() - origin, q = Body.Quat(mm) }
+		end
+	end
+	lastFrame = {
+		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
+		bones = sent, pelvis = offsets[pelvis] and pelvis or nil, ppos = offsets[pelvis], board = board,
+	}
+	return { origin = origin, yaw = yaw, turns = turns, offsets = offsets }, forward, up
+end
+
+-- The last frame of your own body, to send to other players; nil when your
+-- body isn't the one skating.
+function Skater.NetFrame()
+	return IsValid(model) and model.skate3Real and pose and lastFrame or nil
+end
+
 function Skater.UpdateModel(p)
 	pose = p
 	-- The player's model can change mid-ride (or arrive late after spawning).
 	if IsValid(owner) and IsValid(model) and model.skate3Name ~= ModelFor(owner) then
 		Skater.ShowModel(owner)
 	end
-	if IsValid(model) and p then
-		model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
+	if not (IsValid(model) and p) then return end
+	model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
+	if model.skate3Real and frozen and IsValid(owner) and p.bones and not Skater.Skip.bones then
+		CheckLanding()
+		local frame, forward, up = RealFrame(p)
+		Body.Apply(owner, frame)
+		if not Skater.Skip.board then
+			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up }, Skater.DrawBoard)
+		end
 	end
 end
 
+-- Faces from a Think hook: flex weights are safe there, and nothing in a
+-- render hook may touch the skeleton.
+hook.Add("Think", "skate3_anim_face", function()
+	if IsValid(model) and pose and (model.skate3Real or not model:GetNoDraw()) then
+		Anim.Think(model.skate3AnimEnt or model, pose)
+	end
+end)
+
+concommand.Add("skate3_anim_report", function()
+	if not IsValid(model) then print("[skate3] get on the board first, then run this") return end
+	local lines = Anim.Report(model.skate3AnimEnt or model, pose, lastWorld)
+	file.CreateDir("skate3")
+	file.Write("skate3/anim_report.txt", "model " .. tostring(model.skate3Name) .. "\n" .. table.concat(lines, "\n"))
+	for _, l in ipairs(lines) do print("[skate3] " .. l) end
+	print("[skate3] saved garrysmod/data/skate3/anim_report.txt")
+end)
+
 function Skater.HideModel()
+	if IsValid(model) and IsValid(model.skate3AnimEnt) then Anim.Clear(model.skate3AnimEnt) end
 	pose = nil
+	lastFrame = nil
+	pelvisWant, offFrames, offWarned = nil, 0, false
 	if IsValid(model) then model:SetNoDraw(true) end
+	if IsValid(owner) then
+		Body.Release(owner)
+		Body.HideBoard(owner)
+	end
+end
+
+-- Whether your own body is the one skating (so it must be drawn, not hidden).
+function Skater.RealBody()
+	return IsValid(model) and model.skate3Real == true and pose ~= nil
 end
 
 function Skater.HasBoard()
@@ -592,7 +826,7 @@ function Skater.HasBoard()
 end
 
 function Skater.HasModel()
-	return IsValid(model) and not model:GetNoDraw()
+	return IsValid(model) and (model.skate3Real and pose ~= nil or not model:GetNoDraw())
 end
 
 return Skater
