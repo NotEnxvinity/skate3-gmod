@@ -197,7 +197,8 @@ def install(selected, gmod, report, with_addon=False):
         # The mod plays Half-Life 2 sounds without these, so a problem here
         # doesn't undo the rest.
         try:
-            audio.install(xex.parent, gmod / 'sound/skate3', report)
+            audio.install(xex.parent, gmod / 'sound/skate3', report,
+                          collections=data / 'assets/private/stock/skater-collections.json')
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')

@@ -13,6 +13,8 @@ from pathlib import Path
 from fractions import Fraction
 import argparse, json, os, shutil, struct, subprocess, sys, tempfile, wave
 
+import audio_tuning
+
 ARCHIVES = ('audiofiles.big', 'grains.big', 'wheels.big')
 FROM_DISC = tuple('data/audio/' + name for name in ARCHIVES)
 
@@ -37,17 +39,14 @@ BANKS = {
     'spins': ('wheels.big', '.snr'),
     'roll': ('grains.big', '.grain'),
 }
-LOOPS = {'spins'}
-# The SPLC sound ids the mod plays, per bank folder. Skate 3 names these
-# through its attribute vault; the values are retail's, as recovered by
-# doriangironde/skate-3-rust-macos (docs/engine-defects.md, splice.rs):
-# 0x447 the landing impact, 0x35C-0x35F the landing's soft/hard layer,
-# 0x449-0x44B and 0x44F-0x451 the pops (soft, medium, hard) for the two
-# surface categories, and 879/883 with metal 399/401 a rail grind's hit.
-SOUND_IDS = {
-    'collisions': (0x447, 0x35C, 0x35D, 0x35E, 0x35F, 0x449, 0x44A, 0x44B, 0x44F, 0x450, 0x451, 879, 883),
-    'metal': (399, 401),
-}
+# The spins are Skate 3's wheel spin-downs: one-shots the mod starts part-way
+# in, never loops, whatever their headers say.
+NO_LOOP = {'spins'}
+# The SPLC banks' sound ids are retail's own numbering (pops, landings,
+# footsteps, body impacts...), as SK8-ENGINE's crates/skate-audio and
+# doriangironde/skate-3-rust-macos recovered them. Setup writes what every id
+# plays, so the mod can play any of them.
+
 # Each rolling grain is one recording that speeds up from a crawl to flat out;
 # Skate 3 plays the part for the board's speed. Setup cuts it into this many
 # looping bands, which the mod crossfades by speed.
@@ -243,6 +242,7 @@ def splc(data):
         if sound - records >= containers or depth > 8:
             return []
         return [alt for pick in picks[sound - records] for alt in play(pick, depth + 1)]
+    play.count = records + containers
     return streams, play
 
 
@@ -323,7 +323,7 @@ def check(vgmstream):
 def sounds(game, report, play=None):
     """(folder, name, snr bytes) for every sound setup installs. SPLC banks
     are numbered as the game numbers them, and `play`, if given, gets what
-    their SOUND_IDS play, as {folder: {id: alternatives}}."""
+    every id of theirs plays, as {folder: {id: alternatives}}."""
     audio = Path(game) / 'data/audio'
     missing = [name for name in ARCHIVES if not (audio / name).is_file()]
     if missing:
@@ -346,7 +346,8 @@ def sounds(game, report, play=None):
                         report(f'Reading {entry} the rough way: {error}')
                     else:
                         if play is not None:
-                            play[folder] = {f'{i}': sound(i) for i in SOUND_IDS.get(folder, ())}
+                            ids = ((i, sound(i)) for i in range(sound.count))
+                            play[folder] = {f'{i}': alts for i, alts in ids if any(any(g) for g in alts)}
                         for i, clip in enumerate(streams):
                             yield folder, f'{i:04d}', clip
                         continue
@@ -359,9 +360,10 @@ def sounds(game, report, play=None):
             big.close()
 
 
-def install(game, out, report=print):
+def install(game, out, report=print, collections=None):
     """Writes the skate sounds from the extracted `game` folder into `out`
-    (garrysmod/sound/skate3), replacing what an earlier setup put there.
+    (garrysmod/sound/skate3), replacing what an earlier setup put there, and
+    from the converted vault at `collections` the tuning the bails read.
     Returns how many sounds were installed."""
     vgmstream = find_vgmstream()
     if vgmstream is None:
@@ -392,7 +394,7 @@ def install(game, out, report=print):
             target = rate if rate in SOURCE_RATES else (22050 if rate < 22050 else 44100)
             samples = resample(samples, rate, target)
             (staged / folder).mkdir(parents=True, exist_ok=True)
-            loop = True if folder in LOOPS else loops[path]
+            loop = None if folder in NO_LOOP else loops[path]
             if loop is not None and loop is not True:
                 loop = loop * target // rate
             write_wav(staged / folder / f'{name}.wav', samples, target, loop)
@@ -406,7 +408,12 @@ def install(game, out, report=print):
             installed += 1
         (staged / 'index.txt').write_text('\n'.join(index) + '\n')
         # What the mod reads: the sound ids' samples and which sounds loop.
-        (staged / 'sounds.json').write_text(json.dumps({'ids': play, 'loops': looping}))
+        manifest = {'ids': play, 'loops': looping}
+        if collections is not None:
+            tuning = audio_tuning.install(collections, report)
+            if tuning is not None:
+                manifest['tuning'] = tuning
+        (staged / 'sounds.json').write_text(json.dumps(manifest, separators=(',', ':')))
         shutil.rmtree(out, ignore_errors=True)
         shutil.move(str(staged), str(out))
     report(f'Installed {installed} skate sounds in {out}')
@@ -417,8 +424,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     parser.add_argument('--game', type=Path, required=True, help='extracted Skate 3 folder (holding default.xex and data/)')
     parser.add_argument('--out', type=Path, required=True, help='garrysmod/sound/skate3')
+    parser.add_argument('--collections', type=Path, help='garrysmod/data/skate3/assets/private/stock/skater-collections.json')
     args = parser.parse_args()
-    install(args.game, args.out)
+    install(args.game, args.out, collections=args.collections)
 
 
 if __name__ == '__main__':

@@ -43,6 +43,12 @@ net.Receive("skate3_move", function(_, ply)
 	ply:SetPos(pos)
 end)
 
+-- A skater's Garry's Mod body stands still or is moved by the simulation, so
+-- its footsteps would sound in place; the skate sounds play the real ones.
+hook.Add("PlayerFootstep", "skate3_quiet", function(ply)
+	if ply.Skate3 then return true end
+end)
+
 hook.Add("PlayerDeath", "skate3_stop", ForceStop)
 hook.Add("PlayerSpawn", "skate3_stop", ForceStop)
 hook.Add("PlayerEnteredVehicle", "skate3_stop", ForceStop)

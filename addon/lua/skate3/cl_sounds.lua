@@ -1,9 +1,12 @@
--- Skate sounds, driven by the skater's state each frame: rolling and grinding
--- loops that follow speed, and one-shots for pops, landings and bails.
+-- Skate sounds, driven by the skater's state each frame: rolling, grinding and
+-- sliding loops that follow speed, one-shots for pops and landings, the
+-- wheels spinning down, footsteps, and bails.
 --
 -- The classic set is Half-Life 2 sounds every Garry's Mod install has. The
 -- disc set is Skate 3's own, which setup decodes from the player's disc into
--- sound/skate3; anything it hasn't mapped yet falls back to the classic one.
+-- sound/skate3; anything it hasn't mapped falls back to the classic one. Which
+-- disc sound plays when follows retail's rules, as SK8-ENGINE's port of the
+-- game's audio code spells them out (crates/skate-audio/src/player).
 
 local Sounds = {}
 
@@ -18,6 +21,18 @@ local HL2 = {
 local cv_volume = CreateClientConVar("skate3_volume", "1", true, false, "Skate sound volume, 0 to 1", 0, 1)
 local cv_pack = CreateClientConVar("skate3_sounds", "hl2", true, false,
 	"Skate sounds: hl2 (the classic Half-Life 2 ones), disc (Skate 3's own, installed by setup) or off")
+local cv_bails = CreateClientConVar("skate3_bail_sounds", "disc", true, false,
+	"Bail sounds with the disc set: disc (Skate 3's own body hits and slides) or hl2 (Half-Life 2's)")
+local cv_debug = CreateClientConVar("skate3_debug_sounds", "0", false, false, "Print each footstep, wheel spin and bail hit")
+
+-- Map units per metre: Source and the simulation are both inches.
+local UNITS = 39.37
+-- The simulation's step: speeds come from how far bones moved between ticks.
+local TICK = 1 / 60
+
+local function Debug(...)
+	if cv_debug:GetBool() then print("[skate3] " .. string.format(...)) end
+end
 
 -- Skate 3 rolls on one recording per surface that speeds up from a crawl to
 -- flat out, playing the part that matches the board's speed. Setup cuts each
@@ -41,30 +56,56 @@ local ROLL = {
 }
 local ROLL_DEFAULT = "asphalt_smooth_hard"
 
+-- The kind of ground each rolling recording stands for, as setup names the
+-- disc's materials (audio_tuning.py ROLLING): picks a material's collision
+-- and footstep sounds.
+local GROUND = {
+	wood_ramp_hard = "wood",
+	metal_smooth_hard = "metal",
+	concrete_smooth_hard = "concrete_smooth",
+	concrete_smooth_soft = "concrete_smooth",
+	asphalt_rough_hard = "asphalt_rough",
+	asphalt_smooth_hard = "asphalt_smooth",
+}
+
 function Sounds.HasDisc()
 	return file.Exists("sound/skate3/index.txt", "GAME")
 end
-
-local ground, nextTrace = ROLL_DEFAULT, 0
 
 local function Disc()
 	return cv_pack:GetString() == "disc" and Sounds.HasDisc()
 end
 
+local installed = {}
+
+-- Whether setup installed the rolling recording `name` (asked once each).
+local function Installed(name)
+	if installed[name] == nil then
+		installed[name] = file.Exists("sound/skate3/roll/" .. name .. "_0.wav", "GAME")
+	end
+	return installed[name]
+end
+
+-- The rolling recording for the surface under `pos`, and the trace.
+local function Surface(pos, filter)
+	local tr = util.TraceLine({ start = pos + Vector(0, 0, 8), endpos = pos - Vector(0, 0, 40), filter = filter })
+	local name = tr.Hit and ROLL[tr.MatType] or ROLL_DEFAULT
+	return Installed(name) and name or ROLL_DEFAULT, tr
+end
+
+local ground, nextTrace = ROLL_DEFAULT, 0
+
 -- The surface under the board, checked a few times a second.
 local function Ground(ent)
 	if CurTime() >= nextTrace then
 		nextTrace = CurTime() + 0.25
-		local pos = ent:GetPos()
-		local tr = util.TraceLine({ start = pos + Vector(0, 0, 8), endpos = pos - Vector(0, 0, 40), filter = ent })
-		local name = tr.Hit and ROLL[tr.MatType] or ROLL_DEFAULT
-		ground = file.Exists("sound/skate3/roll/" .. name .. "_0.wav", "GAME") and name or ROLL_DEFAULT
+		ground = Surface(ent:GetPos(), ent)
 	end
 	return ground
 end
 
--- setup's sounds.json: the samples behind the game's sound ids, and which
--- of the disc's sounds loop.
+-- setup's sounds.json: the samples behind the game's sound ids, which of the
+-- disc's sounds loop, and the vault's collision tuning.
 local manifest
 
 local function Manifest()
@@ -80,13 +121,16 @@ local function Loops(folder)
 	return m and m.loops and m.loops[folder] or {}
 end
 
--- Plays one of the game's own sound ids from a bank: one alternative, and
--- one member from each of its groups, at the member's gain. False when setup
--- didn't install it.
--- Plays one take of a retail sound id. A record's groups are the same hit at
--- rising strength, so `strength` (0 to 1) picks one rather than stacking them
--- all, and sets how loud it is.
-local function PlayId(folder, id, ent, strength)
+local function Tuning()
+	local m = Manifest()
+	return m and m.tuning
+end
+
+-- One take of a retail sound id from a bank folder: one of its alternatives,
+-- and in it one of the groups (a record's groups are the same hit at rising
+-- strength, so `strength`, 0 to 1, picks one). Played at `pos` when given,
+-- else on `ent`. False when setup didn't install it.
+local function PlayId(folder, id, ent, strength, volume, pitch, pos)
 	local m = Manifest()
 	local ids = m and m.ids and m.ids[folder]
 	-- util.JSONToTable turns numeric keys into numbers.
@@ -101,8 +145,13 @@ local function PlayId(folder, id, ent, strength)
 	local group = groups[math.Clamp(math.floor(strength * #groups) + 1, 1, #groups)]
 	local member = group[math.random(#group)]
 	local path = string.format("skate3/%s/%04d.wav", folder, member[1])
-	local level = math.Clamp(member[2], 0, 1) * (0.3 + 0.5 * strength) * cv_volume:GetFloat()
-	ent:EmitSound(path, 70, math.random(97, 103), level)
+	local level = math.Clamp(member[2], 0, 1) * (volume or (0.3 + 0.5 * strength)) * cv_volume:GetFloat()
+	pitch = math.Clamp(math.floor((pitch or 1) * math.random(97, 103)), 30, 250)
+	if pos then
+		sound.Play(path, pos, 70, pitch, level)
+	else
+		ent:EmitSound(path, 70, pitch, level)
+	end
 	return true
 end
 
@@ -110,12 +159,13 @@ local picks = {}
 
 -- The sound to use for `name`, from the set the player picked: the disc's
 -- loops where setup found some, else HL2's.
-local function Path(name, ent)
+local function Path(name)
 	if Disc() and picks[name] then return picks[name] end
 	return HL2[name]
 end
 
--- A random looping sound from a disc folder for `name`, kept until the next pick.
+-- A random looping sound from a disc folder for `name`, kept until the next
+-- pick. Stays unset when the folder has none.
 local function Pick(name, folder)
 	local list = Loops(folder)
 	picks[name] = #list > 0 and string.format("skate3/%s/%s.wav", folder, list[math.random(#list)]) or nil
@@ -208,7 +258,7 @@ local last
 
 -- A looping sound for `name`, swapped when its entity or sound changes.
 local function Loop(name, ent)
-	local path = Path(name, ent)
+	local path = Path(name)
 	local s = loops[name]
 	if not s or s.ent ~= ent or s.path ~= path then
 		local volume = s and s.on and s.volume
@@ -224,7 +274,7 @@ local function Loop(name, ent)
 end
 
 local function Play(name, ent, level)
-	local list = Path(name, ent)
+	local list = Path(name)
 	if istable(list) then list = list[math.random(#list)] end
 	ent:EmitSound(list, 75, math.random(95, 105), level * cv_volume:GetFloat())
 end
@@ -232,15 +282,17 @@ end
 local airStart
 local landedAt = -math.huge
 
--- Keeps the loop for `name` playing at `level` while `on`, fading it out after.
-local function Hold(name, ent, on, level)
-	if on and level > 0.01 then
+-- Keeps the loop for `name` playing at `level` while `on`, fading it out
+-- after; `pitch` (100 = as recorded) follows when given.
+local function Hold(name, ent, on, level, pitch)
+	if on and level > 0.01 and Path(name) then
 		local patch = Loop(name, ent)
 		if not loops[name].on then
-			patch:PlayEx(0, 100)
+			patch:PlayEx(0, pitch or 100)
 			loops[name].on = true
 		end
 		patch:ChangeVolume(level, 0.1)
+		if pitch then patch:ChangePitch(pitch, 0.1) end
 		loops[name].volume = level
 	elseif loops[name] and loops[name].on then
 		loops[name].patch:FadeOut(0.2)
@@ -265,6 +317,421 @@ local function RollClassic(ent, rolling, speed, volume)
 	end
 end
 
+---------------------------------------------------------------------------
+-- The wheels spinning free (retail SFXObj_Wheels, wheels.rs): a 14 s
+-- spin-down recording, never looped, started part-way in so a fast board
+-- starts near the full spin and a slow one near the end. It plays in the air
+-- and with the board in your hands after stepping off, where only the end of
+-- it plays (the start is capped at 26% of the way down). Two recordings,
+-- used in turn, the manual one first.
+---------------------------------------------------------------------------
+
+local SPINS = { "skate3/spins/whls_spins_man_1.wav", "skate3/spins/whls_spins_jump_1.wav" }
+local SPIN_LENGTH = 14
+local SPIN_FULL = 50 -- km/h at which a spin starts at the very beginning
+local SPIN_HAND_CAP = 0.26
+local spin = { toggle = false }
+
+local function SpinStop()
+	spin.token = nil
+	if IsValid(spin.channel) then spin.channel:Stop() end
+	spin.channel = nil
+end
+
+-- Starts the next recording for a board going `speed` m/s; `hand` is the
+-- board-in-hand slot.
+local function SpinStart(speed, pos, level, hand)
+	SpinStop()
+	local path = SPINS[spin.toggle and 2 or 1]
+	if not file.Exists("sound/" .. path, "GAME") then path = SPINS[spin.toggle and 1 or 2] end
+	spin.toggle = not spin.toggle
+	if not file.Exists("sound/" .. path, "GAME") then return end
+	local x = math.Clamp(math.abs(speed) * 3.6 / SPIN_FULL, 0, 1)
+	if hand then x = math.min(x, SPIN_HAND_CAP) end
+	local seek = SPIN_LENGTH * (1 - x)
+	Debug("wheels spin from %.1f s (%s, %.1f m/s)", seek, hand and "in hand" or "in the air", speed)
+	local token = {}
+	spin.token = token
+	spin.level = level
+	-- sound.PlayFile can start part-way in, which EmitSound can't.
+	sound.PlayFile("sound/" .. path, "3d noplay", function(channel)
+		if not IsValid(channel) then return end
+		if spin.token ~= token then channel:Stop() return end
+		if seek >= channel:GetLength() then channel:Stop() return end
+		spin.channel = channel
+		channel:SetPos(pos)
+		channel:Set3DFadeDistance(300, 3000)
+		channel:SetTime(seek)
+		channel:SetVolume(spin.level * cv_volume:GetFloat())
+		channel:Play()
+	end)
+end
+
+-- Each frame: `trigger` is the slot that wants the wheels heard (nil, "air"
+-- or "hand"); it starts on the trigger's rising edge, plays to its end and
+-- stops when the trigger drops.
+local function Spin(trigger, speed, pos, volume)
+	local level = (trigger == "hand" and 0.3 or 0.4) * volume
+	if trigger ~= spin.trigger then
+		spin.trigger = trigger
+		if trigger then SpinStart(speed, pos, level, trigger == "hand") else SpinStop() end
+	end
+	if IsValid(spin.channel) then
+		spin.channel:SetPos(pos)
+		spin.channel:SetVolume(level * cv_volume:GetFloat())
+	end
+end
+
+---------------------------------------------------------------------------
+-- Footsteps (retail SFXObj_OffBoard, footsteps.rs). Each time a foot comes
+-- down: a step from sk8_foley by walk or run, an even or uneven step and the
+-- footstep surface (1..7) of the material underfoot, plus a hard layer from
+-- Skate_Collisions on surfaces 3 and 4, plus the clothes' walking foley by
+-- body speed. Jumping on foot adds a take-off and an apex.
+---------------------------------------------------------------------------
+
+-- [walk, run][even, uneven][surface 1..7]
+local STEP_IDS = {
+	{ { 86, 82, 86, 91, 86, 78, 75 }, { 87, 83, 87, 91, 107, 79, 110 } },
+	{ { 107, 102, 105, 105, 105, 99, 101 }, { 104, 103, 104, 106, 104, 100, 100 } },
+}
+-- [walk, run][even, uneven][surface 3, 4]
+local STEP_IDS_HARD = { { { 963, 964 }, { 963, 964 } }, { { 963, 964 }, { 522, 523 } } }
+local WALK_IDS = { 62, 63, 64 }
+-- Retail's walk curve crosses its run threshold at about 5.9 m/s.
+local RUN_SPEED = 5.9
+local WALK_SPEEDS = { 2.5, 7.5 }
+-- The step code's height between the feet's last plants, m.
+local STEP_HEIGHT = 0.07
+local JUMP_ID, APEX_ID = 65, 66
+
+local FEET = {
+	{ toe = "LEFTTOEBASE", ankle = "LEFTFOOT" },
+	{ toe = "RIGHTTOEBASE", ankle = "RIGHTFOOT" },
+}
+-- A foot is down when its toe is this close to the ground (units) and
+-- barely moving (m/s).
+local FOOT_GROUND = 3
+local FOOT_STILL = 0.6
+
+local feet = { {}, {} }
+local body = {}
+
+local function BonePos(pose, name)
+	local m = pose.bones and pose.bones[name]
+	return m and Vector(m[4], m[8], m[12])
+end
+
+-- The disc material standing for a rolling recording's kind of ground, or nil.
+local function GroundMaterial(name)
+	local t = Tuning()
+	return t and t.grounds and t.grounds[GROUND[name] or ""]
+end
+
+-- AudioSurfaceMap entry of a material, as setup exports it: { rolling,
+-- footstep surface, collision class }; materials 94 and up share entry 94.
+local function SurfaceEntry(m)
+	local t = Tuning()
+	local s = t and t.surfaces
+	if not s or not m then return end
+	return s[math.min(m, 94) + 1] or s[#s]
+end
+
+local function FootstepSurface(name)
+	local e = SurfaceEntry(GroundMaterial(name))
+	local s = e and e[2] or 1
+	return (s >= 1 and s <= 7) and s or 1
+end
+
+local function Step(foot, pos, comSpeed, uneven, surfaceName)
+	local run = comSpeed > RUN_SPEED and 2 or 1
+	local surface = FootstepSurface(surfaceName)
+	local id = STEP_IDS[run][uneven and 2 or 1][surface]
+	local played = PlayId("foley", id, LocalPlayer(), 0.5, 0.7, 1, pos)
+	if surface == 3 or surface == 4 then
+		PlayId("collisions", STEP_IDS_HARD[run][uneven and 2 or 1][surface - 2], LocalPlayer(), 0.5, 0.5, 1, pos)
+	end
+	local walk = comSpeed > WALK_SPEEDS[2] and 3 or comSpeed > WALK_SPEEDS[1] and 2 or 1
+	PlayId("foley", WALK_IDS[walk], LocalPlayer(), 0.5, 0.5, 1, pos)
+	Debug("step: foot %d, %s, surface %d, %s, foley %d%s", foot, run == 2 and "run" or "walk", surface,
+		uneven and "uneven" or "even", id, played and "" or " (not installed)")
+	return played
+end
+
+-- HL2's footstep: the one Garry's Mod plays for the surface underfoot.
+local function StepClassic(pos, tr)
+	local data = tr and tr.Hit and util.GetSurfaceData(tr.SurfaceProps)
+	local name = data and (math.random(2) == 1 and data.stepLeftSound or data.stepRightSound)
+	if name and name ~= "" then
+		sound.Play(name, pos, 65, 100, 0.5 * cv_volume:GetFloat())
+	end
+end
+
+-- Watches both feet for plants while on foot (or pushing on the board),
+-- and the body for on-foot jumps.
+local function Feet(pose, kind, dt, disc, volume)
+	local hips = BonePos(pose, "HIPS")
+	local comSpeed, comVz = 0, 0
+	if hips then
+		if body.hips and dt > 0 then
+			local v = (hips - body.hips) / dt / UNITS
+			comSpeed, comVz = v:Length(), v.z
+		end
+		body.hips = hips
+	end
+	-- Jumps on foot: the take-off as the feet leave the ground, the apex as
+	-- the body starts falling.
+	if disc and kind == "air" and body.kind == "foot" then
+		body.jumping, body.rising = true, true
+		PlayId("foley", JUMP_ID, LocalPlayer(), 0.5, 0.6, 1, hips)
+		Debug("jump take-off")
+	elseif body.jumping and kind == "air" and body.rising and comVz <= 0 then
+		body.rising = false
+		if disc then PlayId("foley", APEX_ID, LocalPlayer(), 0.5, 0.5, 1, hips) end
+		Debug("jump apex")
+	elseif kind ~= "air" then
+		body.jumping = false
+	end
+	body.kind = kind
+
+	local watching = kind == "foot" or kind == "ground"
+	for i, f in ipairs(FEET) do
+		local state = feet[i]
+		local toe = BonePos(pose, f.toe) or BonePos(pose, f.ankle)
+		local down = false
+		if toe and watching then
+			local speed = state.pos and dt > 0 and (toe - state.pos):Length() / dt / UNITS or math.huge
+			local name, tr = Surface(toe, LocalPlayer())
+			local height = tr.Hit and toe.z - tr.HitPos.z or math.huge
+			down = height < FOOT_GROUND and speed < FOOT_STILL
+			if down and not state.down then
+				-- Retail's step code: a foot planted more than 7 cm above the
+				-- other's last plant is an uneven step.
+				local other = feet[3 - i].plantZ
+				local uneven = other and (toe.z - other) / UNITS > STEP_HEIGHT or false
+				state.plantZ = toe.z
+				if disc then
+					Step(i, toe, comSpeed, uneven, name)
+				else
+					StepClassic(toe, tr)
+				end
+			end
+		end
+		state.pos = toe
+		state.down = down
+	end
+end
+
+---------------------------------------------------------------------------
+-- Bails (retail Contacts body poster and collision manager: contacts.rs,
+-- collision.rs). Each body region that hits something is a collision between
+-- its material and the ground's: an impact sets a tier from the material's
+-- bands, a level from its windows, and each side plays the sample its
+-- AudioSurface record names for that tier and the other side's class. The
+-- clothes and pads add their own contacts. While the body slides along the
+-- ground, Bodyslide loops.
+---------------------------------------------------------------------------
+
+local NO_MATERIAL = 143
+-- Region: bones, then retail's material, cloth contact and pad contact
+-- (contacts.rs body_materials); `mass` is the region's share of the body,
+-- which scales its impact as retail's part weights do.
+local REGIONS = {
+	{ bone = "HEAD", material = 97, pad = 110, mass = 0.08, reach = 6 },
+	{ bone = "SPINE1", material = 98, cloth = 109, pad = 110, mass = 0.45, reach = 8 },
+	{ bone = "LEFTFOREARM", material = 100, cloth = 107, pad = 111, mass = 0.05, reach = 4 },
+	{ bone = "RIGHTFOREARM", material = 100, cloth = 107, pad = 111, mass = 0.05, reach = 4 },
+	{ bone = "LEFTLEG", material = 99, cloth = 108, pad = 111, mass = 0.12, reach = 4 },
+	{ bone = "RIGHTLEG", material = 99, cloth = 108, pad = 111, mass = 0.12, reach = 4 },
+}
+-- The pad contacts' thresholds (contacts.rs ContactsTuning defaults): 110 on
+-- the head and torso, 111 on the limbs.
+local PAD_110 = { [97] = { 0.75, 1.25 }, [98] = { 0.7, 1.25 } }
+local PAD_111 = { 0.65, 1.25 }
+-- The bridge's speed graph on the impacts: x m/s of the body, y the factor.
+local BODY_SPEED = {
+	{ 0, 0.3664, 0.4479, 0.5212, 0.5928, 0.7410, 0.8632, 0.9463 },
+	{ 1.0, 1.2, 1.4857, 1.9143, 2.4286, 3.6, 4.5714, 5.0 },
+}
+-- Frames of retail's per-region cooldown.
+local BODY_COOLDOWN = 15
+-- Collision class (0..2) of materials 95..113; false: AudioSurfaceMap entry 94.
+local CLASS_95 = { 1, 2, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, false, false, false, 1 }
+local BANKS = { [0] = "collisions", [1] = "metal" }
+-- Retail's collision manager has ten slots; a tumble can't start more than
+-- that many sounds in one tick.
+local VOICES = 10
+
+local function Graph(g, v)
+	local x, y = g[1], g[2]
+	if v < x[1] then return y[1] end
+	if v >= x[#x] then return y[#y] end
+	for i = 2, #x do
+		if v < x[i] then
+			local dx = x[i] - x[i - 1]
+			if dx > 0 then return y[i - 1] + (y[i] - y[i - 1]) / dx * (v - x[i - 1]) end
+			return y[i]
+		end
+	end
+	return y[1]
+end
+
+local function Material(m)
+	local t = Tuning()
+	return t and m and m >= 0 and t.materials and t.materials[m + 1]
+end
+
+local function Class(m)
+	if m >= 95 and m <= 113 and CLASS_95[m - 94] then return CLASS_95[m - 94] end
+	local e = SurfaceEntry(m < 94 and m or 94)
+	return e and e[3] or 0
+end
+
+-- collision.rs impact_band: tier (0..2, 3 none) and its [low, high].
+local function Band(m, impact)
+	local rec = Material(m)
+	local b = rec and rec.bands
+	if not b or impact < b[4] then return 3, 0, 0 end
+	if impact > b[1] then return 2, b[1], b[2] end
+	if impact > b[3] then return 1, b[3], b[1] end
+	return 0, b[4], b[3]
+end
+
+-- collision.rs contact_level: 0..32767 from the material's windows.
+local WINDOW_AT = { [0] = 1, [4] = 2, [8] = 3, [12] = 4, [16] = 5, [20] = 6, [24] = 7, [28] = 8, [32] = 9,
+	[36] = 10, [44] = 11, [48] = 12, [52] = 13, [56] = 14 }
+local function Level(m, other, tier, low, high, value)
+	if m < 0 or tier == 3 then return 0 end
+	value = math.min(value, high)
+	local rec = Material(m)
+	local w = rec and rec.windows or {}
+	local function W(off) return w[WINDOW_AT[off]] or 0 end
+	local class = (m >= 97 or other == NO_MATERIAL) and 0 or Class(other)
+	local lo, hi
+	if tier == 0 then
+		if class == 0 then lo, hi = W(8), W(12) elseif class == 1 then lo, hi = W(24), W(28) else lo, hi = W(52), W(56) end
+	elseif tier == 1 then
+		if class == 0 then lo, hi = W(0), W(4) elseif class == 1 then lo, hi = W(16), W(20) else lo, hi = W(44), W(48) end
+	else
+		lo, hi = W(32), W(36)
+	end
+	if high > low then return (hi - lo) / (high - low) * (value - low) + lo end
+	return hi
+end
+
+-- collision.rs sample: plays `m`'s sound against `other` at `tier` and
+-- `level`; true when one played.
+local bail = { regions = {}, voices = 0 }
+
+local function Collide(m, other, tier, level, pos)
+	if m < 0 or m >= NO_MATERIAL or tier == 3 or bail.voices >= VOICES then return false end
+	local rec = Material(m)
+	if not rec or not rec.ids or not BANKS[rec.kind] then return false end
+	local class = other == NO_MATERIAL and 0 or Class(other)
+	local id = tier == 2 and rec.ids[1] or tier == 0 and rec.ids[2 + class] or rec.ids[5 + class]
+	if not id or id < 0 then return false end
+	local volume = math.Clamp(level / 32767, 0, 1) * (rec.gain or 32767) / 32767
+	if volume < 0.01 then return false end
+	local played = PlayId(BANKS[rec.kind], id, LocalPlayer(), tier / 2, volume, (rec.pitch or 4096) / 4096, pos)
+	if played then bail.voices = bail.voices + 1 end
+	return played
+end
+
+-- One region's hit at `impact` against ground material `b`: retail's pair,
+-- the second hit of a hard one, the clothes and the pad.
+local function BodyHit(r, impact, b, pos)
+	local a = r.material
+	local ta, la_lo, la_hi = Band(a, impact)
+	local tb, lb_lo, lb_hi = Band(b, impact)
+	if ta == 3 and tb == 3 then return false end
+	local la = Level(a, b, ta, la_lo, la_hi, impact)
+	local lb = Level(b, a, tb, lb_lo, lb_hi, impact)
+	local played = Collide(a, b, ta, la, pos)
+	played = Collide(b, a, tb, lb, pos) or played
+	if ta == 2 or tb == 2 then
+		local ra, rb = Material(a), Material(b)
+		if ta == 2 then Collide(a, b, 1, la * (ra and ra.scale or 1), pos) end
+		if tb == 2 then Collide(b, a, 1, lb * (rb and rb.scale or 1), pos) end
+	end
+	if r.cloth then
+		Collide(r.cloth, NO_MATERIAL, 0, Level(a, b, 0, la_lo, la_hi, impact), pos)
+	end
+	local th = r.pad == 110 and PAD_110[a] or r.pad == 111 and PAD_111
+	if th and impact > th[1] and impact <= th[2] then
+		Collide(r.pad, NO_MATERIAL, 1, Level(r.pad, b, 1, th[1], th[2], impact), pos)
+	end
+	Debug("bail hit: %s at %.2f, tiers %d/%d against material %d%s", r.bone, impact, ta, tb, b,
+		played and "" or " (no sound)")
+	return played
+end
+
+local function BailReset()
+	bail.regions = {}
+	bail.comSpeed = 0
+end
+
+-- Each tick of a bail: a region whose velocity into a surface it is touching
+-- dropped is a hit, its impact retail's clamp01(dv . n x weight x 10) scaled
+-- by the speed graph at the body's speed.
+local function Bail(pose, dt, volume, ent)
+	local t = Tuning()
+	local cooldown = t and t.body_cooldown or BODY_COOLDOWN
+	local graph = t and t.body_speed or BODY_SPEED
+	local hips = BonePos(pose, "HIPS")
+	local scale = Graph(graph, bail.comSpeed or 0)
+	local hits = 0
+	bail.voices = 0
+	for i, r in ipairs(REGIONS) do
+		local s = bail.regions[i] or {}
+		bail.regions[i] = s
+		local pos = BonePos(pose, r.bone)
+		if pos and s.pos and dt > 0 then
+			local v = (pos - s.pos) / dt / UNITS
+			if s.v and (s.cooldown or 0) <= 0 then
+				-- Touching something in the direction it was moving?
+				local dir = s.v:GetNormalized()
+				local tr = util.TraceLine({ start = s.pos, endpos = pos + dir * r.reach, filter = ent, mask = MASK_SOLID })
+				if tr.Hit then
+					local n = tr.HitNormal
+					local into = math.max(0, -s.v:Dot(n)) - math.max(0, -v:Dot(n))
+					local impact = math.Clamp(into * r.mass * 10, 0, 1) * scale
+					if impact > 0.001 then
+						-- What it hit, wall or floor, as the disc's material for it.
+						local b = GroundMaterial(ROLL[tr.MatType] or ROLL_DEFAULT) or NO_MATERIAL
+						if BodyHit(r, impact, b, tr.HitPos) then
+							s.cooldown = cooldown
+							hits = hits + 1
+						end
+					end
+				end
+			end
+			s.v = v
+		end
+		s.pos = pos
+		if s.cooldown and s.cooldown > 0 then s.cooldown = s.cooldown - 1 end
+	end
+	if hips and bail.hips and dt > 0 then
+		bail.comSpeed = (hips - bail.hips):Length() / dt / UNITS
+	end
+	-- The body sliding along the ground.
+	local sliding = 0
+	if hips and bail.hips and dt > 0 then
+		local tr = util.TraceLine({ start = hips, endpos = hips - Vector(0, 0, 14), filter = ent, mask = MASK_SOLID })
+		if tr.Hit then
+			local v = (hips - bail.hips) / dt / UNITS
+			sliding = Vector(v.x, v.y, 0):Length()
+		end
+	end
+	bail.hips = hips
+	if not picks.bodyslide then Pick("bodyslide", "bodyslide") end
+	Hold("bodyslide", ent, sliding > 1, math.Clamp(sliding / 8, 0, 0.7) * volume, math.Clamp(85 + sliding * 3, 85, 120))
+	return hits
+end
+
+---------------------------------------------------------------------------
+
+local lastTick, wasDisc
+
 -- Called every frame while skating, with the latest pose.
 function Sounds.Update(ent, pose)
 	if not IsValid(ent) or not pose or cv_pack:GetString() == "off" then return Sounds.Stop() end
@@ -272,8 +739,21 @@ function Sounds.Update(ent, pose)
 	local volume = cv_volume:GetFloat()
 	-- m/s: a brisk push is about 4, flat out about 10.
 	local speed = pose.speed or 0
-
 	local disc = Disc()
+	if disc ~= wasDisc then
+		-- Switching sets: let every loop pick its sound again.
+		wasDisc = disc
+		for _, s in pairs(loops) do s.patch:Stop() end
+		loops, picks = {}, {}
+	end
+	local bails = disc and cv_bails:GetString() ~= "hl2" and Tuning() ~= nil
+
+	-- Bones move once per simulation tick; frames between ticks repeat them.
+	local tick = pose.tick
+	local dt = tick and lastTick and tick > lastTick and (tick - lastTick) * TICK or 0
+	local newTick = not tick or tick ~= lastTick
+	lastTick = tick
+
 	if last and kind ~= last then
 		if kind == "air" and (last == "ground" or last == "grind") then
 			-- Rough ground flickers in and out of the air; only a takeoff
@@ -289,11 +769,17 @@ function Sounds.Update(ent, pose)
 		elseif kind == "grind" and disc then
 			GrindHit(ent, speed)
 		elseif kind == "bail" then
-			Play("bail", ent, 1)
+			BailReset()
+			if not bails then Play("bail", ent, 1) end
 		end
 		if kind == "grind" then Pick("grind", "grinds") end
 	end
+	if kind ~= "air" then airStart = nil end
 	last = kind
+
+	local boardPos = pose.pos and Vector(pose.pos[1], pose.pos[2], pose.pos[3]) or ent:GetPos()
+	local onBoard = kind == "ground" or kind == "grind" or kind == "air"
+	local sliding = pose.state == "SlideGround" or pose.state == "RevertGround"
 
 	if disc then
 		RollBands(ent, kind == "ground" and speed > 0.3, speed, volume)
@@ -303,23 +789,41 @@ function Sounds.Update(ent, pose)
 		end
 		-- The trucks' rattle rides on top of the surface, louder with speed.
 		if not picks.rattle then Pick("rattle", "rattles") end
-		if picks.rattle then
-			Hold("rattle", ent, kind == "ground" and speed > 0.5, math.Clamp(speed / 12, 0, 0.45) * volume)
+		Hold("rattle", ent, kind == "ground" and speed > 0.5, math.Clamp(speed / 12, 0, 0.45) * volume)
+		-- Powerslides and reverts: the wheels skidding.
+		if not picks.skid then Pick("skid", "skids") end
+		Hold("skid", ent, sliding and speed > 1, math.Clamp(speed / 8, 0, 0.6) * volume, math.Clamp(85 + speed * 3, 85, 120))
+		-- The wind at speed (retail's sense of speed starts around 1 m/s and
+		-- is full by flat out).
+		if not picks.wind then Pick("wind", "wind") end
+		Hold("wind", ent, onBoard and speed > 4, math.Clamp((speed - 4) / 8, 0, 0.35) * volume)
+		-- The wheels spinning free: in the air on the board, or in your hands
+		-- after stepping off it.
+		local trigger
+		if kind == "air" then
+			trigger = "air"
+		elseif kind == "foot" then
+			trigger = "hand"
 		end
-		-- Wheels spinning free after the pop, winding down through the air.
-		if picks.spin == nil then
-			picks.spin = file.Exists("sound/skate3/spins/whls_spins_jump_1.wav", "GAME") and "skate3/spins/whls_spins_jump_1.wav" or false
-		end
-		local air = kind == "air" and airStart and CurTime() - airStart or 0
-		if picks.spin then
-			Hold("spin", ent, kind == "air", math.Clamp(1 - air / 2, 0, 1) * 0.35 * volume)
-		end
+		-- Keep the speed the board had when it left the ground or your feet.
+		if onBoard then spin.speed = speed end
+		Spin(trigger, spin.speed or speed, boardPos, volume)
 	else
 		RollBands(ent, false, speed, volume)
 		RollClassic(ent, kind == "ground" and speed > 0.3, speed, volume)
 		Hold("rattle", ent, false, 0)
-		Hold("spin", ent, false, 0)
+		Hold("skid", ent, false, 0)
+		Hold("wind", ent, false, 0)
+		Spin(nil, 0, boardPos, volume)
 	end
+
+	if newTick and dt > 0 then
+		Feet(pose, kind, dt, disc, volume)
+		if kind == "bail" and bails then
+			Bail(pose, dt, volume, ent)
+		end
+	end
+	if kind ~= "bail" or not bails then Hold("bodyslide", ent, false, 0) end
 
 	local grind = Loop("grind", ent)
 	if kind == "grind" then
@@ -345,7 +849,19 @@ function Sounds.Stop()
 			s.on = false
 		end
 	end
-	last = nil
+	spin.trigger = nil
+	SpinStop()
+	feet = { {}, {} }
+	body = {}
+	BailReset()
+	last, lastTick = nil, nil
 end
+
+-- Garry's Mod's own footsteps for a skater: the simulation moves them, so
+-- the walk animation other players see would step in place. Ours play
+-- instead (the server's copy of this hook is in sv_skate3.lua).
+hook.Add("PlayerFootstep", "skate3_quiet", function(ply)
+	if ply:GetNW2Bool("skate3_riding") then return true end
+end)
 
 return Sounds

@@ -68,7 +68,7 @@ def game(folder):
     (audio_dir / 'audiofiles.big').write_bytes(big({'Skate_Collisions.bnk': bank, 'Skate_Metal.bnk': metal,
                                                     'GRINDS.abk': b'ABKC' + snr(300) + looped(900)}))
     (audio_dir / 'grains.big').write_bytes(big({'wood_ramp_soft.grain': grain}))
-    (audio_dir / 'wheels.big').write_bytes(big({'Whls_spins_Jump_1.sek': b'\0' * 87, 'Whls_spins_Jump_1.snr': snr(4800)}, slot=24))
+    (audio_dir / 'wheels.big').write_bytes(big({'Whls_spins_Jump_1.sek': b'\0' * 87, 'Whls_spins_Jump_1.snr': looped(4800)}, slot=24))
 
 
 class AudioTest(unittest.TestCase):
@@ -92,6 +92,7 @@ class AudioTest(unittest.TestCase):
         # A container offers each of its records.
         self.assertEqual(play(2), play(0) + play(1))
         self.assertEqual(play(3), [])
+        self.assertEqual(play.count, 3)
         with self.assertRaises(ValueError):
             audio.splc(bank[:60] + bank[61:])
 
@@ -157,7 +158,12 @@ class AudioTest(unittest.TestCase):
             self.assertIn('spins/whls_spins_jump_1.wav', (out / 'index.txt').read_text())
             manifest = json.loads((out / 'sounds.json').read_text())
             self.assertEqual(manifest['loops']['grinds'], ['001'])
-            self.assertEqual(manifest['ids']['metal'], {'399': [], '401': []})
+            # Every sound id of an SPLC bank, with what it plays.
+            self.assertEqual(manifest['ids']['metal'], {'0': [[[[1, 0.5]]]], '1': [[[[0, 1.0], [1, 0.8]], [[1, 0.25]]]],
+                                                        '2': [[[[1, 0.5]]], [[[0, 1.0], [1, 0.8]], [[1, 0.25]]]]})
+            # The wheel spin-downs are one-shots.
+            self.assertNotIn(b'cue ', (out / 'spins/whls_spins_jump_1.wav').read_bytes())
+            self.assertNotIn('tuning', manifest)
             self.assertIn(b'cue ', (out / 'grinds/001.wav').read_bytes())
 
 

@@ -34,7 +34,12 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Skate 3 (from your disc)", "disc" },
 			{ "Off", "off" },
 		})
-		panel:ControlHelp("Skate 3's own sounds come from your disc: run setup to install them. Bails still use Half-Life 2.")
+		panel:ControlHelp("Skate 3's own sounds come from your disc: run setup to install them.")
+		Choices(panel, "Bail sounds", "skate3_bail_sounds", {
+			{ "Skate 3 (from your disc)", "disc" },
+			{ "Half-Life 2", "hl2" },
+		})
+		panel:ControlHelp("With the Skate 3 sounds: whose bails to play.")
 		panel:NumSlider("Volume", "skate3_volume", 0, 1, 2)
 
 		panel:CheckBox("Show the trick score", "skate3_score_hud")
