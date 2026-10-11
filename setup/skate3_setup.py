@@ -101,11 +101,18 @@ def find_gmod():
     return None
 
 
+def own_module():
+    """This computer's skate module (the Mac download carries only its own)."""
+    if os.name == 'nt':
+        return 'gmcl_skate3_win64.dll'
+    return 'gmcl_skate3_osx64.dll' if sys.platform == 'darwin' else 'gmcl_skate3_linux64.dll'
+
+
 def module_dir():
     """Where the skate modules come from: inside the app, or beside setup in
     the CI download (skate3-gmod/garrysmod/lua/bin)."""
     for folder in (ROOT / 'bin', HERE.parent / 'garrysmod/lua/bin'):
-        if all((folder / m).is_file() for m in MODULES):
+        if (folder / own_module()).is_file():
             return folder
     return None
 
@@ -176,7 +183,8 @@ def install(selected, gmod, report, with_addon=False):
     bin_dir = gmod / 'lua/bin'
     bin_dir.mkdir(parents=True, exist_ok=True)
     for m in MODULES:
-        shutil.copy2(modules / m, bin_dir / m)
+        if (modules / m).is_file():
+            shutil.copy2(modules / m, bin_dir / m)
     report(f'Installed the skate module in {bin_dir}')
     install_addon(gmod, with_addon, report)
 
