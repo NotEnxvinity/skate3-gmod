@@ -253,7 +253,6 @@ end
 local model -- the clientside copy of the local player's model (drawn only with skate3_body copy)
 local frozen -- the model's frozen frame, from Body.FrozenLocals, when posing the real body
 local pelvis -- the pelvis bone index, the one bone that's also shifted
-local extras = {} -- bone index -> a local turn Matrix for bones the retarget leaves alone
 local skeleton = {} -- bone index -> true for the model's ValveBiped bones
 local rest = {} -- bone index -> the model's bind Matrix at the origin
 -- Bones the engine sets up at all. Writing any other (unused helper bones on
@@ -636,22 +635,16 @@ concommand.Add("skate3_bone_report", function()
 	print("[skate3] saved garrysmod/data/skate3/bone_report.txt")
 end)
 
--- A bone the retarget doesn't move (a finger, say) turned by local rotation
--- m (nil to stop), on top of the frozen frame. Only with the real body.
-function Skater.SetExtra(bone, m)
-	extras[bone] = m
-end
-
--- The turn and offset of every posed bone of the real body, for the skater's
--- pose p, and the same as a frame to send other players.
+-- Where your hips should have ended up last frame, and how long they've been
+-- somewhere else.
 local lastFrame
-local pelvisWant -- where the hips should have ended up last frame
+local pelvisWant
 local offFrames, offWarned = 0, false
 
 -- Whether the engine put the body where we asked: the hips from last
 -- frame's setup against where they were meant to go. Said once per ride in
 -- the console when it's off for a second, since that means this Gmod
--- places players differently than expected.
+-- places players differently than expected (skate3_body_report says more).
 local function CheckLanding()
 	if not (pelvisWant and pelvis and IsValid(owner)) or offWarned then return end
 	local got = owner:GetBoneMatrix(pelvis)
@@ -661,20 +654,22 @@ local function CheckLanding()
 	offFrames = (off > 6 or turn > 0.3) and offFrames + 1 or 0
 	if offFrames > 60 then
 		offWarned = true
-		print(("[skate3] your body isn't landing on the skater: hips %.0f units away, turned off by %.2f. Tell the thread; skate3_body copy goes back to the old way."):format(off, turn))
+		print(("[skate3] your body isn't landing on the skater: hips %.0f units away, turned off by %.2f. Run skate3_body_report and send the thread data/skate3/body_report.txt; skate3_body copy goes back to the old way."):format(off, turn))
 	end
 end
 
+-- Your skater's pose p as a frame for Body.Apply (and, the same numbers, for
+-- other players): each posed bone's world turn relative to the way the
+-- skater faces, and where the hips go.
 local function RealFrame(p)
-	local conv = Body.Conv()
 	local origin = Vector(p.pos[1], p.pos[2], p.pos[3])
 	local forward = Vector(p.forward[1], p.forward[2], p.forward[3])
 	local up = Vector(p.up[1], p.up[2], p.up[3])
 	local yaw = forward:Angle().y
-	local E = Matrix()
-	E:SetAngles(Angle(0, yaw, 0))
-	E:SetTranslation(origin)
-	local locals, parents = frozen.locals, frozen.parents
+	local E0 = Matrix()
+	E0:SetAngles(Angle(0, yaw, 0))
+	E0:SetTranslation(origin)
+	local toFace = E0:GetInverseTR()
 	-- The whole skeleton the way the copy gets it first, so the finishing
 	-- touches (feet on the board, hands round it) can work on it.
 	local world, skins, driven = {}, {}, {}
@@ -692,7 +687,7 @@ local function RealFrame(p)
 			skin = Mat(posed) * fit.pre
 			driven[i] = true
 		else
-			local par = parents[i]
+			local par = frozen.parents[i]
 			skin = par >= 0 and skins[par] or hips
 		end
 		skins[i] = skin
@@ -710,43 +705,16 @@ local function RealFrame(p)
 		end
 	end
 	lastWorld = world
-	local F, turns, offsets, sent = {}, {}, {}, {}
+	local rots, sent = {}, {}
 	for i = 0, frozen.count - 1 do
-		local par = parents[i]
-		local Fp = par >= 0 and F[par] or E
-		local L = locals[i]
-		if L and driven[i] and world[i] then
-			-- Turn it so its world rotation is the retarget's (the same one
-			-- the copy gets), whatever its parents did.
-			local want = world[i]
-			local wantRot = Body.RotOnly(want)
-			local base, lr = Body.RotOnly(Fp), Body.RotOnly(L)
-			local R
-			if conv.pre then
-				R = base:GetInverseTR() * wantRot * lr:GetInverseTR()
-			else
-				R = (base * lr):GetInverseTR() * wantRot
-			end
-			turns[i] = R
-			sent[#sent + 1] = { i = i, q = Body.Quat(R) }
-			local Fi = Body.Chain(Fp, L, R)
-			if i == pelvis then
-				-- The hips also move, so the body sits where the skater is.
-				local at = want:GetTranslation()
-				offsets[i] = Body.OffsetAxes(Fp, L, Fi):GetInverseTR() * (at - Fi:GetTranslation())
-				Fi:SetTranslation(at)
-				pelvisWant = Fi
-			end
-			F[i] = Fi
-		else
-			local extra = L and extras[i]
-			if extra then
-				turns[i] = extra
-				sent[#sent + 1] = { i = i, q = Body.Quat(extra) }
-			end
-			F[i] = L and Body.Chain(Fp, L, extra or nil) or Fp
+		if driven[i] and world[i] and frozen.locals[i] then
+			local r = Body.RotOnly(toFace * world[i])
+			rots[i] = r
+			sent[#sent + 1] = { i = i, q = Body.Quat(r) }
 		end
 	end
+	local hipsAt = pelvis and world[pelvis] and toFace * world[pelvis]:GetTranslation()
+	pelvisWant = pelvis and world[pelvis]
 	local board = {}
 	for _, part in ipairs(data and data.parts or {}) do
 		local m = p.bones[part.bone]
@@ -758,9 +726,9 @@ local function RealFrame(p)
 	end
 	lastFrame = {
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
-		bones = sent, pelvis = offsets[pelvis] and pelvis or nil, ppos = offsets[pelvis], board = board,
+		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, board = board,
 	}
-	return { origin = origin, yaw = yaw, turns = turns, offsets = offsets }, forward, up
+	return { origin = origin, yaw = yaw, rots = rots, hips = hipsAt and pelvis or nil, hipsAt = hipsAt }, forward, up
 end
 
 -- The last frame of your own body, to send to other players; nil when your
@@ -780,7 +748,7 @@ function Skater.UpdateModel(p)
 	if model.skate3Real and frozen and IsValid(owner) and p.bones and not Skater.Skip.bones then
 		CheckLanding()
 		local frame, forward, up = RealFrame(p)
-		Body.Apply(owner, frame)
+		Body.Apply(owner, frame, frozen)
 		if not Skater.Skip.board then
 			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up }, Skater.DrawBoard)
 		end
@@ -802,6 +770,23 @@ concommand.Add("skate3_anim_report", function()
 	file.Write("skate3/anim_report.txt", "model " .. tostring(model.skate3Name) .. "\n" .. table.concat(lines, "\n"))
 	for _, l in ipairs(lines) do print("[skate3] " .. l) end
 	print("[skate3] saved garrysmod/data/skate3/anim_report.txt")
+end)
+
+-- Where your posed body is against where it should be, for working out why
+-- it looks wrong. Prints to the console and saves data/skate3/body_report.txt.
+concommand.Add("skate3_body_report", function()
+	local ply = LocalPlayer()
+	local lines = { "model " .. tostring(ply:GetModel()) }
+	local c = Body.Conv()
+	lines[#lines + 1] = c and ("bone turns apply %s the animation, angles read %d%d%d%s, offsets in %s axes"):format(
+		c.pre and "before" or "after", c.perm[1], c.perm[2], c.perm[3], c.inverse and " inverted" or "", c.space)
+		or "bone turns not measured yet"
+	lines[#lines + 1] = frozen and ("frozen on " .. tostring(frozen.sequence)) or "no frozen frame (not posing your own body)"
+	for _, l in ipairs(Body.Report(ply)) do lines[#lines + 1] = l end
+	file.CreateDir("skate3")
+	file.Write("skate3/body_report.txt", table.concat(lines, "\n"))
+	for _, l in ipairs(lines) do print("[skate3] " .. l) end
+	print("[skate3] saved garrysmod/data/skate3/body_report.txt")
 end)
 
 function Skater.HideModel()

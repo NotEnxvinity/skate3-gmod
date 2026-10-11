@@ -96,6 +96,37 @@ local function Load()
 end
 hook.Add("InitPostEntity", "skate3_load", Load)
 
+-- Bails: the server can make them hurt (skate3_bail_damage, a server
+-- setting, off unless it's turned on), so it's told how fast you were
+-- going into each one. Measured from where the skater was over the last
+-- moments rather than the speedometer, so drops count too.
+local recent, wasBailing = {}, false
+local UNITS = 39.37 -- map units per metre
+local function WatchBail(now, p)
+	if not p then return end
+	recent[#recent + 1] = { t = now, pos = V(p.pos) }
+	while #recent > 2 and now - recent[1].t > 0.4 do table.remove(recent, 1) end
+	local bailing = p.state and p.state:find("^Wipeout") ~= nil
+	if bailing and not wasBailing then
+		-- Fastest over any stretch of at least 0.05 s, so one odd frame
+		-- doesn't count.
+		local fastest = 0
+		for a = 1, #recent do
+			for b = a + 1, #recent do
+				local dt = recent[b].t - recent[a].t
+				if dt >= 0.05 then
+					fastest = math.max(fastest, recent[a].pos:Distance(recent[b].pos) / dt)
+					break
+				end
+			end
+		end
+		net.Start("skate3_bail")
+		net.WriteFloat(fastest / UNITS)
+		net.SendToServer()
+	end
+	wasBailing = bailing
+end
+
 local function SetActive(on)
 	active = on
 	net.Start("skate3_state")
@@ -113,6 +144,7 @@ local function Stop()
 	end
 	SetActive(false)
 	pose = nil
+	recent, wasBailing = {}, false
 	Skater.HideModel()
 	Sounds.Stop()
 	Score.Reset()
@@ -370,6 +402,7 @@ hook.Add("Think", "skate3_step", function()
 	if SessionMarker(now) then return end
 	if not skip.pose or not pose then pose = skate3.GetPose() or pose end
 	Skater.UpdateModel(pose)
+	if not skip.net then WatchBail(now, pose) end
 	if skip.sounds then Sounds.Stop() else Sounds.Update(LocalPlayer(), pose) end
 	if pose and now >= nextSend and not skip.net then
 		nextSend = now + 0.05

@@ -1,6 +1,7 @@
 util.AddNetworkString("skate3_state")
 util.AddNetworkString("skate3_move")
 util.AddNetworkString("skate3_pose")
+util.AddNetworkString("skate3_bail")
 
 local Pose = include("skate3/sh_pose.lua")
 
@@ -71,6 +72,39 @@ net.Receive("skate3_pose", function(len, ply)
 	net.WriteEntity(ply)
 	Pose.Write(f)
 	net.Send(to)
+end)
+
+-- Bail damage: a server setting, off unless the server turns it on. The
+-- faster you were going into the bail, the more it hurts; small bails are
+-- free. Your game says how fast you were going when you bail.
+local cv_bail = CreateConVar("skate3_bail_damage", "0", FCVAR_ARCHIVE,
+	"Bails hurt, by how fast you were going (0 = off, the default)", 0, 1)
+local cv_bailGrace = CreateConVar("skate3_bail_damage_grace", "15", FCVAR_ARCHIVE,
+	"Bails slower than this many km/h don't hurt", 0, 1000)
+local cv_bailScale = CreateConVar("skate3_bail_damage_scale", "1", FCVAR_ARCHIVE,
+	"How hard bails hit: 1 normal, 0.1 to 10; at 10 every bail past the grace kills", 0.1, 10)
+-- At scale 1, each km/h past the grace is this much damage: a 40 km/h bail
+-- with the default grace is 20 damage, 140 km/h kills from full health.
+local DAMAGE_PER_KMH = 0.8
+
+net.Receive("skate3_bail", function(_, ply)
+	local speed = net.ReadFloat() -- metres a second
+	if not cv_bail:GetBool() or not ply.Skate3 or not ply:Alive() then return end
+	if not (speed == speed) or speed <= 0 then return end
+	-- One bail is one hit, however the message arrives.
+	local now = CurTime()
+	if now - (ply.skate3BailAt or -10) < 1 then return end
+	ply.skate3BailAt = now
+	local over = math.min(speed * 3.6, 1e6) - cv_bailGrace:GetFloat()
+	if over <= 0 then return end
+	local scale = math.Clamp(cv_bailScale:GetFloat(), 0.1, 10)
+	local amount = scale >= 10 and 1e6 or math.ceil(over * DAMAGE_PER_KMH * scale)
+	local dmg = DamageInfo()
+	dmg:SetDamage(amount)
+	dmg:SetDamageType(DMG_FALL)
+	dmg:SetAttacker(game.GetWorld())
+	dmg:SetInflictor(game.GetWorld())
+	ply:TakeDamageInfo(dmg)
 end)
 
 hook.Add("PlayerDeath", "skate3_stop", ForceStop)

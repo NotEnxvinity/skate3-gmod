@@ -4,8 +4,11 @@
 -- body's shadow, jiggle bones (hair, tails, capes), eyes, mirrors and every
 -- other player's view all see the skating pose.
 --
--- Used for your own skater (cl_skater.lua works out the turns) and for other
--- skaters (cl_others.lua, from the pose their game sends).
+-- Used for your own skater (cl_skater.lua works out the pose) and for other
+-- skaters (cl_others.lua, from the pose their game sends). The pose comes in
+-- as each bone's world turn relative to the skater's facing; the turns that
+-- get there are worked out here, against where the engine has the player
+-- right now and how the body really holds its frozen frame.
 
 local Body = {}
 
@@ -284,42 +287,235 @@ function Body.FrozenLocals(ent)
 	return { locals = locals, parents = parents, count = count, sequence = name }
 end
 
+-- The frozen frame of another player's model, from a stand-in of it (once
+-- per model; a model that isn't ready is tried again a few seconds later).
+local bases, baseRetry = {}, {}
+function Body.BaseFor(ply)
+	local name = ply:GetModel()
+	if bases[name] then return bases[name] end
+	if RealTime() < (baseRetry[name] or 0) then return nil end
+	baseRetry[name] = RealTime() + 3
+	local e = ClientsideModel(name, RENDERGROUP_OPAQUE)
+	if not IsValid(e) then return nil end
+	e:SetNoDraw(true)
+	local b = Body.FrozenLocals(e)
+	e:Remove()
+	if next(b.locals) == nil then return nil end
+	bases[name] = b
+	return b
+end
+
 ---------------------------------------------------------------------------
--- Players being posed: ply -> { origin, yaw, touched = { [bone] = true } }
+-- Players being posed. Per player:
+--   base      the frozen frame of their model (Body.FrozenLocals)
+--   measured  bone -> its local turn as their body really holds the frozen
+--             frame, read off the body itself (nil until it's steady)
+--   frame     the pose last asked for (see Body.Apply)
+--   E         where the engine had the body when the turns were worked out
+--   applied   bone -> the turn set on it
 
 local posed = {}
+
+-- The rotation part of m with clean axes (bone matrices can carry scale).
+local function Ortho(m)
+	local f, r, u = m:GetForward(), m:GetRight(), m:GetUp()
+	f:Normalize() r:Normalize() u:Normalize()
+	local o = Matrix({
+		{ f.x, -r.x, u.x, 0 },
+		{ f.y, -r.y, u.y, 0 },
+		{ f.z, -r.z, u.z, 0 },
+		{ 0, 0, 0, 1 },
+	})
+	return o
+end
+
+-- How far apart two turns are, in degrees.
+local function TurnBetween(a, b)
+	local t = (RotOnly(a):GetInverseTR() * RotOnly(b)):ToTable()
+	local c = math.Clamp((t[1][1] + t[2][2] + t[3][3] - 1) / 2, -1, 1)
+	return math.deg(math.acos(c))
+end
+Body.TurnBetween = TurnBetween
+
+-- Where the engine puts the body this moment: the player's own position and
+-- facing. The body isn't moved there by us any more (Gmod resets a player's
+-- render angles every frame, and the position only updates 20 times a
+-- second); instead the hips are shifted from wherever that is to the skater.
+local function EngineE(ply)
+	local ang = ply.GetRenderAngles and ply:GetRenderAngles() or ply:GetAngles()
+	local E = Matrix()
+	E:SetAngles(Angle(0, ang.y, 0))
+	E:SetTranslation(ply:GetPos())
+	return E
+end
+Body.EngineE = EngineE
+
+local function SameE(a, b)
+	return b and (a:GetTranslation() - b:GetTranslation()):LengthSqr() < 1e-4
+		and (a:GetForward() - b:GetForward()):LengthSqr() < 1e-8
+end
+
+-- A bone's local matrix: the turn the body really holds once measured, the
+-- frozen frame's until then; the offset from its parent is always the frozen
+-- frame's.
+local function Local(p, i)
+	local L = p.base.locals[i]
+	local m = L and p.measured and p.measured[i]
+	if not m then return L end
+	local r = Matrix(m)
+	r:SetTranslation(L:GetTranslation())
+	return r
+end
+
+-- Work out and set every turn and offset for the body placed at E.
+local function Solve(ply, p, E)
+	local f, base = p.frame, p.base
+	local E0 = Matrix()
+	E0:SetAngles(Angle(0, f.yaw, 0))
+	E0:SetTranslation(f.origin)
+	local face = RotOnly(E0)
+	local F, turns, offsets = {}, {}, {}
+	for i = 0, base.count - 1 do
+		local par = base.parents[i]
+		local L = p.needed[i] and Local(p, i)
+		local Fp = par >= 0 and F[par] or (par < 0 and E) or nil
+		if L and Fp then
+			local want = f.rots[i] and face * f.rots[i]
+			-- Bones at the top of the skeleton stay with the skater too,
+			-- wherever the engine has the player.
+			if par < 0 and not want then want = face * RotOnly(L) end
+			local R
+			if want then
+				local lr = RotOnly(L)
+				if conv.pre then
+					R = RotOnly(Fp):GetInverseTR() * want * lr:GetInverseTR()
+				else
+					R = (RotOnly(Fp) * lr):GetInverseTR() * want
+				end
+				turns[i] = R
+			end
+			local Fi = Body.Chain(Fp, L, R)
+			local at
+			if i == f.hips and f.hipsAt then
+				at = E0 * f.hipsAt
+			elseif par < 0 then
+				at = E0 * L:GetTranslation()
+			end
+			if at then
+				offsets[i] = Body.OffsetAxes(Fp, L, Fi):GetInverseTR() * (at - Fi:GetTranslation())
+				Fi:SetTranslation(at)
+			end
+			F[i] = Fi
+		end
+	end
+	for i, R in pairs(turns) do ply:ManipulateBoneAngles(i, Body.AnglesFor(R)) end
+	for i, v in pairs(offsets) do ply:ManipulateBonePosition(i, v) end
+	-- Bones set last time but not this time go back to normal.
+	for i in pairs(p.applied or {}) do
+		if not turns[i] then ply:ManipulateBoneAngles(i, angle_zero) end
+	end
+	for i in pairs(p.moved or {}) do
+		if not offsets[i] then ply:ManipulateBonePosition(i, vector_origin) end
+	end
+	p.applied, p.moved, p.E = turns, offsets, E
+	p.want = F
+end
+
+-- Reads how the body really holds its frozen frame: each bone's turn from
+-- its parent, as the engine set it up, minus the turn we put on it. Gmod can
+-- hold a slightly different frame than the copy we measured (layers the
+-- player animation adds, aim pose parameters), and every turn that's off
+-- there shows up straight in the pose: arms bent back, say. Taken once the
+-- reading holds steady for a few frames, then kept for the ride.
+local STEADY = 5
+local GIVE_UP = 300
+
+local function Measure(ply, p)
+	if p.measured or p.gaveUp or not p.applied then return end
+	p.tries = (p.tries or 0) + 1
+	local got, drift, worst, worstBone = {}, 0, 0, nil
+	for i in pairs(p.needed) do
+		local par = p.base.parents[i]
+		local L = p.base.locals[i]
+		if par >= 0 and L then
+			local Fp, Fi = ply:GetBoneMatrix(par), ply:GetBoneMatrix(i)
+			if not (Fp and Fi) then return end
+			local m = Ortho(Fp):GetInverseTR() * Ortho(Fi)
+			local R = p.applied[i]
+			if R then m = conv.pre and R:GetInverseTR() * m or m * R:GetInverseTR() end
+			got[i] = m
+			if p.last and p.last[i] then drift = math.max(drift, TurnBetween(p.last[i], m)) end
+			local d = TurnBetween(L, m)
+			if d > worst then worst, worstBone = d, i end
+		end
+	end
+	p.steady = (p.last and drift < 1) and (p.steady or 0) + 1 or 0
+	p.last = got
+	local who = ply == LocalPlayer() and "your" or ((ply.Nick and ply:Nick() or "a player") .. "'s")
+	if p.steady >= STEADY then
+		p.measured = got
+		p.measuredWorst, p.measuredBone = worst, worstBone
+		if worst > 3 then
+			print(("[skate3] %s body holds its frame differently than the copy (up to %.0f degrees, %s); using what it really does"):format(
+				who, worst, tostring(ply:GetBoneName(worstBone))))
+		end
+	elseif p.tries > GIVE_UP then
+		p.gaveUp = true
+		print(("[skate3] couldn't read how %s body really stands (it kept moving %.0f degrees between frames); using the copy's frame"):format(who, drift))
+	end
+end
+
+local function MarkNeeded(p)
+	local needed, parents = {}, p.base.parents
+	for i in pairs(p.frame.rots) do
+		local j = i
+		while j and j >= 0 and not needed[j] do
+			needed[j] = true
+			j = parents[j]
+		end
+	end
+	if p.frame.hips then
+		local j = p.frame.hips
+		while j and j >= 0 and not needed[j] do
+			needed[j] = true
+			j = parents[j]
+		end
+	end
+	for i = 0, p.base.count - 1 do
+		if parents[i] < 0 then needed[i] = true end
+	end
+	p.needed = needed
+end
 
 function Body.IsPosed(ply)
 	return posed[ply] ~= nil
 end
 
--- frame: { origin = Vector, yaw = number, turns = { [bone] = Matrix },
--- offsets = { [bone] = Vector } }
-function Body.Apply(ply, frame)
-	if not IsValid(ply) or not conv then return end
+local BIG_MIN, BIG_MAX = Vector(-160, -160, -80), Vector(160, 160, 200)
+
+-- frame: { origin = Vector, yaw = number, rots = { [bone] = Matrix, each
+-- bone's world turn relative to the facing yaw }, hips = bone index,
+-- hipsAt = Vector (where the hips go, from origin, in the facing's axes) }.
+-- base: the model's frozen frame (Body.FrozenLocals).
+function Body.Apply(ply, frame, base)
+	if not IsValid(ply) or not conv or not base then return end
 	local p = posed[ply]
 	if not p then
-		p = { touched = {} }
+		p = {}
 		posed[ply] = p
+		-- The body can be a little way from where the engine thinks the
+		-- player is; don't let it vanish at the screen's edge.
+		pcall(ply.SetRenderBounds, ply, BIG_MIN, BIG_MAX)
 	end
-	p.origin, p.yaw = frame.origin, frame.yaw
-	local now = {}
-	for i, R in pairs(frame.turns) do
-		ply:ManipulateBoneAngles(i, Body.AnglesFor(R))
-		now[i] = true
+	if p.base ~= base then
+		p.base, p.measured, p.last, p.steady, p.tries, p.gaveUp = base, nil, nil, 0, 0, false
 	end
-	for i, v in pairs(frame.offsets or {}) do
-		ply:ManipulateBonePosition(i, v)
-		now[i] = true
-	end
-	-- Bones turned last frame but not this one go back to normal.
-	for i in pairs(p.touched) do
-		if not now[i] then
-			ply:ManipulateBoneAngles(i, angle_zero)
-			ply:ManipulateBonePosition(i, vector_origin)
-		end
-	end
-	p.touched = now
+	-- Pose parameters (aiming, mostly) bend the frozen frame: keep them flat.
+	ply:ClearPoseParameters()
+	if p.needed then Measure(ply, p) end
+	p.frame = frame
+	MarkNeeded(p)
+	Solve(ply, p, EngineE(ply))
 	ply:InvalidateBoneCache()
 end
 
@@ -327,26 +523,65 @@ function Body.Release(ply)
 	local p = posed[ply]
 	posed[ply] = nil
 	if not p or not IsValid(ply) then return end
-	-- Back to where the engine puts it.
-	pcall(ply.SetRenderOrigin, ply)
-	pcall(ply.SetRenderAngles, ply)
-	for i in pairs(p.touched) do
-		ply:ManipulateBoneAngles(i, angle_zero)
-		ply:ManipulateBonePosition(i, vector_origin)
+	for i in pairs(p.applied or {}) do ply:ManipulateBoneAngles(i, angle_zero) end
+	for i in pairs(p.moved or {}) do ply:ManipulateBonePosition(i, vector_origin) end
+	if ply.GetModelRenderBounds then
+		local mins, maxs = ply:GetModelRenderBounds()
+		if mins and maxs then pcall(ply.SetRenderBounds, ply, mins, maxs) end
 	end
 	ply:InvalidateBoneCache()
 end
 
-local function Place(ply)
+-- Right before the body is drawn: if the engine has moved or turned the
+-- player since the turns were worked out (a position update from the
+-- server, the camera turning the player), shift the top of the skeleton so
+-- the body stays exactly on the skater.
+local function Follow(ply)
 	local p = posed[ply]
-	if not p or not p.origin then return end
-	ply:SetRenderOrigin(p.origin)
-	ply:SetRenderAngles(Angle(0, p.yaw, 0))
+	if not p or not p.frame then return end
+	local fresh = p.drawFrame ~= FrameNumber()
+	p.drawFrame = FrameNumber()
+	if fresh then ply:ClearPoseParameters() end
+	local E = EngineE(ply)
+	if not SameE(E, p.E) then
+		Solve(ply, p, E)
+		fresh = true
+	end
+	if fresh then ply:InvalidateBoneCache() end
+end
+
+-- What's known about a posed body, for skate3_body_report.
+function Body.Report(ply)
+	local p = posed[ply]
+	if not p or not p.frame then return { "not posed right now" } end
+	local lines = {}
+	local E, f = EngineE(ply), p.frame
+	local yawOff = math.AngleDifference(E:GetAngles().y, f.yaw)
+	lines[#lines + 1] = ("engine has the player %.1f units from the skater, facing %.0f degrees off"):format(
+		E:GetTranslation():Distance(f.origin), yawOff)
+	lines[#lines + 1] = p.measured and ("frame measured off the body, biggest difference from the copy %.1f degrees (%s)"):format(
+		p.measuredWorst or 0, tostring(p.measuredBone and ply:GetBoneName(p.measuredBone)))
+		or p.gaveUp and "frame couldn't be measured (kept moving), using the copy's"
+		or ("still measuring the frame (%d tries, %d steady)"):format(p.tries or 0, p.steady or 0)
+	ply:SetupBones()
+	local rows = {}
+	for i, want in pairs(p.want or {}) do
+		local got = ply:GetBoneMatrix(i)
+		if got then
+			rows[#rows + 1] = { i = i, turn = TurnBetween(Ortho(got), want), off = got:GetTranslation():Distance(want:GetTranslation()) }
+		end
+	end
+	table.sort(rows, function(a, b) return a.turn > b.turn end)
+	lines[#lines + 1] = "bone: how far off where it should be (turn in degrees, position in units), worst first"
+	for n = 1, math.min(#rows, 12) do
+		local r = rows[n]
+		lines[#lines + 1] = ("  %-34s %6.1f  %6.1f"):format(tostring(ply:GetBoneName(r.i)), r.turn, r.off)
+	end
+	return lines
 end
 
 -- Gmod animates players every frame; while posed, the body holds the frozen
--- frame instead, with no gestures, and sits where the skater is (moved every
--- frame on this screen, not 20 times a second as the server sees it).
+-- frame instead, with no gestures.
 hook.Add("CalcMainActivity", "skate3_body", function(ply)
 	if not posed[ply] then return end
 	ply:SetCycle(0)
@@ -358,7 +593,6 @@ hook.Add("UpdateAnimation", "skate3_body", function(ply)
 	ply:SetPlaybackRate(0)
 	ply:SetCycle(0)
 	ply:ClearPoseParameters()
-	Place(ply)
 	return true
 end)
 
@@ -366,14 +600,14 @@ hook.Add("DoAnimationEvent", "skate3_body", function(ply)
 	if posed[ply] then return ACT_INVALID end
 end)
 
-hook.Add("PreRender", "skate3_body", function()
-	for ply in pairs(posed) do
-		if IsValid(ply) then Place(ply) else posed[ply] = nil end
-	end
+hook.Add("PrePlayerDraw", "skate3_body", function(ply)
+	if posed[ply] then Follow(ply) end
 end)
 
-hook.Add("PrePlayerDraw", "skate3_body", function(ply)
-	if posed[ply] then Place(ply) end
+hook.Add("Think", "skate3_body_gone", function()
+	for ply in pairs(posed) do
+		if not IsValid(ply) then posed[ply] = nil end
+	end
 end)
 
 ---------------------------------------------------------------------------

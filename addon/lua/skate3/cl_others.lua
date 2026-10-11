@@ -80,11 +80,13 @@ return function(Skater)
 				or now - frames[#frames].t > STALE then
 				Let(ply)
 			elseif Body.Ready(ply:GetModel()) then
+				local base = Body.BaseFor(ply)
 				local f = FrameAt(frames, now - DELAY)
-				local turns, offsets = {}, {}
-				for _, bone in ipairs(f.bones) do turns[bone.i] = Body.QuatMatrix(bone.q) end
-				if f.pelvis then offsets[f.pelvis] = f.ppos end
-				Body.Apply(ply, { origin = f.origin, yaw = f.yaw, turns = turns, offsets = offsets })
+				local rots = {}
+				for _, bone in ipairs(f.bones) do rots[bone.i] = Body.QuatMatrix(bone.q) end
+				if base then
+					Body.Apply(ply, { origin = f.origin, yaw = f.yaw, rots = rots, hips = f.pelvis, hipsAt = f.ppos }, base)
+				end
 				local bones = {}
 				for _, part in ipairs(f.board) do
 					local m = Body.QuatMatrix(part.q)

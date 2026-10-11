@@ -8,8 +8,10 @@
 --   yaw      number, which way the body faces
 --   state    string, the skate state ("PhysicsGround", "BipedGround", ...)
 --   forward, up  Vector, the board's heading, for the stand-in board
---   bones    list of { i = bone index, q = { w, x, y, z } }, each bone's turn
---   pelvis   bone index or nil, with ppos the Vector it's shifted by
+--   bones    list of { i = bone index, q = { w, x, y, z } }, each posed
+--            bone's world turn relative to the way the body faces (yaw)
+--   pelvis   bone index or nil, with ppos where it goes: from origin, in
+--            the facing's axes
 --   board    list of { name = Skate 3 bone, pos = Vector from origin, q = quat }
 
 local Pose = {}
