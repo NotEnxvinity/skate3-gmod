@@ -41,9 +41,12 @@ return function(Skater)
 		}
 		local from = {}
 		for _, bone in ipairs(a.bones) do from[bone.i] = bone.q end
+		local fromP = {}
+		for _, bone in ipairs(a.bones) do fromP[bone.i] = bone.p end
 		for n, bone in ipairs(b.bones) do
-			local q = from[bone.i]
-			f.bones[n] = { i = bone.i, q = q and Body.Slerp(q, bone.q, t) or bone.q }
+			local q, p = from[bone.i], fromP[bone.i]
+			f.bones[n] = { i = bone.i, q = q and Body.Slerp(q, bone.q, t) or bone.q,
+				p = p and LerpVector(t, p, bone.p) or bone.p }
 		end
 		if b.pelvis then
 			f.pelvis = b.pelvis
@@ -82,10 +85,20 @@ return function(Skater)
 			elseif Body.Ready(ply:GetModel()) then
 				local base = Body.BaseFor(ply)
 				local f = FrameAt(frames, now - DELAY)
-				local rots = {}
-				for _, bone in ipairs(f.bones) do rots[bone.i] = Body.QuatMatrix(bone.q) end
+				local E0 = Matrix()
+				E0:SetAngles(Angle(0, f.yaw, 0))
+				E0:SetTranslation(f.origin)
+				local rots, final = {}, {}
+				for _, bone in ipairs(f.bones) do
+					local r = Body.QuatMatrix(bone.q)
+					rots[bone.i] = r
+					local m = Matrix(r)
+					m:SetTranslation(bone.p)
+					final[bone.i] = E0 * m
+				end
 				if base then
-					Body.Apply(ply, { origin = f.origin, yaw = f.yaw, rots = rots, hips = f.pelvis, hipsAt = f.ppos }, base)
+					Body.Apply(ply, { origin = f.origin, yaw = f.yaw, rots = rots, final = final,
+						hips = f.pelvis, hipsAt = f.ppos }, base)
 				end
 				local bones = {}
 				for _, part in ipairs(f.board) do

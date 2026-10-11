@@ -443,10 +443,9 @@ local function Sane(m)
 	return t.x == t.x and math.abs(t.x) + math.abs(t.y) + math.abs(t.z) < 1e6
 end
 
--- Forearms, hands and fingers: Gmod's own IK moves them after our turns
--- (pulling the hands to where a weapon would be held; it flipped the left
--- hand round), so they're placed outright once the engine is done, below.
--- Fingers also aren't set up every time on some models.
+-- Forearms, hands and fingers aren't read: Gmod's own IK moves them after
+-- our turns (pulling the hands to where a weapon would be held), and fingers
+-- aren't set up every time on some models. The finishing step places them.
 local function IsHand(name)
 	return name:find("Forearm") ~= nil or name:find("_Hand$") ~= nil or name:find("Finger") ~= nil
 end
@@ -459,24 +458,6 @@ local function SkipMeasure(ply, p, i)
 		p.skipMeasure[i] = skip
 	end
 	return skip
-end
-
--- Run by the engine at the end of each bone setup, after its IK.
-local function PlaceHands(ply, count)
-	local p = posed[ply]
-	if not (p and p.want and p.hands) then return end
-	for i in pairs(p.hands) do
-		local w = p.want[i]
-		if w and i < count then ply:SetBoneMatrix(i, w) end
-	end
-end
-
-local function FindHands(ply, p)
-	p.hands = {}
-	for i = 0, p.base.count - 1 do
-		local name = ply:GetBoneName(i) or ""
-		if name:find("^ValveBiped%.Bip01_") and IsHand(name) then p.hands[i] = true end
-	end
 end
 
 local function Measure(ply, p)
@@ -516,6 +497,39 @@ local function Measure(ply, p)
 	print(("[skate3] read how %s body really stands: %d bones%s, biggest difference from the copy %.0f degrees (%s)"):format(
 		who, count, open > 0 and (", " .. open .. " never held still (kept the copy's)") or "",
 		worst, worstBone and tostring(ply:GetBoneName(worstBone)) or "none"))
+end
+
+-- The finishing step, run by the engine at the very end of each bone setup
+-- (after its own IK, helper bones and jiggle bones). The turns above only
+-- nudge the body, and Gmod changes things after them (it pulls the hands to
+-- where a weapon would be held, works out wrist and elbow helpers from the
+-- arms it had), so on their own they never quite gave the copy's pose. Here
+-- the skeleton is set to exactly the copy's finished pose (frame.final), and
+-- every other bone (hair, tails, capes, helpers) is carried along with its
+-- parent, keeping whatever the engine made of it: jiggle bones keep
+-- swinging, since the turns above already moved the body nearly there.
+local function PlaceAll(ply, count)
+	local p = posed[ply]
+	if not p or p.measuring or not p.final then return end
+	local final, parents = p.final, p.base.parents
+	local old, new = {}, {}
+	for i = 0, math.min(count, p.base.count) - 1 do
+		local was = ply:GetBoneMatrix(i)
+		if was then
+			old[i] = was
+			local m = final[i]
+			if not m then
+				local par = parents[i]
+				if par and par >= 0 and new[par] and old[par] then
+					m = new[par] * old[par]:GetInverse() * was
+				end
+			end
+			if m then
+				new[i] = m
+				ply:SetBoneMatrix(i, m)
+			end
+		end
+	end
 end
 
 -- Where the engine really had the player when the body was last set up:
@@ -574,7 +588,9 @@ local BIG_MIN, BIG_MAX = Vector(-160, -160, -80), Vector(160, 160, 200)
 
 -- frame: { origin = Vector, yaw = number, rots = { [bone] = Matrix, each
 -- bone's world turn relative to the facing yaw }, hips = bone index,
--- hipsAt = Vector (where the hips go, from origin, in the facing's axes) }.
+-- hipsAt = Vector (where the hips go, from origin, in the facing's axes),
+-- final = { [bone] = Matrix, the finished world pose the skeleton is set to
+-- at the end of each setup } }.
 -- base: the model's frozen frame (Body.FrozenLocals).
 function Body.Apply(ply, frame, base)
 	if not IsValid(ply) or not conv or not base then return end
@@ -588,13 +604,12 @@ function Body.Apply(ply, frame, base)
 		-- Full detail: further away Gmod skips small bones (fingers), and
 		-- they'd hold whatever they had last.
 		pcall(ply.SetLOD, ply, 0)
-		p.callback = ply:AddCallback("BuildBonePositions", PlaceHands)
+		p.callback = ply:AddCallback("BuildBonePositions", PlaceAll)
 	end
 	if p.base ~= base then
 		-- A new model: its bones are numbered differently, start over.
 		p.base, p.needed, p.measured, p.last, p.steady, p.tries, p.measureDone = base, nil, nil, nil, nil, 0, false
 		p.skipMeasure = nil
-		FindHands(ply, p)
 	end
 	-- Pose parameters (aiming, mostly) bend the frozen frame: keep them flat.
 	ply:ClearPoseParameters()
@@ -603,13 +618,17 @@ function Body.Apply(ply, frame, base)
 		-- Set the body up as it stands right now, last frame's turns on it,
 		-- and read off it where the engine really has it and how it really
 		-- holds its frame.
+		-- (Without the finishing step, so it's the engine's own result.)
+		p.measuring = true
 		ply:InvalidateBoneCache()
 		ply:SetupBones()
 		local E = ReadE(ply, p)
 		if E then p.fix = guess:GetInverseTR() * E end
 		Measure(ply, p)
+		p.measuring = false
 	end
 	p.frame = frame
+	p.final = frame.final
 	MarkNeeded(p)
 	Solve(ply, p, p.fix and guess * p.fix or guess)
 	p.guess = guess
@@ -676,7 +695,7 @@ function Body.Report(ply)
 	end
 	ply:SetupBones()
 	local rows = {}
-	for i, want in pairs(p.want or {}) do
+	for i, want in pairs(p.final or p.want or {}) do
 		local got = ply:GetBoneMatrix(i)
 		if got then
 			rows[#rows + 1] = { i = i, turn = TurnBetween(Ortho(got), want), off = got:GetTranslation():Distance(want:GetTranslation()) }

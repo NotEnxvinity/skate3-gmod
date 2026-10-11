@@ -705,12 +705,16 @@ local function RealFrame(p)
 		end
 	end
 	lastWorld = world
-	local rots, sent = {}, {}
+	-- The finished pose of every skeleton bone the copy would write, exactly
+	-- as the copy gets it: your body is set to it at the end of each setup.
+	local rots, final, sent = {}, {}, {}
 	for i = 0, frozen.count - 1 do
-		if driven[i] and world[i] and frozen.locals[i] then
-			local r = Body.RotOnly(toFace * world[i])
+		if world[i] and writable[i] and skeleton[i] and frozen.locals[i] then
+			final[i] = world[i]
+			local rel = toFace * world[i]
+			local r = Body.RotOnly(rel)
 			rots[i] = r
-			sent[#sent + 1] = { i = i, q = Body.Quat(r) }
+			sent[#sent + 1] = { i = i, q = Body.Quat(r), p = rel:GetTranslation() }
 		end
 	end
 	local hipsAt = pelvis and world[pelvis] and toFace * world[pelvis]:GetTranslation()
@@ -728,7 +732,8 @@ local function RealFrame(p)
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
 		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, board = board,
 	}
-	return { origin = origin, yaw = yaw, rots = rots, hips = hipsAt and pelvis or nil, hipsAt = hipsAt }, forward, up
+	return { origin = origin, yaw = yaw, rots = rots, final = final, hips = hipsAt and pelvis or nil, hipsAt = hipsAt },
+		forward, up
 end
 
 -- The last frame of your own body, to send to other players; nil when your

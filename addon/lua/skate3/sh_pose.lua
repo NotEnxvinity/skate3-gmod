@@ -8,8 +8,9 @@
 --   yaw      number, which way the body faces
 --   state    string, the skate state ("PhysicsGround", "BipedGround", ...)
 --   forward, up  Vector, the board's heading, for the stand-in board
---   bones    list of { i = bone index, q = { w, x, y, z } }, each posed
---            bone's world turn relative to the way the body faces (yaw)
+--   bones    list of { i = bone index, q = { w, x, y, z }, p = Vector },
+--            each posed bone's finished world turn and position relative to
+--            origin and the way the body faces (yaw)
 --   pelvis   bone index or nil, with ppos where it goes: from origin, in
 --            the facing's axes
 --   board    list of { name = Skate 3 bone, pos = Vector from origin, q = quat }
@@ -65,6 +66,7 @@ function Pose.Write(f)
 	for n = 1, math.min(#bones, 255) do
 		net.WriteUInt(math.Clamp(bones[n].i, 0, MAX_BONE), 10)
 		WriteQuat(bones[n].q)
+		WriteSmall(bones[n].p or vector_origin, POS_SCALE)
 	end
 	net.WriteBool(f.pelvis ~= nil)
 	if f.pelvis then
@@ -92,7 +94,7 @@ function Pose.Read()
 	f.up = ReadDir()
 	f.bones = {}
 	for n = 1, net.ReadUInt(8) do
-		f.bones[n] = { i = net.ReadUInt(10), q = ReadQuat() }
+		f.bones[n] = { i = net.ReadUInt(10), q = ReadQuat(), p = ReadSmall(POS_SCALE) }
 	end
 	if net.ReadBool() then
 		f.pelvis = net.ReadUInt(10)

@@ -57,7 +57,7 @@ end)
 -- skating; the others pose that player's body from this).
 local POSE_EVERY = 1 / 30
 net.Receive("skate3_pose", function(len, ply)
-	if not ply.Skate3 or len > 16000 then return end
+	if not ply.Skate3 or len > 40000 then return end
 	local now = SysTime()
 	if now - (ply.skate3PoseAt or 0) < POSE_EVERY then return end
 	ply.skate3PoseAt = now
