@@ -166,19 +166,22 @@ local function FindHand(ent, rest, side)
 		curl = { 0, 0 }, wanted = 0 }
 end
 
--- One leg's chain and how high its ankle sits above its toe joint, for
--- matching the skater's sole height.
-local function FindLeg(ent, rest, side, skateBind, skateSide)
+-- One leg's chain and how high its ankle sits off the floor, for matching
+-- the skater's sole height. Foot bones differ a lot between models (Enx's
+-- bone views: Gordon, Daedric, TB3 and the suit angle the foot bone down to
+-- the ball of the foot, Chief and Hornet run it flat along the ground, the
+-- fox has extra toe bones, the plague doctor has no toe bone), so nothing
+-- here uses the foot or toe bone's direction: playermodels stand with their
+-- origin on the floor, so the ankle's rest height is its height off the floor.
+local function FindLeg(ent, rest, side, skateBind, skateSide, skateFloor)
 	local thigh, calf, foot, toe = Bone(ent, side .. "_Thigh"), Bone(ent, side .. "_Calf"),
 		Bone(ent, side .. "_Foot"), Bone(ent, side .. "_Toe0")
 	if not (thigh and calf and foot and rest[thigh] and rest[calf] and rest[foot]) then return nil end
 	local leg = { thigh = thigh, calf = calf, foot = foot, toe = toe }
-	local sFoot, sToe = skateBind[skateSide .. "FOOT"], skateBind[skateSide .. "TOEBASE"]
-	if toe and rest[toe] and sFoot and sToe then
-		-- Both rigs put the toe joint about on the sole, so ankle height above
-		-- it is how far each ankle sits above the ground.
-		leg.ankle = Pos(rest, foot).z - Pos(rest, toe).z
-		leg.skateAnkle = sFoot:GetTranslation().z - sToe:GetTranslation().z
+	local sFoot = skateBind[skateSide .. "FOOT"]
+	if sFoot and skateFloor then
+		leg.ankle = Pos(rest, foot).z
+		leg.skateAnkle = sFoot:GetTranslation().z - skateFloor
 		leg.skateFoot = skateSide .. "FOOT"
 		leg.bindTurn = Turn(sFoot):GetInverse()
 	end
@@ -244,11 +247,25 @@ local function FindFace(ent)
 	return face
 end
 
+-- Where the skater's floor is in its bind pose: at its origin if it stands
+-- there, otherwise just under its lowest joint (the toes).
+local function SkateFloor(bind)
+	local low
+	for _, m in pairs(bind) do
+		local z = m:GetTranslation().z
+		if not low or z < low then low = z end
+	end
+	if not low then return nil end
+	if low >= -0.5 and low <= 4 then return 0 end
+	return low - 1
+end
+
 function Anim.Setup(ent, rest, skater)
 	local bind = {}
 	for name, m in pairs(skater and skater.bind or {}) do
 		bind[name] = istable(m) and Mat(m) or m
 	end
+	local floor = SkateFloor(bind)
 	local info = {
 		below = Below(ent),
 		hands = {},
@@ -263,8 +280,9 @@ function Anim.Setup(ent, rest, skater)
 		local hand, why = FindHand(ent, rest, side)
 		info.hands[side] = hand or false
 		info.handWhy = info.handWhy or why
-		info.legs[side] = FindLeg(ent, rest, side, bind, side == "L" and "LEFT" or "RIGHT") or false
+		info.legs[side] = FindLeg(ent, rest, side, bind, side == "L" and "LEFT" or "RIGHT", floor) or false
 	end
+	info.skateFloor = floor
 	per[ent] = info
 	return info
 end
@@ -479,19 +497,22 @@ function Anim.Report(ent, pose, world)
 	end
 	for side, leg in pairs(info.legs) do
 		if leg and leg.ankle then
-			local line = ("%s foot: ankle %.1f above toe joint (Skate 3: %.1f), lift %.1f")
-				:format(side, leg.ankle, leg.skateAnkle, leg.ankle - leg.skateAnkle)
-			if world and world[leg.foot] and leg.toe and world[leg.toe] then
+			local line = ("%s foot: ankle %.1f off the floor at rest (Skate 3: %.1f, its floor at %.1f), lift %.1f%s")
+				:format(side, leg.ankle, leg.skateAnkle, info.skateFloor or 0, leg.ankle - leg.skateAnkle,
+					leg.toe and "" or ", no toe bone")
+			if world and world[leg.foot] then
 				local function Above(p)
 					local tr = util.TraceLine({ start = p + Vector(0, 0, 4), endpos = p - Vector(0, 0, 64), mask = MASK_SOLID })
 					return p.z - tr.HitPos.z
 				end
-				line = line .. (", now ankle %.1f and toe %.1f above what's under them")
-					:format(Above(world[leg.foot]:GetTranslation()), Above(world[leg.toe]:GetTranslation()))
+				line = line .. (", now ankle %.1f above what's under it"):format(Above(world[leg.foot]:GetTranslation()))
+				if leg.toe and world[leg.toe] then
+					line = line .. (", toe %.1f"):format(Above(world[leg.toe]:GetTranslation()))
+				end
 			end
 			lines[#lines + 1] = line
 		else
-			lines[#lines + 1] = side .. " foot: no ValveBiped toe bone, sole height not matched"
+			lines[#lines + 1] = side .. " foot: no ValveBiped leg bones, left as is"
 		end
 	end
 	for _, role in ipairs({ "lids", "grimace", "jaw" }) do
