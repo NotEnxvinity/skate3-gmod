@@ -50,14 +50,45 @@ end
 
 local function SpellOut(id)
 	local words = {}
-	for word in id:gsub("^ID_", ""):gmatch("[^_]+") do words[#words + 1] = word end
+	local bare = id:gsub("^ID_", "")
+	for word in bare:gmatch("[^_]+") do words[#words + 1] = word end
+	-- Grinds come without a localisation ID (GRIND_BS_5_0): that's a
+	-- "BS 5-0 Grind".
+	local grind = bare:find("^GRIND_") ~= nil
 	while #words > 1 and CATEGORY[words[1]] do table.remove(words, 1) end
+	-- Numbers written in pieces: 5_0 is 5-0, 50_50 is 50-50.
+	local joined = {}
+	for _, word in ipairs(words) do
+		local prev = joined[#joined]
+		if prev and word:find("^%d+$") and prev:find("^%d[%d%-]*$") then
+			joined[#joined] = prev .. "-" .. word
+		else
+			joined[#joined + 1] = word
+		end
+	end
+	words = joined
 	for i, word in ipairs(words) do
 		if #word > 2 and not word:find("%d") then
 			words[i] = word:sub(1, 1) .. word:sub(2):lower()
 		end
 	end
-	return table.concat(words, " ")
+	local name = table.concat(words, " ")
+	if grind and not name:lower():find("grind") and not name:lower():find("slide") then
+		name = name .. " Grind"
+	end
+	return name
+end
+
+-- An engine label's name: the game's own text if setup found it (under
+-- whichever ID it's filed), else spelled out from the label.
+local function Lookup(part)
+	local k = Known()
+	local found = k[part] or k["ID_TRICK_" .. part] or k["ID_" .. part]
+	if found then return found end
+	-- Anything that looks like an ID (capitals and underscores) is spelled
+	-- out rather than shown raw.
+	if part:find("^ID_") or (part:find("_") and part:find("^[%u%d_]+$")) then return SpellOut(part) end
+	return part
 end
 
 local names = {}
@@ -70,7 +101,7 @@ local function TrickName(label)
 	else
 		local parts = {}
 		for part in label:gmatch("%S+") do
-			parts[#parts + 1] = Known()[part] or (part:find("^ID_") and SpellOut(part)) or part
+			parts[#parts + 1] = Lookup(part)
 		end
 		name = table.concat(parts, " ")
 	end
