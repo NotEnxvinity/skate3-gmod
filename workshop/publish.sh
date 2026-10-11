@@ -13,7 +13,15 @@ ITEM=3814357793
 changes=${1:?usage: workshop/publish.sh \"what changed\"}
 cd "$(dirname "$0")/.."
 S=${STEAM_DIR:-$HOME/.local/share/Steam}
-BIN=$S/steamapps/common/GarrysMod/bin
+# Garry's Mod can live in any Steam library (an SD card, a second drive).
+LIB=
+while IFS= read -r lib; do
+	if [ -d "$lib/steamapps/common/GarrysMod/bin" ]; then LIB=$lib; break; fi
+done < <(echo "$S"; sed -n 's/^[[:space:]]*"path"[[:space:]]*"\(.*\)"/\1/p' "$S/steamapps/libraryfolders.vdf" 2>/dev/null)
+[ -n "$LIB" ] || { echo "Couldn't find Garry's Mod in your Steam libraries." >&2; exit 1; }
+BIN=$LIB/steamapps/common/GarrysMod/bin
+COMPAT=$LIB/steamapps/compatdata/4000
+[ -d "$COMPAT" ] || COMPAT=$S/steamapps/compatdata/4000
 
 tool() {
 	if [ -x "$BIN/linux64/$1" ]; then
@@ -21,9 +29,9 @@ tool() {
 		return
 	fi
 	local proton
-	proton="$( (ls -d "$S"/steamapps/common/Proton*Experimental; ls -d "$S"/steamapps/common/Proton*) 2>/dev/null | head -1)/proton"
+	proton="$( (ls -d "$S"/steamapps/common/Proton*Experimental "$LIB"/steamapps/common/Proton*Experimental; ls -d "$S"/steamapps/common/Proton* "$LIB"/steamapps/common/Proton*) 2>/dev/null | head -1 || true)/proton"
 	[ -x "$proton" ] || { echo "Neither Garry's Mod's Linux $1 nor Proton was found." >&2; exit 1; }
-	STEAM_COMPAT_CLIENT_INSTALL_PATH="$S" STEAM_COMPAT_DATA_PATH="$S/steamapps/compatdata/4000" \
+	STEAM_COMPAT_CLIENT_INSTALL_PATH="$S" STEAM_COMPAT_DATA_PATH="$COMPAT" \
 		SteamAppId=4000 SteamGameId=4000 "$proton" run "$BIN/win64/$1.exe" "${@:2}"
 }
 
