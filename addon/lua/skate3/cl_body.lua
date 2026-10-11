@@ -425,44 +425,76 @@ end
 -- its parent, as the engine set it up, minus the turn we put on it. Gmod can
 -- hold a slightly different frame than the copy we measured (layers the
 -- player animation adds, aim pose parameters), and every turn that's off
--- there shows up straight in the pose: arms bent back, say. Taken once the
--- reading holds steady for a few frames, then kept for the ride.
+-- there shows up straight in the pose: arms bent back, say. Each bone's
+-- reading is taken once it holds steady for a few frames, then kept for the
+-- ride; a bone that never settles (the engine skipping it, say) keeps the
+-- copy's.
 local STEADY = 5
 local GIVE_UP = 300
 
 local function Measure(ply, p)
-	if p.measured or p.gaveUp or not p.applied then return end
+	if p.measureDone or not p.applied then return end
 	p.tries = (p.tries or 0) + 1
-	local got, drift, worst, worstBone = {}, 0, 0, nil
+	p.measured = p.measured or {}
+	p.last = p.last or {}
+	p.steady = p.steady or {}
+	local parents, locals = p.base.parents, p.base.locals
+	local open = 0
 	for i in pairs(p.needed) do
-		local par = p.base.parents[i]
-		local L = p.base.locals[i]
-		if par >= 0 and L then
+		local par, L = parents[i], locals[i]
+		if par and par >= 0 and L and not p.measured[i] then
 			local Fp, Fi = ply:GetBoneMatrix(par), ply:GetBoneMatrix(i)
-			if not (Fp and Fi) then return end
-			local m = Ortho(Fp):GetInverseTR() * Ortho(Fi)
-			local R = p.applied[i]
-			if R then m = conv.pre and R:GetInverseTR() * m or m * R:GetInverseTR() end
-			got[i] = m
-			if p.last and p.last[i] then drift = math.max(drift, TurnBetween(p.last[i], m)) end
-			local d = TurnBetween(L, m)
-			if d > worst then worst, worstBone = d, i end
+			if Fp and Fi then
+				local m = Ortho(Fp):GetInverseTR() * Ortho(Fi)
+				local R = p.applied[i]
+				if R then m = conv.pre and R:GetInverseTR() * m or m * R:GetInverseTR() end
+				local was = p.last[i]
+				p.steady[i] = (was and TurnBetween(was, m) < 1) and (p.steady[i] or 0) + 1 or 0
+				p.last[i] = m
+				if p.steady[i] >= STEADY then p.measured[i] = m end
+			end
+			if not p.measured[i] then open = open + 1 end
 		end
 	end
-	p.steady = (p.last and drift < 1) and (p.steady or 0) + 1 or 0
-	p.last = got
+	if open > 0 and p.tries <= GIVE_UP then return end
+	p.measureDone = true
+	local worst, worstBone, count = 0, nil, 0
+	for i, m in pairs(p.measured) do
+		count = count + 1
+		local d = locals[i] and TurnBetween(locals[i], m) or 0
+		if d > worst then worst, worstBone = d, i end
+	end
+	p.measuredWorst, p.measuredBone, p.unsteady = worst, worstBone, open
 	local who = ply == LocalPlayer() and "your" or ((ply.Nick and ply:Nick() or "a player") .. "'s")
-	if p.steady >= STEADY then
-		p.measured = got
-		p.measuredWorst, p.measuredBone = worst, worstBone
-		if worst > 3 then
-			print(("[skate3] %s body holds its frame differently than the copy (up to %.0f degrees, %s); using what it really does"):format(
-				who, worst, tostring(ply:GetBoneName(worstBone))))
+	print(("[skate3] read how %s body really stands: %d bones%s, biggest difference from the copy %.0f degrees (%s)"):format(
+		who, count, open > 0 and (", " .. open .. " never held still (kept the copy's)") or "",
+		worst, worstBone and tostring(ply:GetBoneName(worstBone)) or "none"))
+end
+
+-- Where the engine really had the player when the body was last set up:
+-- the top bone of the skeleton as it came out, less what we did to it (its
+-- frozen local, our turn and shift). Gmod's own idea of which way a player
+-- faces (GetRenderAngles) turned out not to be the one it poses with, so
+-- this is read off the body every frame instead of trusted.
+local function ReadE(ply, p)
+	if not p.applied then return nil end
+	for i = 0, p.base.count - 1 do
+		local L = p.base.parents[i] < 0 and p.needed[i] and Local(p, i)
+		local got = L and ply:GetBoneMatrix(i)
+		if got then
+			local X = Body.Chain(Matrix(), L, p.applied[i])
+			local off = p.moved and p.moved[i]
+			if off then X:SetTranslation(X:GetTranslation() + Body.OffsetAxes(Matrix(), L, X) * off) end
+			local G = Ortho(got)
+			G:SetTranslation(got:GetTranslation())
+			local E = G * X:GetInverseTR()
+			-- Clean axes, or rounding builds up frame after frame.
+			local clean = Ortho(E)
+			clean:SetTranslation(E:GetTranslation())
+			return clean
 		end
-	elseif p.tries > GIVE_UP then
-		p.gaveUp = true
-		print(("[skate3] couldn't read how %s body really stands (it kept moving %.0f degrees between frames); using the copy's frame"):format(who, drift))
 	end
+	return nil
 end
 
 local function MarkNeeded(p)
@@ -506,16 +538,31 @@ function Body.Apply(ply, frame, base)
 		-- The body can be a little way from where the engine thinks the
 		-- player is; don't let it vanish at the screen's edge.
 		pcall(ply.SetRenderBounds, ply, BIG_MIN, BIG_MAX)
+		-- Full detail: further away Gmod skips small bones (fingers), and
+		-- they'd hold whatever they had last.
+		pcall(ply.SetLOD, ply, 0)
 	end
 	if p.base ~= base then
-		p.base, p.measured, p.last, p.steady, p.tries, p.gaveUp = base, nil, nil, 0, 0, false
+		-- A new model: its bones are numbered differently, start over.
+		p.base, p.needed, p.measured, p.last, p.steady, p.tries, p.measureDone = base, nil, nil, nil, nil, 0, false
 	end
 	-- Pose parameters (aiming, mostly) bend the frozen frame: keep them flat.
 	ply:ClearPoseParameters()
-	if p.needed then Measure(ply, p) end
+	local guess = EngineE(ply)
+	if p.needed and p.applied then
+		-- Set the body up as it stands right now, last frame's turns on it,
+		-- and read off it where the engine really has it and how it really
+		-- holds its frame.
+		ply:InvalidateBoneCache()
+		ply:SetupBones()
+		local E = ReadE(ply, p)
+		if E then p.fix = guess:GetInverseTR() * E end
+		Measure(ply, p)
+	end
 	p.frame = frame
 	MarkNeeded(p)
-	Solve(ply, p, EngineE(ply))
+	Solve(ply, p, p.fix and guess * p.fix or guess)
+	p.guess = guess
 	ply:InvalidateBoneCache()
 end
 
@@ -525,6 +572,7 @@ function Body.Release(ply)
 	if not p or not IsValid(ply) then return end
 	for i in pairs(p.applied or {}) do ply:ManipulateBoneAngles(i, angle_zero) end
 	for i in pairs(p.moved or {}) do ply:ManipulateBonePosition(i, vector_origin) end
+	pcall(ply.SetLOD, ply, -1)
 	if ply.GetModelRenderBounds then
 		local mins, maxs = ply:GetModelRenderBounds()
 		if mins and maxs then pcall(ply.SetRenderBounds, ply, mins, maxs) end
@@ -542,9 +590,10 @@ local function Follow(ply)
 	local fresh = p.drawFrame ~= FrameNumber()
 	p.drawFrame = FrameNumber()
 	if fresh then ply:ClearPoseParameters() end
-	local E = EngineE(ply)
-	if not SameE(E, p.E) then
-		Solve(ply, p, E)
+	local guess = EngineE(ply)
+	if not SameE(guess, p.guess) then
+		Solve(ply, p, p.fix and guess * p.fix or guess)
+		p.guess = guess
 		fresh = true
 	end
 	if fresh then ply:InvalidateBoneCache() end
@@ -559,10 +608,21 @@ function Body.Report(ply)
 	local yawOff = math.AngleDifference(E:GetAngles().y, f.yaw)
 	lines[#lines + 1] = ("engine has the player %.1f units from the skater, facing %.0f degrees off"):format(
 		E:GetTranslation():Distance(f.origin), yawOff)
-	lines[#lines + 1] = p.measured and ("frame measured off the body, biggest difference from the copy %.1f degrees (%s)"):format(
-		p.measuredWorst or 0, tostring(p.measuredBone and ply:GetBoneName(p.measuredBone)))
-		or p.gaveUp and "frame couldn't be measured (kept moving), using the copy's"
-		or ("still measuring the frame (%d tries, %d steady)"):format(p.tries or 0, p.steady or 0)
+	if p.fix then
+		lines[#lines + 1] = ("read off the body: it's really posed %.1f units and %.0f degrees from where Gmod says the player is"):format(
+			p.fix:GetTranslation():Length(), TurnBetween(Matrix(), p.fix))
+	end
+	if p.measureDone then
+		lines[#lines + 1] = ("frame read off the body: biggest difference from the copy %.1f degrees (%s), %d bones never held still"):format(
+			p.measuredWorst or 0, tostring(p.measuredBone and ply:GetBoneName(p.measuredBone)), p.unsteady or 0)
+		for i in pairs(p.needed or {}) do
+			if p.base.parents[i] and p.base.parents[i] >= 0 and not (p.measured and p.measured[i]) then
+				lines[#lines + 1] = "  never held still: " .. tostring(ply:GetBoneName(i))
+			end
+		end
+	else
+		lines[#lines + 1] = ("still reading the frame off the body (%d tries)"):format(p.tries or 0)
+	end
 	ply:SetupBones()
 	local rows = {}
 	for i, want in pairs(p.want or {}) do
