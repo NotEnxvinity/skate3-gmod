@@ -1,4 +1,4 @@
-S3GM v2.0.0: Skate 3 in Garry's Mod
+S3GM v2.0.1: Skate 3 in Garry's Mod
 ====================================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
@@ -18,7 +18,8 @@ What you need
   must be a "Gamepad" template, not keyboard and mouse.
 - Linux / SteamOS: git and python3 (SteamOS has both).
 - Windows: Python 3.10 to 3.13 from python.org (tick "Add python.exe to PATH").
-- macOS isn't supported yet.
+- macOS (new): git and Python 3.10 to 3.13 (python.org or Homebrew; the
+  python3 that comes with macOS is too old).
 
 
 Install
@@ -29,9 +30,15 @@ Install
 2. Extract this zip right there. It adds two things:
      garrysmod/addons/skate3   the addon (merges into the garrysmod folder)
      S3GM-setup/               the setup
+   macOS: DON'T drag the garrysmod folder in: Finder's "Replace" deletes your
+   whole garrysmod folder. Only put S3GM-setup in the GarrysMod folder; the
+   setup installs the addon itself.
 3. Run the setup once (and again after every S3GM update):
      Linux / SteamOS:  open S3GM-setup in a terminal and run  ./skate3-setup.sh
      Windows:          double-click S3GM-setup\S3GM-setup-Windows.bat
+     macOS:            open Terminal, type  bash  and a space, drag
+                       skate3-setup.sh from S3GM-setup into the window,
+                       press Return
    Pick your Skate 3 .iso (or default.xex) in the window. It finds Garry's
    Mod, installs the skate engine module, and converts the skater,
    animations and sounds from your disc. The first run
@@ -52,7 +59,8 @@ go back to it. Switch weapons to leave skate mode.
 Settings
 --------
 Spawn menu > Utilities > Skate 3: stance, camera, sounds (Skate 3's from
-your disc, or Half-Life 2's), bail sounds, volume, the trick score's look.
+your disc, or Half-Life 2's), bail sounds, footsteps, volume, the trick
+score's look, and a button to reset them all to the defaults.
 Servers: skate3_bail_damage turns bail damage on or off, skate3_enabled 0
 turns the mode off.
 

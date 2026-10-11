@@ -15,6 +15,11 @@ set -euo pipefail
 ENGINE_URL=https://github.com/SK8-ENGINE/skate-3-rust-engine
 ENGINE_REV=cb7968930f14dad38457e98720d1a274e469eec2
 VGMSTREAM_URL=https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz
+if [ "$(uname -s)" = Darwin ]; then
+    VGMSTREAM_URL=https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-mac-cli.tar.gz
+    # Downloaded zips are quarantined; Gatekeeper would refuse the module.
+    xattr -dr com.apple.quarantine "$(cd "$(dirname "$0")" && pwd)" 2>/dev/null || true
+fi
 
 here=$(cd "$(dirname "$0")" && pwd)
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/skate3-gmod
@@ -22,6 +27,8 @@ die() { echo "error: $*" >&2; exit 1; }
 
 command -v git >/dev/null || die "git is required"
 command -v python3 >/dev/null || die "python3 is required"
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' \
+    || die "python3 is too old: S3GM needs Python 3.10 to 3.13 (python.org or Homebrew)"
 mkdir -p "$cache"
 
 engine="$cache/engine-${ENGINE_REV:0:7}"
