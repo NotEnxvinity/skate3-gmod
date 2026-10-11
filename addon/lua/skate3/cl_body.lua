@@ -545,7 +545,11 @@ local function PlaceAll(ply, count)
 	-- (An extra setup of our own each frame to read it, as before, ran the
 	-- jiggle bones once more at a slightly stale spot and made tails twitch.)
 	local E = ReadE(p, old)
-	if E and p.guess then p.fix = p.guess:GetInverseTR() * E end
+	-- Measured against where the player is right now, not where it was
+	-- when the pose was worked out: a server update landing in between
+	-- otherwise got folded into the fix, the next pose put the body that
+	-- far off, and tails/capes/hair got yanked back every update.
+	if E then p.fix = EngineE(ply):GetInverseTR() * E end
 	if p.needed then Measure(ply, p, old) end
 	local final, parents = p.final, p.base.parents
 	if not final then return end
@@ -729,6 +733,17 @@ end)
 
 hook.Add("PrePlayerDraw", "skate3_body", function(ply)
 	if posed[ply] then Follow(ply) end
+end)
+
+-- And once at the very start of every rendered frame, once the engine has
+-- moved everyone to where they are this frame: shadows and the like set the
+-- body up before PrePlayerDraw ever runs, and with turns worked out for
+-- last frame's position the tail/cape/hair physics got a body that jumped
+-- away and back each frame the player moved.
+hook.Add("PreRender", "skate3_body", function()
+	for ply in pairs(posed) do
+		if IsValid(ply) then Follow(ply) end
+	end
 end)
 
 hook.Add("Think", "skate3_body_gone", function()
