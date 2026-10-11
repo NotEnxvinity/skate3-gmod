@@ -217,6 +217,8 @@ local MAP = {
 -- for the old way).
 local cv_footMode = CreateClientConVar("skate3_foot_mode", "flat", true, false,
 	"How the playermodel's feet follow the skater's: flat (default) or aim (the older way, aimed at the toe)")
+local cv_footStand = CreateClientConVar("skate3_foot_stand", "1", true, false,
+	"Feet sit on the board the way the playermodel's feet sit on the ground when it stands (0 = from its rest pose, the older way)")
 local cv_head = CreateClientConVar("skate3_pose_head", "1", true, false,
 	"Neck and head follow the skater's (0 = locked to the chest, the older way)")
 
@@ -377,9 +379,25 @@ local cv_rest = CreateClientConVar("skate3_rest_pose", "bind", true, false,
 local restFrom = "" -- what the rest pose was read from, for the bone report
 
 -- The model's rest pose, read once with the entity at the origin.
+local stand = {} -- bone index -> Matrix, the model standing in Gmod's idle, at the origin
+
 local function CaptureRest(ent)
 	ent:SetPos(vector_origin)
 	ent:SetAngles(angle_zero)
+	-- How the model stands in Gmod, for its feet: however its foot bones
+	-- are set up, that's the way its feet sit flat on the ground.
+	stand = {}
+	for _, name in ipairs({ "idle_all_01", "idle_all_02", "idle_passive" }) do
+		local s = ent:LookupSequence(name)
+		if s and s >= 0 then
+			ent:ResetSequence(s)
+			ent:SetCycle(0)
+			ent:InvalidateBoneCache()
+			ent:SetupBones()
+			for i = 0, ent:GetBoneCount() - 1 do stand[i] = ent:GetBoneMatrix(i) end
+			break
+		end
+	end
 	local seq = ent:LookupSequence("ragdoll")
 	ent:ResetSequence(seq >= 0 and seq or 0)
 	ent:SetCycle(0)
@@ -403,6 +421,24 @@ local function CaptureRest(ent)
 		rest[i] = bindPose and bindPose[i] or ragdoll[i]
 		writable[i] = rest[i] ~= nil and ent:BoneHasFlag(i, USED)
 	end
+end
+
+-- The turn (tilt only, no turning about the vertical) taking a bone from
+-- its rest pose to how it is when the model stands. Nil if not known.
+local function StandTilt(i)
+	local r, s = rest[i], stand[i]
+	if not (r and s) then return nil end
+	local function Rot(m) local c = Matrix(m) c:SetTranslation(vector_origin) return c end
+	local C = Rot(s) * Rot(r):GetInverse()
+	-- Take out the part that turns about the vertical, from where C sends
+	-- "ahead", leaving the tilt.
+	local ahead = C * Vector(1, 0, 0)
+	if ahead.x * ahead.x + ahead.y * ahead.y < 0.1 then return nil end
+	local yaw = Matrix()
+	yaw:Rotate(Angle(0, -math.deg(math.atan2(ahead.y, ahead.x)), 0))
+	local tilt = yaw * C
+	local up = tilt * Vector(0, 0, 1)
+	return tilt, math.deg(math.acos(math.Clamp(up.z, -1, 1)))
 end
 
 local function Fit(ent)
@@ -439,6 +475,17 @@ local function Fit(ent)
 			end
 			local rot = Matrix()
 			rot:Rotate(FACING)
+			if row.flat and flat and cv_footStand:GetBool() then
+				-- The rest pose (bind pose or the ragdoll sequence) has some
+				-- models' feet pointing down (Maxine, Master Chief). Tilt the
+				-- foot the way it's tilted when the model stands instead;
+				-- only the tilt, so feet keep pointing along the board.
+				local tilt, deg = StandTilt(index)
+				if tilt then rot = rot * tilt end
+				if deg and deg > 10 and row[1]:find("Foot") then
+					print(("[skate3] %s tilted %.0f degrees to sit like it does standing"):format(row[1], deg))
+				end
+			end
 			if a and b and a:LengthSqr() > 0 and b:LengthSqr() > 0 then
 				rot = Arc(a:GetNormalized(), b:GetNormalized()) * rot
 			end
@@ -491,7 +538,7 @@ local function BuildBones(ent, count)
 end
 
 -- Refit when the foot or head mode changes, no need to change models.
-for _, name in ipairs({ "skate3_foot_mode", "skate3_pose_head" }) do
+for _, name in ipairs({ "skate3_foot_mode", "skate3_pose_head", "skate3_foot_stand" }) do
 	cvars.AddChangeCallback(name, function() if IsValid(model) then Fit(model) end end, "skate3_anim")
 end
 

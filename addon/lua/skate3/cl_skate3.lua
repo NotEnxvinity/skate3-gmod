@@ -516,16 +516,19 @@ hook.Add("PostDrawTranslucentRenderables", "skate3_rails", function(_, skybox)
 end)
 
 hook.Add("HUDPaint", "skate3_hud", function()
-	if not cv_hud:GetBool() or not loaded then return end
+	if not loaded then return end
+	-- The score has its own switch (skate3_score_hud); this one only hides
+	-- the status line along the bottom.
+	if active and not Skater.Skip.score then Score.Draw(pose) end
 	local line
-	if status.state == "loading" then
+	if not cv_hud:GetBool() then
+	elseif status.state == "loading" then
 		line = "skate3: building collision (" .. (status.stage or "starting") .. ")..."
 	elseif active and pose then
 		local onFoot = pose.state and pose.state:find("^Biped")
 		line = ("skate3: %s  %.0f km/h  %s   (Y: %s)"):format(pose.state, pose.speed * 3.6, status.pad or "no controller",
 			onFoot and "get on the board" or "step off")
 	end
-	if active and not Skater.Skip.score then Score.Draw(pose) end
 	if line then
 		-- Under Half-Life 2's HUD row, which the HL2 score look sits in.
 		draw.SimpleTextOutlined(line, "DermaDefaultBold", ScrW() * 0.5, ScrH() - 2, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_BOTTOM, 1, color_black)

@@ -284,7 +284,18 @@ function Body.FrozenLocals(ent)
 			locals[i] = pw and pw:GetInverse() * w or (p < 0 and Matrix(w)) or nil
 		end
 	end
-	return { locals = locals, parents = parents, count = count, sequence = name }
+	-- Where the eyes sit on the head, for aiming them (see EyesAhead).
+	local head = ent:LookupBone("ValveBiped.Bip01_Head1")
+	local eyes
+	local id = head and world[head] and ent.LookupAttachment and ent:LookupAttachment("eyes")
+	local att = id and id > 0 and ent:GetAttachment(id)
+	if att then
+		local m = Matrix()
+		m:SetAngles(att.Ang)
+		m:SetTranslation(att.Pos)
+		eyes = world[head]:GetInverse() * m
+	end
+	return { locals = locals, parents = parents, count = count, sequence = name, head = head, eyes = eyes }
 end
 
 -- The frozen frame of another player's model, from a stand-in of it (once
@@ -655,9 +666,21 @@ end
 -- player since the turns were worked out (a position update from the
 -- server, the camera turning the player), shift the top of the skeleton so
 -- the body stays exactly on the skater.
+-- The eyes look where the posed head faces. The player's own eye target is
+-- a spot worked out from where the engine has them aiming, which has nothing
+-- to do with the head we posed, so they stared off one way.
+local function EyesAhead(ply, p)
+	local b = p.base
+	local head = b and b.eyes and p.final and p.final[b.head]
+	if not head then return end
+	local m = head * b.eyes
+	ply:SetEyeTarget(m:GetTranslation() + m:GetForward() * 200)
+end
+
 local function Follow(ply)
 	local p = posed[ply]
 	if not p or not p.frame then return end
+	EyesAhead(ply, p)
 	local fresh = p.drawFrame ~= FrameNumber()
 	p.drawFrame = FrameNumber()
 	if fresh then ply:ClearPoseParameters() end
