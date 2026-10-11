@@ -30,9 +30,9 @@ Install
 2. Extract this zip right there. It adds two things:
      garrysmod/addons/skate3   the addon (merges into the garrysmod folder)
      S3GM-setup/               the setup
-   macOS: DON'T drag the garrysmod folder in: Finder's "Replace" deletes your
-   whole garrysmod folder. Only put S3GM-setup in the GarrysMod folder; the
-   setup installs the addon itself.
+   macOS: use the Mac zip, which has only S3GM-setup in it; the setup
+   installs the addon itself. Never drag a garrysmod folder in on a Mac:
+   Finder's "Replace" deletes your whole garrysmod folder.
 3. Run the setup once (and again after every S3GM update):
      Linux / SteamOS:  open S3GM-setup in a terminal and run  ./skate3-setup.sh
      Windows:          double-click S3GM-setup\S3GM-setup-Windows.bat
