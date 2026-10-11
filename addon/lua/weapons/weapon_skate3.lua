@@ -30,3 +30,18 @@ function SWEP:SecondaryAttack() end
 
 -- The skate mode draws the board under the skater.
 function SWEP:DrawWorldModel() end
+
+if CLIENT then
+	-- The weapon switcher's picture: a board, in the HUD's colour like HL2's.
+	-- The spawn menu's comes from materials/entities/weapon_skate3.png.
+	local icon = Material("skate3/weapon_select.png", "smooth")
+
+	function SWEP:DrawWeaponSelection(x, y, wide, tall, alpha)
+		local w = math.min(wide, tall * 2) * 0.9
+		local h = w / 2
+		surface.SetMaterial(icon)
+		surface.SetDrawColor(255, 220, 0, alpha)
+		surface.DrawTexturedRect(x + (wide - w) / 2, y + (tall - h) / 2, w, h)
+		self:PrintWeaponInfo(x + wide + 20, y + tall * 0.95, alpha)
+	end
+end

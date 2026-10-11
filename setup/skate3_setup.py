@@ -170,6 +170,10 @@ def install_addon(gmod, wanted, report):
     # Replaced whole, so files an update removed don't linger.
     shutil.rmtree(local / 'lua', ignore_errors=True)
     shutil.copytree(addon, local / 'lua')
+    # The spawn menu and weapon switcher icons sit beside the Lua.
+    if (addon.parent / 'materials').is_dir():
+        shutil.rmtree(local / 'materials', ignore_errors=True)
+        shutil.copytree(addon.parent / 'materials', local / 'materials')
     report(f'Installed the addon in {local}; it loads instead of the Workshop one until setup runs without it')
 
 

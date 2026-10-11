@@ -51,6 +51,7 @@ def stage_folder(modules, out):
     for m in MODULES:
         shutil.copy2(modules / m, out / 'bin' / m)
     shutil.copytree(HERE.parent / 'addon/lua', out / 'addon/lua')
+    shutil.copytree(HERE.parent / 'addon/materials', out / 'addon/materials')
 
 
 def main():
@@ -89,6 +90,7 @@ def main():
             '--add-data', f'{stage / "tools"}{sep}tools',
             '--add-data', f'{bin_dir}{sep}bin',
             '--add-data', f'{HERE.parent / "addon/lua"}{sep}addon/lua',
+            '--add-data', f'{HERE.parent / "addon/materials"}{sep}addon/materials',
             '--add-data', f'{args.vgmstream.resolve()}{sep}vgmstream',
             '--distpath', str(args.out.resolve()),
             '--workpath', str(Path(tmp) / 'work'), '--specpath', str(Path(tmp) / 'spec'),
