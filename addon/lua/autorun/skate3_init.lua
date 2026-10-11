@@ -12,6 +12,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_score.lua")
 	AddCSLuaFile("skate3/cl_menu.lua")
 	AddCSLuaFile("skate3/cl_props.lua")
+	AddCSLuaFile("skate3/cl_boards.lua")
 	include("skate3/sv_skate3.lua")
 else
 	include("skate3/cl_skate3.lua")

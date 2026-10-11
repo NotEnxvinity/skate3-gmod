@@ -15,6 +15,8 @@ it as <folder>/conversion.log; progress lines go to stdout.
 from pathlib import Path
 import argparse, shutil, sys, tempfile, traceback
 
+import boards
+
 REQUIRED = [
     'data/big/miscload.big',
     'data/big/miscboot.big',
@@ -58,6 +60,12 @@ def convert(engine, xex, out, report=None):
         work = Path(work)
         converted = exports.core(game, stage, work, report, log)
         exports.character(game, stage, work, report, log, converted)
+        # The board's other looks are a bonus: setup carries on without them.
+        try:
+            boards.export(engine, game, stage / 'assets/boards', report)
+        except Exception as e:
+            report(f'Skipped the board looks ({e}); the board keeps its usual look')
+            log.write(traceback.format_exc())
 
     assets = stage / 'assets'
     for needed in PRODUCED:

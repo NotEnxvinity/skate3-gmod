@@ -5,6 +5,7 @@ local Skater = {}
 local Body = include("skate3/cl_body.lua")
 Skater.Body = Body
 local Anim = include("skate3/cl_skater_anim.lua")
+local Boards = include("skate3/cl_boards.lua")
 
 -- For hunting a leak: parts of the per-frame work to switch off while riding,
 -- as a list such as "board,bones". board, bones, model, score, sounds, pose,
@@ -41,6 +42,7 @@ function Skater.Load()
 	end
 	data = skater
 	parts = nil
+	Boards.SetTextures(skater.textures)
 	bind = {}
 	for name, m in pairs(skater.bind) do bind[name] = Mat(m) end
 	print(("[skate3] board ready: %d parts"):format(#skater.parts))
@@ -52,21 +54,43 @@ end
 -- A source mesh can only hold so many triangles.
 local MAX_TRIANGLES = 10000
 
-local function BoardMaterial(slot, tint)
-	local mat = CreateMaterial("skate3_board_" .. slot, "VertexLitGeneric", {
-		["$basetexture"] = "color/white",
-		["$model"] = 1,
-		["$nocull"] = 1,
-	})
-	local png = data.textures and (data.textures .. "/" .. slot .. "_base_color.png")
+-- A part's texture and colour: the look picked in the settings (see
+-- cl_boards.lua), else the skater's own.
+local function ApplyLook(mat, slot, tint)
+	local png = Boards.Texture(slot)
+		or data.textures and (data.textures .. "/" .. slot .. "_base_color.png")
+	mat:SetTexture("$basetexture", "color/white")
 	if png and file.Exists(png, "DATA") then
 		local source = Material("../data/" .. png, "smooth mips")
 		if not source:IsError() then
 			mat:SetTexture("$basetexture", source:GetTexture("$basetexture"))
 		end
 	end
-	mat:SetVector("$color2", Vector(tint[1], tint[2], tint[3]))
+	local color = Boards.Color(slot) or Vector(1, 1, 1)
+	mat:SetVector("$color2", Vector(tint[1] * color.x, tint[2] * color.y, tint[3] * color.z))
+end
+
+local function BoardMaterial(slot, tint)
+	local mat = CreateMaterial("skate3_board_" .. slot, "VertexLitGeneric", {
+		["$basetexture"] = "color/white",
+		["$model"] = 1,
+		["$nocull"] = 1,
+	})
+	ApplyLook(mat, slot, tint)
 	return mat
+end
+
+-- Picking a look in the settings repaints the board straight away.
+for _, p in ipairs(Boards.PARTS) do
+	for _, name in ipairs({ p.look, p.color }) do
+		cvars.AddChangeCallback(name, function()
+			if not parts or not data then return end
+			for i, part in ipairs(parts) do
+				local source = data.parts[i]
+				if source and source.slot == p.slot then ApplyLook(part.material, source.slot, source.tint) end
+			end
+		end, "skate3_board_look")
+	end
 end
 
 local function BuildMeshes(v)

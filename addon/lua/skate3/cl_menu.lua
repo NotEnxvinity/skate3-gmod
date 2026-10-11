@@ -12,9 +12,39 @@ local function Choices(panel, label, convar, choices)
 	return combo
 end
 
+local Boards = include("skate3/cl_boards.lua")
+
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
 	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_hud" }
+for _, p in ipairs(Boards.PARTS) do
+	DEFAULTS[#DEFAULTS + 1] = p.look
+	DEFAULTS[#DEFAULTS + 1] = p.color
+end
+
+-- The board's looks from the player's disc, and a colour for each part.
+local function BoardChoices(panel)
+	panel:Help("Your board")
+	local list = Boards.List()
+	local any = false
+	for _, p in ipairs(Boards.PARTS) do
+		local looks = list[p.slot] or {}
+		if #looks > 1 then
+			any = true
+			local choices = { { "Usual", "" } }
+			for _, look in ipairs(looks) do
+				if not look.default then
+					choices[#choices + 1] = { look.name .. (look.worn and " (worn)" or ""), look.id }
+				end
+			end
+			Choices(panel, p.name, p.look, choices)
+		end
+		Choices(panel, p.name .. " colour", p.color, Boards.COLORS)
+	end
+	if not any then
+		panel:ControlHelp("Run the S3GM setup again to get the decks, trucks and wheels from your disc.")
+	end
+end
 
 hook.Add("PopulateToolMenu", "skate3_menu", function()
 	spawnmenu.AddToolMenuOption("Utilities", "Skate 3", "skate3_settings", "Settings", "", "", function(panel)
@@ -57,6 +87,8 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Half-Life 2", "hl2" },
 		})
 		panel:CheckBox("Show the status line", "skate3_hud")
+
+		BoardChoices(panel)
 
 		local reset = panel:Button("Reset these to defaults")
 		reset.DoClick = function()
