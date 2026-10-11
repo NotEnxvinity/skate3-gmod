@@ -512,6 +512,52 @@ local function Fit(ent)
 	end
 end
 
+-- The neck and head keep the model's own neck length: their turns come
+-- from the skater, but each sits where the model has it from its parent.
+-- Set at the skater's neck and head, a model whose proportions differ
+-- from the skater's (Master Chief) got a stretched neck.
+local cv_neck = CreateClientConVar("skate3_neck_keep", "1", true, false,
+	"Neck and head keep the playermodel's own neck length (0 = placed at the skater's, the older way)")
+local neckChain = {} -- { { bone, its offset from its parent at rest }, ... } neck first
+local kids = {} -- bone -> its children
+
+local function FindNeck(ent)
+	neckChain, kids = {}, {}
+	for i = 0, ent:GetBoneCount() - 1 do
+		local p = ent:GetBoneParent(i)
+		if p and p >= 0 then kids[p] = kids[p] or {} table.insert(kids[p], i) end
+	end
+	for _, name in ipairs({ "Neck1", "Head1" }) do
+		local i = ent:LookupBone("ValveBiped.Bip01_" .. name)
+		local p = i and ent:GetBoneParent(i)
+		if i and p and p >= 0 and rest[i] and rest[p] then
+			neckChain[#neckChain + 1] = { i, (rest[p]:GetInverseTR() * rest[i]):GetTranslation() }
+		end
+	end
+end
+
+local function Shift(world, i, by)
+	local m = world[i]
+	if m then
+		m = Matrix(m)
+		m:SetTranslation(m:GetTranslation() + by)
+		world[i] = m
+	end
+	for _, k in ipairs(kids[i] or {}) do Shift(world, k, by) end
+end
+
+local function KeepNeck(ent, world)
+	if not cv_neck:GetBool() then return end
+	for _, link in ipairs(neckChain) do
+		local i = link[1]
+		local p = ent:GetBoneParent(i)
+		if world[i] and world[p] then
+			local want = world[p] * link[2]
+			Shift(world, i, want - world[i]:GetTranslation())
+		end
+	end
+end
+
 local pose
 local cv_body = CreateClientConVar("skate3_body", "real", true, false,
 	"Which body skates: real (your own playermodel, posed) or copy (the older way: a copy of it, posed; you're hidden)")
@@ -545,6 +591,7 @@ local function BuildBones(ent, count)
 		if skin and rest[i] then world[i] = skin * rest[i] end
 	end
 	-- Feet onto the board and hands around it.
+	KeepNeck(ent, world)
 	if not Skater.Skip.anim then Anim.PostPose(ent, world, pose) end
 	lastWorld = world
 	for i = 0, count - 1 do
@@ -613,6 +660,7 @@ function Skater.ShowModel(ply)
 		model:SetLOD(0)
 		CaptureRest(model)
 		Fit(model)
+		FindNeck(model)
 		local real, why = cv_body:GetString() ~= "copy", nil
 		if real then real, why = Body.Ready(model) end
 		if cv_body:GetString() ~= "copy" and not real then
@@ -755,6 +803,7 @@ local function RealFrame(p)
 		skins[i] = skin
 		if skin and rest[i] then world[i] = skin * rest[i] end
 	end
+	KeepNeck(model, world)
 	if not Skater.Skip.anim then
 		local before = {}
 		for i, m in pairs(world) do before[i] = m end

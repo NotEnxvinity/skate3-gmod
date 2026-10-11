@@ -7,13 +7,23 @@ local Pose = include("skate3/sh_pose.lua")
 
 local cv_enabled = CreateConVar("skate3_enabled", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY, "Allow players to use Skate 3 mode")
 
--- Farthest a skater may move between two position updates, in units. Skate 3
--- tops out around 800 units/s and clients update 20 times a second, so this
--- leaves room for hitches without allowing teleports.
+-- How far a skater may move between two position updates: MAX_STEP plus
+-- MAX_SPEED for every second since the last one that was taken. A fixed
+-- step (600) used to be the whole limit: bombing a hill (or mach 1, which
+-- stays) outran it, or a hitch did, and from then on every update was
+-- refused, so the player was left behind and their body vanished. The
+-- allowance grows with time, so a skater always gets back in step.
 local MAX_STEP = 600
+local MAX_SPEED = 40000 -- units/s, about 3600 km/h: well past mach 1
+
+local function Allowed(ply)
+	local dt = math.min(CurTime() - (ply.skate3MoveAt or 0), 10)
+	return MAX_STEP + dt * MAX_SPEED
+end
 
 local function SetSkating(ply, on)
 	ply.Skate3 = on
+	ply.skate3MoveAt = CurTime()
 	ply:SetMoveType(on and MOVETYPE_NONE or MOVETYPE_WALK)
 	-- Park pieces ignore a skater's Gmod body (see sh_park.lua).
 	ply:SetNW2Bool("skate3_riding", on)
@@ -43,7 +53,11 @@ end)
 net.Receive("skate3_move", function(_, ply)
 	if not ply.Skate3 then return end
 	local pos = net.ReadVector()
-	if pos:DistToSqr(ply:GetPos()) > MAX_STEP * MAX_STEP then return end
+	-- Not a number (NaN, inf) would break the player for good.
+	if not (pos.x == pos.x and pos.y == pos.y and pos.z == pos.z) or pos:Length() > 1e7 then return end
+	local allowed = Allowed(ply)
+	if pos:DistToSqr(ply:GetPos()) > allowed * allowed then return end
+	ply.skate3MoveAt = CurTime()
 	ply:SetPos(pos)
 end)
 
@@ -62,7 +76,9 @@ net.Receive("skate3_pose", function(len, ply)
 	if now - (ply.skate3PoseAt or 0) < POSE_EVERY then return end
 	ply.skate3PoseAt = now
 	local f = Pose.Read()
-	if not f or f.origin:DistToSqr(ply:GetPos()) > MAX_STEP * MAX_STEP then return end
+	-- The pose can arrive before the move it goes with.
+	local allowed = Allowed(ply) + MAX_STEP
+	if not f or f.origin:DistToSqr(ply:GetPos()) > allowed * allowed then return end
 	local to = RecipientFilter()
 	to:AddPVS(f.origin)
 	to:RemovePlayer(ply)

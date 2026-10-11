@@ -644,6 +644,25 @@ local BIG_MIN, BIG_MAX = Vector(-160, -160, -80), Vector(160, 160, 200)
 -- final = { [bone] = Matrix, the finished world pose the skeleton is set to
 -- at the end of each setup } }.
 -- base: the model's frozen frame (Body.FrozenLocals).
+-- The body is drawn at the skater, which can be a long way from where the
+-- engine has the player (behind a fast skater, or on a laggy connection).
+-- Gmod skips drawing anything whose box is off screen, and the box goes
+-- with the player, so it's stretched to take in the skater too.
+local function Reach(ply, p, at)
+	if not at then return end
+	local d = at - ply:GetPos()
+	local key = math.floor(d.x / 64) .. "," .. math.floor(d.y / 64) .. "," .. math.floor(d.z / 64)
+	if key == p.boundsKey then return end
+	p.boundsKey = key
+	-- Render bounds turn with the player's render angles; a box that's
+	-- the same size every way round doesn't care which way that is.
+	local r = d:Length() + 64
+	local mins, maxs = Vector(-r, -r, -r), Vector(r, r, r)
+	mins.x, mins.y, mins.z = math.min(mins.x, BIG_MIN.x), math.min(mins.y, BIG_MIN.y), math.min(mins.z, BIG_MIN.z)
+	maxs.x, maxs.y, maxs.z = math.max(maxs.x, BIG_MAX.x), math.max(maxs.y, BIG_MAX.y), math.max(maxs.z, BIG_MAX.z)
+	pcall(ply.SetRenderBounds, ply, mins, maxs)
+end
+
 function Body.Apply(ply, frame, base)
 	if not IsValid(ply) or not conv or not base then return end
 	local p = posed[ply]
@@ -671,6 +690,7 @@ function Body.Apply(ply, frame, base)
 	MarkNeeded(p)
 	Solve(ply, p, p.fix and guess * p.fix or guess)
 	p.guess = guess
+	Reach(ply, p, frame.origin)
 	ply:InvalidateBoneCache()
 end
 

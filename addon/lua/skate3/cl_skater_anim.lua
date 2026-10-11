@@ -292,6 +292,12 @@ function Anim.Setup(ent, rest, skater, stand)
 	-- Maxine's paws have several).
 	for _, leg in pairs(info.legs) do
 		if leg and stand then
+			-- The ankle's height off the floor as the model stands in Gmod,
+			-- rather than in its rest pose: on a digitigrade model (Maxine)
+			-- the rest pose's ankle is lower than when she stands on her
+			-- toes, so her toes ended up under the board and the foot had
+			-- to be tipped up hard to get them out.
+			if leg.ankle and stand[leg.foot] then leg.ankle = stand[leg.foot]:GetTranslation().z end
 			leg.clear = {}
 			for _, i in ipairs(info.below(leg.foot)) do
 				local m = stand[i]
@@ -352,6 +358,8 @@ end
 -- closer to the board than it is to the floor when the model stands, so
 -- toes don't sink through the deck. floor: a point on the board's top,
 -- up: the board's up.
+local MAX_TIP = 20 -- degrees
+
 local function Clear(world, leg, floor, up, below)
 	local ankle = world[leg.foot]:GetTranslation()
 	local bones = below(leg.foot)
@@ -378,11 +386,17 @@ local function Clear(world, leg, floor, up, below)
 		end
 		return most
 	end
-	local r
-	for deg = 3, 60, 3 do
-		r = AxisAngle(axis, math.rad(deg))
-		if Short(r) <= 0.25 then break end
+	-- The smallest tip that clears them, at most MAX_TIP: past that it
+	-- looks worse than a toe in the deck. (Up to 60 degrees stood Maxine's
+	-- feet up on end.)
+	local r, best
+	for deg = 2.5, MAX_TIP, 2.5 do
+		local t = AxisAngle(axis, math.rad(deg))
+		local short = Short(t)
+		if not best or short < best - 0.1 then r, best = t, short end
+		if short <= 0.25 then break end
 	end
+	if not r then return end
 	for _, i in ipairs(bones) do
 		if world[i] then world[i] = TurnAbout(world[i], r, ankle) end
 	end
