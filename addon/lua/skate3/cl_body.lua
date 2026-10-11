@@ -432,6 +432,53 @@ end
 local STEADY = 5
 local GIVE_UP = 300
 
+-- A bone matrix worth reading: real numbers, axes about unit length (a
+-- bone the engine skipped can hold zeros or junk).
+local function Sane(m)
+	for _, v in ipairs({ m:GetForward(), m:GetUp(), m:GetRight() }) do
+		local l = v:Length()
+		if not (l > 0.5 and l < 2) then return false end
+	end
+	local t = m:GetTranslation()
+	return t.x == t.x and math.abs(t.x) + math.abs(t.y) + math.abs(t.z) < 1e6
+end
+
+-- Forearms, hands and fingers: Gmod's own IK moves them after our turns
+-- (pulling the hands to where a weapon would be held; it flipped the left
+-- hand round), so they're placed outright once the engine is done, below.
+-- Fingers also aren't set up every time on some models.
+local function IsHand(name)
+	return name:find("Forearm") ~= nil or name:find("_Hand$") ~= nil or name:find("Finger") ~= nil
+end
+
+local function SkipMeasure(ply, p, i)
+	p.skipMeasure = p.skipMeasure or {}
+	local skip = p.skipMeasure[i]
+	if skip == nil then
+		skip = IsHand(ply:GetBoneName(i) or "")
+		p.skipMeasure[i] = skip
+	end
+	return skip
+end
+
+-- Run by the engine at the end of each bone setup, after its IK.
+local function PlaceHands(ply, count)
+	local p = posed[ply]
+	if not (p and p.want and p.hands) then return end
+	for i in pairs(p.hands) do
+		local w = p.want[i]
+		if w and i < count then ply:SetBoneMatrix(i, w) end
+	end
+end
+
+local function FindHands(ply, p)
+	p.hands = {}
+	for i = 0, p.base.count - 1 do
+		local name = ply:GetBoneName(i) or ""
+		if name:find("^ValveBiped%.Bip01_") and IsHand(name) then p.hands[i] = true end
+	end
+end
+
 local function Measure(ply, p)
 	if p.measureDone or not p.applied then return end
 	p.tries = (p.tries or 0) + 1
@@ -442,9 +489,9 @@ local function Measure(ply, p)
 	local open = 0
 	for i in pairs(p.needed) do
 		local par, L = parents[i], locals[i]
-		if par and par >= 0 and L and not p.measured[i] then
+		if par and par >= 0 and L and not p.measured[i] and not SkipMeasure(ply, p, i) then
 			local Fp, Fi = ply:GetBoneMatrix(par), ply:GetBoneMatrix(i)
-			if Fp and Fi then
+			if Fp and Fi and Sane(Fp) and Sane(Fi) then
 				local m = Ortho(Fp):GetInverseTR() * Ortho(Fi)
 				local R = p.applied[i]
 				if R then m = conv.pre and R:GetInverseTR() * m or m * R:GetInverseTR() end
@@ -541,10 +588,13 @@ function Body.Apply(ply, frame, base)
 		-- Full detail: further away Gmod skips small bones (fingers), and
 		-- they'd hold whatever they had last.
 		pcall(ply.SetLOD, ply, 0)
+		p.callback = ply:AddCallback("BuildBonePositions", PlaceHands)
 	end
 	if p.base ~= base then
 		-- A new model: its bones are numbered differently, start over.
 		p.base, p.needed, p.measured, p.last, p.steady, p.tries, p.measureDone = base, nil, nil, nil, nil, 0, false
+		p.skipMeasure = nil
+		FindHands(ply, p)
 	end
 	-- Pose parameters (aiming, mostly) bend the frozen frame: keep them flat.
 	ply:ClearPoseParameters()
@@ -573,6 +623,7 @@ function Body.Release(ply)
 	for i in pairs(p.applied or {}) do ply:ManipulateBoneAngles(i, angle_zero) end
 	for i in pairs(p.moved or {}) do ply:ManipulateBonePosition(i, vector_origin) end
 	pcall(ply.SetLOD, ply, -1)
+	if p.callback then ply:RemoveCallback("BuildBonePositions", p.callback) end
 	if ply.GetModelRenderBounds then
 		local mins, maxs = ply:GetModelRenderBounds()
 		if mins and maxs then pcall(ply.SetRenderBounds, ply, mins, maxs) end
