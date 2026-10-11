@@ -8,7 +8,7 @@
 local Score = {}
 
 local cv_score = CreateClientConVar("skate3_score_hud", "1", true, false, "Show the trick score widget")
-local cv_style = CreateClientConVar("skate3_score_style", "minimal", true, false,
+local cv_style = CreateClientConVar("skate3_score_style", "world", true, false,
 	"Trick score look: minimal (on screen), world (beside the skater) or hl2")
 
 -- How long a finished line stays on screen, and how long it fades.

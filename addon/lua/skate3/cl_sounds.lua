@@ -17,12 +17,24 @@ local HL2 = {
 	land = { "physics/wood/wood_box_impact_hard1.wav", "physics/wood/wood_box_impact_hard3.wav" },
 	bail = { "physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard4.wav" },
 }
+-- HL2's body hits for each bump of a bail, soft and hard.
+local HL2_HITS = {
+	soft = { "physics/body/body_medium_impact_soft1.wav", "physics/body/body_medium_impact_soft2.wav",
+		"physics/body/body_medium_impact_soft3.wav", "physics/body/body_medium_impact_soft4.wav",
+		"physics/body/body_medium_impact_soft5.wav", "physics/body/body_medium_impact_soft6.wav",
+		"physics/body/body_medium_impact_soft7.wav" },
+	hard = { "physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav",
+		"physics/body/body_medium_impact_hard3.wav", "physics/body/body_medium_impact_hard4.wav",
+		"physics/body/body_medium_impact_hard5.wav", "physics/body/body_medium_impact_hard6.wav" },
+}
 
 local cv_volume = CreateClientConVar("skate3_volume", "1", true, false, "Skate sound volume, 0 to 1", 0, 1)
-local cv_pack = CreateClientConVar("skate3_sounds", "hl2", true, false,
+local cv_pack = CreateClientConVar("skate3_sounds", "disc", true, false,
 	"Skate sounds: hl2 (the classic Half-Life 2 ones), disc (Skate 3's own, installed by setup) or off")
-local cv_bails = CreateClientConVar("skate3_bail_sounds", "disc", true, false,
+local cv_bails = CreateClientConVar("skate3_bail_sounds", "hl2", true, false,
 	"Bail sounds with the disc set: disc (Skate 3's own body hits and slides) or hl2 (Half-Life 2's)")
+local cv_steps = CreateClientConVar("skate3_footsteps", "hl2", true, false,
+	"Footsteps with the disc set: disc (Skate 3's own) or hl2 (Garry's Mod's own for the ground underfoot)")
 local cv_debug = CreateClientConVar("skate3_debug_sounds", "0", false, false, "Print each footstep, wheel spin and bail hit")
 
 -- Map units per metre: Source and the simulation are both inches.
@@ -470,6 +482,8 @@ end
 -- Watches both feet for plants while on foot (or pushing on the board),
 -- and the body for on-foot jumps.
 local function Feet(pose, kind, dt, disc, volume)
+	-- The jump foley goes with Skate 3's footsteps.
+	disc = disc and cv_steps:GetString() == "disc"
 	local hips = BonePos(pose, "HIPS")
 	local comSpeed, comVz = 0, 0
 	if hips then
@@ -665,6 +679,21 @@ local function BodyHit(r, impact, b, pos)
 	return played
 end
 
+-- HL2's version of a bail hit: a body impact, harder and louder the harder
+-- the region hit, each region on its own cooldown so every bump sounds. Hits
+-- closer together than CLASSIC_GAP play as one.
+local CLASSIC_MIN = 0.03
+local CLASSIC_GAP = 0.12
+local function HitClassic(r, impact, pos)
+	if impact < CLASSIC_MIN or CurTime() - (bail.lastClassic or 0) < CLASSIC_GAP then return false end
+	bail.lastClassic = CurTime()
+	local list = impact > 0.25 and HL2_HITS.hard or HL2_HITS.soft
+	sound.Play(list[math.random(#list)], pos, 75, math.random(95, 105),
+		math.Clamp(0.35 + impact, 0.35, 1) * cv_volume:GetFloat())
+	Debug("bail hit (hl2): %s at %.2f", r.bone, impact)
+	return true
+end
+
 local function BailReset()
 	bail.regions = {}
 	bail.comSpeed = 0
@@ -673,8 +702,8 @@ end
 -- Each tick of a bail: a region whose velocity into a surface it is touching
 -- dropped is a hit, its impact retail's clamp01(dv . n x weight x 10) scaled
 -- by the speed graph at the body's speed.
-local function Bail(pose, dt, volume, ent)
-	local t = Tuning()
+local function Bail(pose, dt, volume, ent, classic)
+	local t = not classic and Tuning()
 	local cooldown = t and t.body_cooldown or BODY_COOLDOWN
 	local graph = t and t.body_speed or BODY_SPEED
 	local hips = BonePos(pose, "HIPS")
@@ -696,9 +725,15 @@ local function Bail(pose, dt, volume, ent)
 					local into = math.max(0, -s.v:Dot(n)) - math.max(0, -v:Dot(n))
 					local impact = math.Clamp(into * r.mass * 10, 0, 1) * scale
 					if impact > 0.001 then
-						-- What it hit, wall or floor, as the disc's material for it.
-						local b = GroundMaterial(ROLL[tr.MatType] or ROLL_DEFAULT) or NO_MATERIAL
-						if BodyHit(r, impact, b, tr.HitPos) then
+						local played
+						if classic then
+							played = HitClassic(r, impact, tr.HitPos)
+						else
+							-- What it hit, wall or floor, as the disc's material for it.
+							local b = GroundMaterial(ROLL[tr.MatType] or ROLL_DEFAULT) or NO_MATERIAL
+							played = BodyHit(r, impact, b, tr.HitPos)
+						end
+						if played then
 							s.cooldown = cooldown
 							hits = hits + 1
 						end
@@ -723,6 +758,7 @@ local function Bail(pose, dt, volume, ent)
 		end
 	end
 	bail.hips = hips
+	if classic then return hits end
 	if not picks.bodyslide then Pick("bodyslide", "bodyslide") end
 	Hold("bodyslide", ent, sliding > 1, math.Clamp(sliding / 8, 0, 0.7) * volume, math.Clamp(85 + sliding * 3, 85, 120))
 	return hits
@@ -770,7 +806,12 @@ function Sounds.Update(ent, pose)
 			GrindHit(ent, speed)
 		elseif kind == "bail" then
 			BailReset()
-			if not bails then Play("bail", ent, 1) end
+			-- With HL2's bails, the fall itself thumps; each bump after it
+			-- plays as the body hits things.
+			if not bails then
+				Play("bail", ent, 1)
+				bail.lastClassic = CurTime()
+			end
 		end
 		if kind == "grind" then Pick("grind", "grinds") end
 	end
@@ -819,8 +860,8 @@ function Sounds.Update(ent, pose)
 
 	if newTick and dt > 0 then
 		Feet(pose, kind, dt, disc, volume)
-		if kind == "bail" and bails then
-			Bail(pose, dt, volume, ent)
+		if kind == "bail" then
+			Bail(pose, dt, volume, ent, not bails)
 		end
 	end
 	if kind ~= "bail" or not bails then Hold("bodyslide", ent, false, 0) end

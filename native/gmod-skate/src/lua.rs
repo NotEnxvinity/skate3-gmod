@@ -69,7 +69,9 @@ pub fn api() -> Result<&'static Api, &'static str> {
 fn load() -> Result<Api, String> {
     #[cfg(windows)]
     const NAMES: &[&str] = &["lua_shared.dll"];
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    const NAMES: &[&str] = &["@executable_path/lua_shared.dylib", "lua_shared.dylib"];
+    #[cfg(all(unix, not(target_os = "macos")))]
     const NAMES: &[&str] = &[
         "lua_shared.so",
         "lua_shared_client.so",
@@ -97,7 +99,7 @@ fn open(name: &str) -> Result<libloading::Library, libloading::Error> {
 fn open(name: &str) -> Result<libloading::Library, libloading::Error> {
     use libloading::os::unix::{Library, RTLD_LOCAL, RTLD_NOW};
     // Prefer the copy already in the process; fall back to loading by path.
-    const RTLD_NOLOAD: c_int = 0x4;
+    const RTLD_NOLOAD: c_int = libc::RTLD_NOLOAD;
     unsafe { Library::open(Some(name), RTLD_NOW | RTLD_LOCAL | RTLD_NOLOAD) }
         .or_else(|_| unsafe { Library::open(Some(name), RTLD_NOW | RTLD_LOCAL) })
         .map(Into::into)

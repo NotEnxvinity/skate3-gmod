@@ -1,7 +1,9 @@
 //! The first connected gamepad as the raw Xbox packet Skate 3 reads.
 //!
 //! gilrs reads evdev on Linux (where Steam Input presents a Deck or any pad as
-//! an Xbox pad) and XInput on Windows and Proton.
+//! an Xbox pad) and XInput on Windows and Proton. On macOS Apple's
+//! GameController framework goes first: Steam switches a Bluetooth PS5 pad to
+//! its full report, which raw HID (and so gilrs) can no longer read.
 
 use std::cell::RefCell;
 
@@ -53,6 +55,10 @@ pub struct Pad {
 
 /// Polls the pads and returns the first connected one's state.
 pub fn poll() -> Result<Pad, String> {
+    #[cfg(target_os = "macos")]
+    if let Some(pad) = apple::poll() {
+        return Ok(pad);
+    }
     PADS.with(|pads| {
         let mut pads = pads.borrow_mut();
         let gilrs = pads
@@ -95,6 +101,62 @@ pub fn poll() -> Result<Pad, String> {
 /// -1..1 as XInput's signed 16-bit stick range (up is positive in both).
 fn axis(v: f32) -> i16 {
     (v.clamp(-1., 1.) * f32::from(i16::MAX)).round() as i16
+}
+
+#[cfg(target_os = "macos")]
+mod apple {
+    use objc2_game_controller::{GCController, GCControllerButtonInput, GCControllerDirectionPad, GCDevice};
+
+    use super::*;
+
+    /// The first controller with a full gamepad profile, if any.
+    pub fn poll() -> Option<Pad> {
+        // SAFETY: read-only queries of the framework's live controller state.
+        unsafe {
+            let controllers = GCController::controllers();
+            let (controller, pad) = controllers
+                .iter()
+                .find_map(|c| c.extendedGamepad().map(|p| (c, p)))?;
+            let pressed = |b: &GCControllerButtonInput| b.isPressed();
+            let dpad = pad.dpad();
+            let mut buttons = 0;
+            for (on, bit) in [
+                (pressed(&dpad.up()), DPAD_UP),
+                (pressed(&dpad.down()), DPAD_DOWN),
+                (pressed(&dpad.left()), DPAD_LEFT),
+                (pressed(&dpad.right()), DPAD_RIGHT),
+                (pressed(&pad.buttonMenu()), START),
+                (pad.buttonOptions().is_some_and(|b| pressed(&b)), BACK),
+                (pad.leftThumbstickButton().is_some_and(|b| pressed(&b)), LEFT_THUMB),
+                (pad.rightThumbstickButton().is_some_and(|b| pressed(&b)), RIGHT_THUMB),
+                (pressed(&pad.leftShoulder()), LEFT_SHOULDER),
+                (pressed(&pad.rightShoulder()), RIGHT_SHOULDER),
+                (pressed(&pad.buttonA()), A),
+                (pressed(&pad.buttonB()), B),
+                (pressed(&pad.buttonX()), X),
+                (pressed(&pad.buttonY()), Y),
+            ] {
+                if on {
+                    buttons |= bit;
+                }
+            }
+            let trigger = |b: &GCControllerButtonInput| (b.value().clamp(0., 1.) * 255.).round() as u8;
+            let stick = |s: &GCControllerDirectionPad| [axis(s.xAxis().value()), axis(s.yAxis().value())];
+            let name = controller
+                .vendorName()
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "Controller".to_owned());
+            Some(Pad {
+                controls: Controls {
+                    buttons,
+                    triggers: [trigger(&pad.leftTrigger()), trigger(&pad.rightTrigger())],
+                    left: stick(&pad.leftThumbstick()),
+                    right: stick(&pad.rightThumbstick()),
+                },
+                name: Some(name),
+            })
+        }
+    }
 }
 
 #[cfg(test)]

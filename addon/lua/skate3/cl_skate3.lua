@@ -6,12 +6,12 @@ local Props = include("skate3/cl_props.lua")
 local Pose = include("skate3/sh_pose.lua")
 include("skate3/cl_others.lua")(Skater)
 
-local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_linux64.dll")
+local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OSX" and "gmcl_skate3_osx64.dll" or "gmcl_skate3_linux64.dll")
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.0.0")
-local cv_hud = CreateClientConVar("skate3_hud", "1", true, false, "Show the skate status line")
+print("[skate3] lua build: v2.0.1")
+local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
 
@@ -397,7 +397,7 @@ end)
 
 -- Camera height presets, in units above (or below) the game's own camera.
 local CAMERA_HEIGHTS = { low = -16, normal = 0, high = 32 }
-local cv_camera = CreateClientConVar("skate3_camera", "normal", true, false, "Skate camera height: low, normal or high")
+local cv_camera = CreateClientConVar("skate3_camera", "low", true, false, "Skate camera height: low, normal or high")
 
 concommand.Add("skate3_camera_cycle", function()
 	local order = { low = "normal", normal = "high", high = "low" }

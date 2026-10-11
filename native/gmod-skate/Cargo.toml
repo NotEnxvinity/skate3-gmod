@@ -18,3 +18,10 @@ libloading = "0.8"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# Apple's GameController framework, which reads a PS5 pad in the mode Steam
+# switches it to over Bluetooth; gilrs's raw HID only sees the basic report.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSEnumerator", "NSString"] }
+objc2-game-controller = { version = "0.3", default-features = false, features = ["std", "GCController", "GCExtendedGamepad", "GCPhysicalInputProfile", "GCControllerElement", "GCControllerButtonInput", "GCControllerAxisInput", "GCControllerDirectionPad", "GCDevice"] }

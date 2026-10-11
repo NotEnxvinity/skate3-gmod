@@ -445,11 +445,15 @@ local function Hands(info, world, pose)
 		deckA, deckB = m * info.deck.a, m * info.deck.b
 	end
 	local bailing = pose.state and pose.state:find("^Wipeout") ~= nil
+	-- Off the board (standing, walking, running with it in hand) the hand
+	-- carrying it stays relaxed like the other one: a fist only looks right
+	-- on grab tricks.
+	local onFoot = pose.state and pose.state:find("^Biped") ~= nil
 	for _, hand in pairs(info.hands) do
 		local hm = hand and world[hand.hand]
 		if hm then
 			local p = hm:GetTranslation()
-			local holding = deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE
+			local holding = not onFoot and deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE
 			-- 0 open (flailing in a bail), 1 relaxed, 2 gripping.
 			hand.wanted = holding and 2 or bailing and 0.3 or 1
 			-- Ease towards it, once a frame (this runs for every view and

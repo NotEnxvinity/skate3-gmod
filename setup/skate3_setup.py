@@ -27,7 +27,7 @@ sys.path.insert(0, str(HERE))
 
 import audio, convert, names, xdvdfs  # noqa: E402
 
-MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll')
+MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
 FROM_DISC = {
     'default.xex',
@@ -77,7 +77,7 @@ def steam_roots():
         roots += [Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'Steam']
     else:
         home = Path.home()
-        roots += [home / '.local/share/Steam', home / '.steam/steam', home / '.steam/root',
+        roots += [home / 'Library/Application Support/Steam', home / '.local/share/Steam', home / '.steam/steam', home / '.steam/root',
                   home / '.var/app/com.valvesoftware.Steam/.local/share/Steam']
     return [r for r in roots if r.is_dir()]
 
