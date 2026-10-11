@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Skate 3 for Garry's Mod setup, run with your system's Python.
+# S3GM (Skate 3 in Garry's Mod) setup, run with your system's Python.
 #
 #   ./skate3-setup.sh --game "/path/to/Skate 3/default.xex"   (or a .iso)
 #   ./skate3-setup.sh                                        the setup window

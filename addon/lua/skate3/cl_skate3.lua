@@ -11,7 +11,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or "gmcl_skate3_
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: test-13")
+print("[skate3] lua build: v2.0.0")
 local cv_hud = CreateClientConVar("skate3_hud", "1", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
@@ -65,7 +65,7 @@ local function Load()
 		return
 	end
 	if not file.Exists("lua/bin/" .. MODULE, "MOD") then
-		Say("Skate 3 mode needs its setup app, run once with your own Skate 3 disc: github.com/NotEnxvinity/skate3-gmod/releases")
+		Say("S3GM needs its setup, run once with your own Skate 3 disc. The S3GM Workshop page links the download.")
 		return
 	end
 	local ok, err = pcall(require, "skate3")

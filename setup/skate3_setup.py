@@ -156,7 +156,7 @@ def install_addon(gmod, wanted, report):
         if (local / 'lua/skate3').is_dir():
             shutil.rmtree(local, ignore_errors=True)
             report(f'Removed the old addon copy in {local}; the Workshop one is used now')
-        report('Subscribe to "Skate 3 in Gmod" on the Steam Workshop if you haven\'t yet: '
+        report('Subscribe to "S3GM: Skate 3 in Gmod" on the Steam Workshop if you haven\'t yet: '
                'steamcommunity.com/sharedfiles/filedetails/?id=3814357793')
         return
     addon = addon_dir()
@@ -251,12 +251,12 @@ def window(gmod, with_addon_default=False):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     root = tk.Tk()
-    root.title('Skate 3 for Garry\'s Mod setup')
+    root.title('S3GM setup')
     root.geometry('720x520')
     root.minsize(560, 420)
     frame = ttk.Frame(root, padding=20)
     frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text='Skate 3 for Garry\'s Mod', font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
+    ttk.Label(frame, text='S3GM: Skate 3 in Garry\'s Mod', font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
     ttk.Label(frame, justify='left', wraplength=620, text=(
         'Pick your own Skate 3 (Xbox 360) disc image (.iso), or default.xex in an extracted copy. '
         'Setup installs the skate engine and converts what it needs from your disc; '
@@ -341,7 +341,7 @@ def main():
     if len(sys.argv) > 2 and sys.argv[1] == '--task':
         run_task()
         return 0
-    parser = argparse.ArgumentParser(description='Skate 3 for Garry\'s Mod setup')
+    parser = argparse.ArgumentParser(description='S3GM setup')
     parser.add_argument('--game', type=Path, help='your Skate 3 disc image (.iso) or extracted default.xex')
     parser.add_argument('--gmod', type=Path, help='the garrysmod folder (found automatically if left out)')
     parser.add_argument('--with-addon', action='store_true',
