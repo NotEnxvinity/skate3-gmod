@@ -262,7 +262,9 @@ end
 -- Each bone's local matrix (relative to its parent; the root's relative to
 -- the entity) in the frozen frame, read from a stand-in of the same model at
 -- the map's origin.
-function Body.FrozenLocals(ent)
+function Body.FrozenLocals(ent, rest)
+	-- The model's rest pose first (Body.RestOf comes from cl_skater.lua).
+	if not rest and Body.RestOf then rest = Body.RestOf(ent) end
 	ent:SetPos(vector_origin)
 	ent:SetAngles(angle_zero)
 	local seq, name = Body.FrozenSequence(ent)
@@ -284,6 +286,24 @@ function Body.FrozenLocals(ent)
 			locals[i] = pw and pw:GetInverse() * w or (p < 0 and Matrix(w)) or nil
 		end
 	end
+	-- Bones off the ValveBiped skeleton (Master Chief's real body bones,
+	-- Maxine's toes, hair, tails) are carried along with their parent. On
+	-- proportion-trick models the animation puts the ValveBiped bones at
+	-- stock lengths and these bones make up the difference; our skeleton
+	-- already has the model's own lengths, so carrying the engine's offset
+	-- counted it twice (Chief's long neck). So the offset from the rest
+	-- pose is used, plus whatever the engine moved them since the frozen
+	-- frame (jiggle): carry[i] = rest local * frozen local ^-1.
+	local carry = {}
+	for i = 0, count - 1 do
+		local p = parents[i]
+		local name = ent:GetBoneName(i) or ""
+		if p >= 0 and rest and rest[i] and rest[p] and locals[i]
+			and not name:find("^ValveBiped%.Bip01_") then
+			local rl = rest[p]:GetInverseTR() * rest[i]
+			carry[i] = rl * locals[i]:GetInverseTR()
+		end
+	end
 	-- Where the eyes sit on the head, for aiming them (see EyesAhead).
 	local head = ent:LookupBone("ValveBiped.Bip01_Head1")
 	local eyes
@@ -295,7 +315,7 @@ function Body.FrozenLocals(ent)
 		m:SetTranslation(att.Pos)
 		eyes = world[head]:GetInverse() * m
 	end
-	return { locals = locals, parents = parents, count = count, sequence = name, head = head, eyes = eyes }
+	return { locals = locals, parents = parents, count = count, sequence = name, head = head, eyes = eyes, carry = carry }
 end
 
 -- The frozen frame of another player's model, from a stand-in of it (once
@@ -545,6 +565,9 @@ end
 -- every other bone (hair, tails, capes, helpers) is carried along with its
 -- parent, keeping whatever the engine made of it: jiggle bones keep
 -- swinging, since the turns above already moved the body nearly there.
+local cv_carry = CreateClientConVar("skate3_body_carry", "1", true, false,
+	"Bones off the skeleton (toes, hair, armour) keep the model's own offsets (0 = the engine's, the older way)")
+
 local function PlaceAll(ply, count)
 	local p = posed[ply]
 	if not (p and p.base) then return end
@@ -564,6 +587,7 @@ local function PlaceAll(ply, count)
 	if p.needed then Measure(ply, p, old) end
 	local final, parents = p.final, p.base.parents
 	if not final then return end
+	local carry, carryOn = p.base.carry or {}, cv_carry:GetBool()
 	local new = {}
 	for i = 0, n - 1 do
 		local was = old[i]
@@ -572,7 +596,10 @@ local function PlaceAll(ply, count)
 			if not m then
 				local par = parents[i]
 				if par and par >= 0 and new[par] and old[par] then
-					m = new[par] * old[par]:GetInverse() * was
+					-- A bone scaled to nothing has no inverse.
+					local inv = old[par]:GetInverse() or old[par]:GetInverseTR()
+					local k = carryOn and carry[i]
+					m = k and new[par] * k * inv * was or new[par] * inv * was
 				end
 			end
 			if m then

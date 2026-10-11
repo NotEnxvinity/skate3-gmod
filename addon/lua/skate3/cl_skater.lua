@@ -379,6 +379,33 @@ local cv_rest = CreateClientConVar("skate3_rest_pose", "bind", true, false,
 local restFrom = "" -- what the rest pose was read from, for the bone report
 
 -- The model's rest pose, read once with the entity at the origin.
+-- The bind pose (or the "ragdoll" sequence when it won't line up) of ent,
+-- set at the origin. Returns bindPose or nil, how it was read, ragdoll.
+local function ReadRest(ent)
+	ent:SetPos(vector_origin)
+	ent:SetAngles(angle_zero)
+	local seq = ent:LookupSequence("ragdoll")
+	ent:ResetSequence(seq >= 0 and seq or 0)
+	ent:SetCycle(0)
+	ent:InvalidateBoneCache()
+	ent:SetupBones()
+	local ragdoll = {}
+	for i = 0, ent:GetBoneCount() - 1 do ragdoll[i] = ent:GetBoneMatrix(i) end
+	-- The bind pose rather than the "ragdoll" sequence: playermodels made
+	-- with the proportion trick (Halo Infinite's Master Chief, Doom Guy) get
+	-- the stock Valve skeleton in that sequence, with the neck down inside
+	-- the chest, and their heads ended up there.
+	local bindPose, how
+	if cv_rest:GetString() ~= "ragdoll" then bindPose, how = BindPose(ent, ragdoll) end
+	return bindPose, how, ragdoll
+end
+
+-- Other players' bodies need the same rest pose (see Body.FrozenLocals).
+function Body.RestOf(ent)
+	local bindPose, _, ragdoll = ReadRest(ent)
+	return bindPose or ragdoll
+end
+
 local stand = {} -- bone index -> Matrix, the model standing in Gmod's idle, at the origin
 
 local function CaptureRest(ent)
@@ -398,19 +425,7 @@ local function CaptureRest(ent)
 			break
 		end
 	end
-	local seq = ent:LookupSequence("ragdoll")
-	ent:ResetSequence(seq >= 0 and seq or 0)
-	ent:SetCycle(0)
-	ent:InvalidateBoneCache()
-	ent:SetupBones()
-	local ragdoll = {}
-	for i = 0, ent:GetBoneCount() - 1 do ragdoll[i] = ent:GetBoneMatrix(i) end
-	-- The bind pose rather than the "ragdoll" sequence: playermodels made
-	-- with the proportion trick (Halo Infinite's Master Chief, Doom Guy) get
-	-- the stock Valve skeleton in that sequence, with the neck down inside
-	-- the chest, and their heads ended up there.
-	local bindPose, how
-	if cv_rest:GetString() ~= "ragdoll" then bindPose, how = BindPose(ent, ragdoll) end
+	local bindPose, how, ragdoll = ReadRest(ent)
 	restFrom = bindPose and ("bind pose (" .. how .. ")")
 		or ("ragdoll sequence" .. (how and (" (bind pose didn't line up: " .. how .. ")") or ""))
 	print("[skate3] rest pose from the " .. restFrom)
@@ -607,7 +622,7 @@ function Skater.ShowModel(ply)
 		if real then
 			-- This copy is only measured, never drawn: your own body skates.
 			model:SetNoDraw(true)
-			frozen = Body.FrozenLocals(model)
+			frozen = Body.FrozenLocals(model, rest)
 			pelvis = model:LookupBone("ValveBiped.Bip01_Pelvis")
 			skeleton = {}
 			for i = 0, model:GetBoneCount() - 1 do
@@ -618,7 +633,7 @@ function Skater.ShowModel(ply)
 		local callback = not real and cv_bones:GetString() == "callback"
 		-- The finishing touches work on whichever body is drawn.
 		model.skate3AnimEnt = real and ply or model
-		Anim.Setup(model.skate3AnimEnt, rest, data)
+		Anim.Setup(model.skate3AnimEnt, rest, data, stand)
 		if callback then
 			model:AddCallback("BuildBonePositions", BuildBones)
 		end

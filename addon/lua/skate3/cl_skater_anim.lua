@@ -26,6 +26,8 @@ local cv_curl = CreateClientConVar("skate3_finger_curl", "1", true, false,
 	"How far fingers curl, 1 = normal; a negative number bends them the other way, for a model whose fingers curl backwards")
 local cv_ik = CreateClientConVar("skate3_foot_ik", "1", true, false,
 	"Lift or lower the legs so the playermodel's soles sit where the skater's do (0 = off)")
+local cv_soles = CreateClientConVar("skate3_foot_clear", "1", true, false,
+	"Tip feet up so toes don't sink through the board (0 = off)")
 local cv_face = CreateClientConVar("skate3_face", "1", true, false,
 	"Blinking, and a hurt face on bails (0 = off)")
 
@@ -260,7 +262,9 @@ local function SkateFloor(bind)
 	return low - 1
 end
 
-function Anim.Setup(ent, rest, skater)
+-- stand: optional bone -> Matrix of the model standing (entity at the
+-- origin), for how high off the floor each foot and toe bone sits.
+function Anim.Setup(ent, rest, skater, stand)
 	local bind = {}
 	for name, m in pairs(skater and skater.bind or {}) do
 		bind[name] = istable(m) and Mat(m) or m
@@ -283,6 +287,18 @@ function Anim.Setup(ent, rest, skater)
 		info.legs[side] = FindLeg(ent, rest, side, bind, side == "L" and "LEFT" or "RIGHT", floor) or false
 	end
 	info.skateFloor = floor
+	-- How high each bone of the foot sits off the floor when the model
+	-- stands: never lower than that above the board (toe bones included,
+	-- Maxine's paws have several).
+	for _, leg in pairs(info.legs) do
+		if leg and stand then
+			leg.clear = {}
+			for _, i in ipairs(info.below(leg.foot)) do
+				local m = stand[i]
+				if m then leg.clear[i] = math.max(m:GetTranslation().z, 0.5) end
+			end
+		end
+	end
 	per[ent] = info
 	return info
 end
@@ -332,6 +348,46 @@ local function Reach(world, leg, target, below)
 	end
 end
 
+-- Tip the foot up about the ankle until no bone of it (toes included) is
+-- closer to the board than it is to the floor when the model stands, so
+-- toes don't sink through the deck. floor: a point on the board's top,
+-- up: the board's up.
+local function Clear(world, leg, floor, up, below)
+	local ankle = world[leg.foot]:GetTranslation()
+	local bones = below(leg.foot)
+	local worst, deepest = 0.25, nil
+	for _, i in ipairs(bones) do
+		local need, m = leg.clear[i], world[i]
+		if need and m then
+			local short = need - (m:GetTranslation() - floor):Dot(up)
+			if short > worst then worst, deepest = short, m:GetTranslation() end
+		end
+	end
+	if not deepest then return end
+	local axis = (deepest - ankle):Cross(up)
+	if axis:Length() < 1e-3 then return end
+	axis:Normalize()
+	local function Short(r)
+		local most = 0
+		for _, i in ipairs(bones) do
+			local need, m = leg.clear[i], world[i]
+			if need and m then
+				local p = r * (m:GetTranslation() - ankle) + ankle
+				most = math.max(most, need - (p - floor):Dot(up))
+			end
+		end
+		return most
+	end
+	local r
+	for deg = 3, 60, 3 do
+		r = AxisAngle(axis, math.rad(deg))
+		if Short(r) <= 0.25 then break end
+	end
+	for _, i in ipairs(bones) do
+		if world[i] then world[i] = TurnAbout(world[i], r, ankle) end
+	end
+end
+
 local function Feet(info, world, pose)
 	if not cv_ik:GetBool() then return end
 	for _, leg in pairs(info.legs) do
@@ -345,6 +401,9 @@ local function Feet(info, world, pose)
 			local m = Mat(skate)
 			local up = Turn(m) * leg.bindTurn * Vector(0, 0, 1)
 			Reach(world, leg, m:GetTranslation() + up * d, info.below)
+			if leg.clear and cv_soles:GetBool() then
+				Clear(world, leg, m:GetTranslation() - up * leg.skateAnkle, up, info.below)
+			end
 		end
 	end
 end
