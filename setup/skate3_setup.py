@@ -1,9 +1,8 @@
 """Skate 3 for Garry's Mod setup: pick your own Skate 3 (Xbox 360) disc image
 or extracted game, and this finds Garry's Mod, installs the skate module into
 garrysmod/lua/bin, converts the game data the mod needs into
-garrysmod/data/skate3, the skate sounds into garrysmod/sound/skate3, and the
-create-a-park pieces into garrysmod/data/skate3/park. Run it once, and again
-after an update.
+garrysmod/data/skate3 and the skate sounds into garrysmod/sound/skate3. Run it
+once, and again after an update.
 The Lua addon itself comes from the Steam Workshop.
 
 Nothing from the game is downloaded or bundled: everything comes off the disc
@@ -26,7 +25,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, convert, names, park, xdvdfs  # noqa: E402
+import audio, convert, names, xdvdfs  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -38,7 +37,6 @@ FROM_DISC = {
     'data/content/createacharacter.big',
     *audio.FROM_DISC,
     *names.FROM_DISC,
-    *park.FROM_DISC,
 }
 FROM_DISC_FOLDERS = ('data/anim/',)
 # The engine's top-level scripts the converters run as steps, and the ones
@@ -202,12 +200,6 @@ def install(selected, gmod, report, with_addon=False):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
-        # The park pieces are extra; skating works without them.
-        try:
-            park.install(xex.parent, gmod, report)
-        except Exception as error:
-            traceback.print_exc()
-            report(f'Couldn\'t convert the park pieces ({error}); everything else is installed.')
     report('All set. Start Garry\'s Mod, load a map and equip the Skateboard.')
 
 

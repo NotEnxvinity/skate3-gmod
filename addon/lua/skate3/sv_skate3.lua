@@ -25,7 +25,7 @@ local function SetSkating(ply, on)
 	ply.Skate3 = on
 	ply.skate3MoveAt = CurTime()
 	ply:SetMoveType(on and MOVETYPE_NONE or MOVETYPE_WALK)
-	-- Park pieces ignore a skater's Gmod body (see sh_park.lua).
+	-- Tells clients who is riding (their sounds and how they draw others).
 	ply:SetNW2Bool("skate3_riding", on)
 	ply:CollisionRulesChanged()
 end

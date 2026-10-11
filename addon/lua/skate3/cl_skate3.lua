@@ -2,7 +2,6 @@ local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
 include("skate3/cl_menu.lua")
-local Park = include("skate3/cl_park.lua")
 local Props = include("skate3/cl_props.lua")
 local Pose = include("skate3/sh_pose.lua")
 include("skate3/cl_others.lua")(Skater)
@@ -39,7 +38,6 @@ local status = {}
 local nextStatus = 0
 local loadStage, loadStartedAt -- the collision build's current step, for the console
 local nextSend = 0
-local mapBsp -- kept to rebuild the collision when park pieces change
 
 local function Say(...)
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white, ...)
@@ -49,10 +47,10 @@ local function V(t)
 	return Vector(t[1], t[2], t[3])
 end
 
--- Triangles the .bsp's brushes don't cover: the map's props and park pieces.
+-- Triangles the .bsp's brushes don't cover: the map's props.
 local function ExtraTriangles(bsp)
 	local out = {}
-	for _, list in ipairs({ Props.Triangles(bsp), Park.Triangles() }) do
+	for _, list in ipairs({ Props.Triangles(bsp) }) do
 		local n = #out
 		for i = 1, #list do out[n + i] = list[i] end
 	end
@@ -85,7 +83,6 @@ local function Load()
 		Say("Couldn't read this map's .bsp.")
 		return
 	end
-	mapBsp = bsp
 	local started, loadErr = skate3.LoadMap(bsp, ExtraTriangles(bsp))
 	if not started then
 		Say(loadErr)
@@ -181,34 +178,6 @@ local function Start()
 	SetActive(true)
 	Skater.ShowModel(ply)
 end
-
--- Placing, moving or removing park pieces rebuilds the map's skate
--- collision with their triangles. A ride in progress stops for it and
--- picks up where it was once the new collision is ready.
-local function RebuildCollision()
-	if not loaded or not mapBsp then return end
-	local endedAt, endedOnFoot
-	if active then
-		endedAt = pose and V(pose.pos)
-		endedOnFoot = pose and pose.state and pose.state:find("^Biped") ~= nil
-		Stop()
-	end
-	local extra = ExtraTriangles(mapBsp)
-	local ok, err = skate3.LoadMap(mapBsp, extra)
-	if not ok then
-		Say(err)
-		return
-	end
-	rails = nil
-	status = { state = "loading" }
-	print(("[skate3] rebuilding collision with %d prop and park piece triangles"):format(#extra / 9))
-	if endedAt and boardHeld then
-		rideWhenReady = true
-		resumeAt = endedAt
-		resumeOnFoot = endedOnFoot or false
-	end
-end
-hook.Add("Skate3RebuildCollision", "skate3", RebuildCollision)
 
 concommand.Add("skate3_toggle", function()
 	if active then Stop() else Start() end

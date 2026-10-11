@@ -46,8 +46,6 @@ def stage_folder(modules, out):
     for path in HERE.glob('*.py'):
         if not path.name.startswith('test_') and path.name != 'package.py':
             shutil.copy2(path, out / path.name)
-    shutil.copytree(HERE / 'skate3_formats', out / 'skate3_formats',
-                    ignore=shutil.ignore_patterns('__pycache__', 'test_*'))
     shutil.copy2(HERE / 'skate3-setup.sh', out / 'skate3-setup.sh')
     (out / 'bin').mkdir()
     for m in MODULES:

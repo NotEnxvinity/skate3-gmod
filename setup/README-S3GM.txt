@@ -34,7 +34,7 @@ Install
      Windows:          double-click S3GM-setup\S3GM-setup-Windows.bat
    Pick your Skate 3 .iso (or default.xex) in the window. It finds Garry's
    Mod, installs the skate engine module, and converts the skater,
-   animations, sounds and park pieces from your disc. The first run
+   animations and sounds from your disc. The first run
    downloads a few helpers, so give it a few minutes.
    Without a window: add  --game "/path/to/Skate 3.iso"  (and
    --gmod "/path/to/garrysmod" if it can't find Garry's Mod).
@@ -67,8 +67,6 @@ Credits
 - Module architecture inspired by ckosmic/g64. No code taken.
 - Sound bank research: doriangironde/skate-3-rust-macos and Hailey-Ross's
   audio work on SK8-ENGINE. Sounds are decoded on your machine by vgmstream.
-- Park piece readers: NativeX World Studio and SK8-Engine (MIT, see
-  skate3_formats/).
 
 
 License
