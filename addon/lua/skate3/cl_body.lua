@@ -460,7 +460,7 @@ local function SkipMeasure(ply, p, i)
 	return skip
 end
 
-local function Measure(ply, p)
+local function Measure(ply, p, get)
 	if p.measureDone or not p.applied then return end
 	p.tries = (p.tries or 0) + 1
 	p.measured = p.measured or {}
@@ -471,7 +471,7 @@ local function Measure(ply, p)
 	for i in pairs(p.needed) do
 		local par, L = parents[i], locals[i]
 		if par and par >= 0 and L and not p.measured[i] and not SkipMeasure(ply, p, i) then
-			local Fp, Fi = ply:GetBoneMatrix(par), ply:GetBoneMatrix(i)
+			local Fp, Fi = get[par], get[i]
 			if Fp and Fi and Sane(Fp) and Sane(Fi) then
 				local m = Ortho(Fp):GetInverseTR() * Ortho(Fi)
 				local R = p.applied[i]
@@ -499,49 +499,16 @@ local function Measure(ply, p)
 		worst, worstBone and tostring(ply:GetBoneName(worstBone)) or "none"))
 end
 
--- The finishing step, run by the engine at the very end of each bone setup
--- (after its own IK, helper bones and jiggle bones). The turns above only
--- nudge the body, and Gmod changes things after them (it pulls the hands to
--- where a weapon would be held, works out wrist and elbow helpers from the
--- arms it had), so on their own they never quite gave the copy's pose. Here
--- the skeleton is set to exactly the copy's finished pose (frame.final), and
--- every other bone (hair, tails, capes, helpers) is carried along with its
--- parent, keeping whatever the engine made of it: jiggle bones keep
--- swinging, since the turns above already moved the body nearly there.
-local function PlaceAll(ply, count)
-	local p = posed[ply]
-	if not p or p.measuring or not p.final then return end
-	local final, parents = p.final, p.base.parents
-	local old, new = {}, {}
-	for i = 0, math.min(count, p.base.count) - 1 do
-		local was = ply:GetBoneMatrix(i)
-		if was then
-			old[i] = was
-			local m = final[i]
-			if not m then
-				local par = parents[i]
-				if par and par >= 0 and new[par] and old[par] then
-					m = new[par] * old[par]:GetInverse() * was
-				end
-			end
-			if m then
-				new[i] = m
-				ply:SetBoneMatrix(i, m)
-			end
-		end
-	end
-end
-
 -- Where the engine really had the player when the body was last set up:
 -- the top bone of the skeleton as it came out, less what we did to it (its
 -- frozen local, our turn and shift). Gmod's own idea of which way a player
 -- faces (GetRenderAngles) turned out not to be the one it poses with, so
 -- this is read off the body every frame instead of trusted.
-local function ReadE(ply, p)
-	if not p.applied then return nil end
+local function ReadE(p, get)
+	if not (p.applied and p.needed) then return nil end
 	for i = 0, p.base.count - 1 do
 		local L = p.base.parents[i] < 0 and p.needed[i] and Local(p, i)
-		local got = L and ply:GetBoneMatrix(i)
+		local got = L and get[i]
 		if got then
 			local X = Body.Chain(Matrix(), L, p.applied[i])
 			local off = p.moved and p.moved[i]
@@ -556,6 +523,49 @@ local function ReadE(ply, p)
 		end
 	end
 	return nil
+end
+
+-- The finishing step, run by the engine at the very end of each bone setup
+-- (after its own IK, helper bones and jiggle bones). The turns above only
+-- nudge the body, and Gmod changes things after them (it pulls the hands to
+-- where a weapon would be held, works out wrist and elbow helpers from the
+-- arms it had), so on their own they never quite gave the copy's pose. Here
+-- the skeleton is set to exactly the copy's finished pose (frame.final), and
+-- every other bone (hair, tails, capes, helpers) is carried along with its
+-- parent, keeping whatever the engine made of it: jiggle bones keep
+-- swinging, since the turns above already moved the body nearly there.
+local function PlaceAll(ply, count)
+	local p = posed[ply]
+	if not (p and p.base) then return end
+	local n = math.min(count, p.base.count)
+	local old = {}
+	for i = 0, n - 1 do old[i] = ply:GetBoneMatrix(i) end
+	-- What the engine made of the body is read right here, from this very
+	-- setup: where it really put the player, and how it holds its frame.
+	-- (An extra setup of our own each frame to read it, as before, ran the
+	-- jiggle bones once more at a slightly stale spot and made tails twitch.)
+	local E = ReadE(p, old)
+	if E and p.guess then p.fix = p.guess:GetInverseTR() * E end
+	if p.needed then Measure(ply, p, old) end
+	local final, parents = p.final, p.base.parents
+	if not final then return end
+	local new = {}
+	for i = 0, n - 1 do
+		local was = old[i]
+		if was then
+			local m = final[i]
+			if not m then
+				local par = parents[i]
+				if par and par >= 0 and new[par] and old[par] then
+					m = new[par] * old[par]:GetInverse() * was
+				end
+			end
+			if m then
+				new[i] = m
+				ply:SetBoneMatrix(i, m)
+			end
+		end
+	end
 end
 
 local function MarkNeeded(p)
@@ -614,19 +624,6 @@ function Body.Apply(ply, frame, base)
 	-- Pose parameters (aiming, mostly) bend the frozen frame: keep them flat.
 	ply:ClearPoseParameters()
 	local guess = EngineE(ply)
-	if p.needed and p.applied then
-		-- Set the body up as it stands right now, last frame's turns on it,
-		-- and read off it where the engine really has it and how it really
-		-- holds its frame.
-		-- (Without the finishing step, so it's the engine's own result.)
-		p.measuring = true
-		ply:InvalidateBoneCache()
-		ply:SetupBones()
-		local E = ReadE(ply, p)
-		if E then p.fix = guess:GetInverseTR() * E end
-		Measure(ply, p)
-		p.measuring = false
-	end
 	p.frame = frame
 	p.final = frame.final
 	MarkNeeded(p)
