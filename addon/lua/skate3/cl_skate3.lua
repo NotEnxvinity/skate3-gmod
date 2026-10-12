@@ -1,6 +1,7 @@
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
+local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_menu.lua")
 local Props = include("skate3/cl_props.lua")
 local Pose = include("skate3/sh_pose.lua")
@@ -10,7 +11,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.0.1")
+print("[skate3] lua build: v2.0.2-test-1")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
@@ -127,6 +128,7 @@ end
 
 local function SetActive(on)
 	active = on
+	Keyboard.active = on
 	net.Start("skate3_state")
 	net.WriteBool(on)
 	net.SendToServer()
@@ -164,7 +166,11 @@ local function Start()
 		return
 	end
 	if not st.pad then
-		Say("No controller found. Skate 3 needs one to push and flick.")
+		if Keyboard.Enabled() then
+			Say("No controller found, so it's keyboard and mouse (early days!): WASD, Space pushes, E gets on and off, flick the mouse for tricks. A controller is still the best way to skate.")
+		else
+			Say("No controller found. Skate 3 needs one to push and flick.")
+		end
 	end
 	local ply = LocalPlayer()
 	if not ply:Alive() or ply:InVehicle() then return end
@@ -272,7 +278,7 @@ local lastButtons = 0
 local holdingSince
 local function SessionMarker(now)
 	local input = skate3.GetInput and skate3.GetInput()
-	local buttons = input and input.buttons or 0
+	local buttons = bit.bor(input and input.buttons or 0, Keyboard.buttons)
 	local pressed = bit.band(buttons, bit.bnot(lastButtons))
 	lastButtons = buttons
 	if bit.band(pressed, PAD_DPAD_DOWN) ~= 0 and pose and pose.camera then
@@ -368,7 +374,8 @@ hook.Add("Think", "skate3_step", function()
 		end
 	end
 	local skip = Skater.Skip
-	if not skip.step then skate3.Step(FrameTime(), ScrW() / ScrH(), press) end
+	local keys, analog = Keyboard.Read(FrameTime())
+	if not skip.step then skate3.Step(FrameTime(), ScrW() / ScrH(), bit.bor(press, keys), analog) end
 	if SessionMarker(now) then return end
 	if not skip.pose or not pose then pose = skate3.GetPose() or pose end
 	Skater.UpdateModel(pose)
@@ -500,7 +507,7 @@ hook.Add("HUDPaint", "skate3_hud", function()
 		line = "skate3: building collision (" .. (status.stage or "starting") .. ")..."
 	elseif active and pose then
 		local onFoot = pose.state and pose.state:find("^Biped")
-		line = ("skate3: %s  %.0f km/h  %s   (Y: %s)"):format(pose.state, pose.speed * 3.6, status.pad or "no controller",
+		line = ("skate3: %s  %.0f km/h  %s   (Y: %s)"):format(pose.state, pose.speed * 3.6, status.pad or (Keyboard.Enabled() and "keyboard" or "no controller"),
 			onFoot and "get on the board" or "step off")
 	end
 	if line then

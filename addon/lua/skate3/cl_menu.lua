@@ -14,6 +14,7 @@ end
 
 local Boards = include("skate3/cl_boards.lua")
 local Conflicts = include("skate3/cl_conflicts.lua")
+local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
@@ -21,6 +22,23 @@ local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_ba
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
+end
+for _, name in ipairs(Keyboard.CONVARS) do DEFAULTS[#DEFAULTS + 1] = name end
+
+-- Keyboard and mouse, still early: the switch, the mouse feel and every key.
+local function KeyboardChoices(panel)
+	panel:Help("Keyboard and mouse (early)")
+	panel:CheckBox("Skate with keyboard and mouse", "skate3_keyboard")
+	panel:ControlHelp("Still early: a controller is the best way to play. The keys below only do this while you're skating; the rest of the time they do what they normally do.")
+	panel:NumSlider("Mouse flick strength", "skate3_kb_mouse", 0.2, 3, 2)
+	panel:NumSlider("Trick stick return (seconds)", "skate3_kb_mouse_return", 0.05, 0.5, 2)
+	panel:ControlHelp("The mouse is the right stick: pull it back to crouch, flick it forward to ollie.")
+	for _, b in ipairs(Keyboard.BINDS) do
+		local binder = vgui.Create("DBinder")
+		binder:SetConVar(b.convar)
+		binder:SetValue(b.cv:GetInt())
+		panel:AddItem(Label(b.name), binder)
+	end
 end
 
 -- The board's looks from the player's disc, and a colour for each part.
@@ -50,7 +68,7 @@ end
 hook.Add("PopulateToolMenu", "skate3_menu", function()
 	spawnmenu.AddToolMenuOption("Utilities", "Skate 3", "skate3_settings", "Settings", "", "", function(panel)
 		panel:ClearControls()
-		panel:Help("Equip the Skateboard weapon to skate. Y gets on and off the board, A pushes.")
+		panel:Help("Equip the Skateboard weapon to skate. Y gets on and off the board, A pushes. (Keyboard: E and Space.)")
 		for _, c in ipairs(Conflicts.Found()) do
 			local warn = panel:Help("Warning: \"" .. c.title .. "\" " .. c.why .. ". Disable it in the Addons menu.")
 			warn:SetTextColor(Color(220, 120, 0))
@@ -94,6 +112,7 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:CheckBox("Show the status line", "skate3_hud")
 
 		BoardChoices(panel)
+		KeyboardChoices(panel)
 
 		local reset = panel:Button("Reset these to defaults")
 		reset.DoClick = function()

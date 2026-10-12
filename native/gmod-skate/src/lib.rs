@@ -220,6 +220,12 @@ lua_fn!(step, |lua| {
     };
     // Buttons Lua presses on the player's behalf, such as Y to step off.
     controls.buttons |= lua.number(3).unwrap_or(0.) as u16;
+    // Sticks and triggers from the keyboard and mouse, as { lx, ly, rx, ry,
+    // lt, rt } in -1..1 (0..1 for triggers). Each one only wins over the
+    // pad's when it is pushed further, so a controller still works alongside.
+    if let Some(extra) = lua.numbers(4) {
+        controls = input::merge(controls, &extra);
+    }
     with_runtime(|r| {
         r.send(Job::Step {
             dt,

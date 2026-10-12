@@ -98,6 +98,22 @@ pub fn poll() -> Result<Pad, String> {
     })
 }
 
+/// Adds Lua's sticks and triggers ([lx, ly, rx, ry, lt, rt]) to the pad's,
+/// keeping whichever of each is pushed further.
+pub fn merge(mut controls: Controls, extra: &[f32]) -> Controls {
+    let get = |i: usize| extra.get(i).copied().unwrap_or(0.);
+    let further = |pad: i16, v: f32| {
+        let v = axis(v);
+        if v.unsigned_abs() > pad.unsigned_abs() { v } else { pad }
+    };
+    controls.left = [further(controls.left[0], get(0)), further(controls.left[1], get(1))];
+    controls.right = [further(controls.right[0], get(2)), further(controls.right[1], get(3))];
+    for (i, t) in controls.triggers.iter_mut().enumerate() {
+        *t = (*t).max((get(4 + i).clamp(0., 1.) * 255.).round() as u8);
+    }
+    controls
+}
+
 /// -1..1 as XInput's signed 16-bit stick range (up is positive in both).
 fn axis(v: f32) -> i16 {
     (v.clamp(-1., 1.) * f32::from(i16::MAX)).round() as i16
@@ -169,5 +185,19 @@ mod tests {
         assert_eq!(axis(-1.), -i16::MAX);
         assert_eq!(axis(0.), 0);
         assert_eq!(axis(5.), i16::MAX);
+    }
+
+    #[test]
+    fn merge_keeps_the_stronger_input() {
+        let pad = Controls {
+            left: [axis(0.5), 0],
+            triggers: [200, 0],
+            ..Controls::default()
+        };
+        let c = merge(pad, &[0.2, -1., 0., 1., 0.5, 1.]);
+        assert_eq!(c.left, [axis(0.5), -i16::MAX]);
+        assert_eq!(c.right, [0, i16::MAX]);
+        assert_eq!(c.triggers, [200, 255]);
+        assert_eq!(merge(pad, &[]).left, pad.left);
     }
 }
