@@ -28,8 +28,8 @@ for ride in "$DATA"/rides/*.sk3r; do
 	tick=$(sed -n 's/^BROKE at .*tick \([0-9]*\)).*/\1/p' "$OUT/$name.txt")
 	if [ -n "$tick" ]; then
 		echo "  broke again, tracing the ticks before it..."
-		start=$(( tick > 25 ? tick - 25 : 0 ))
-		SKATE3_AUDIT_OFFBOARD_TICKS=$start:$(( tick + 5 )) \
+		start=$(( tick > 12 ? tick - 12 : 0 ))
+		SKATE3_AUDIT_OFFBOARD_TICKS=$start:$(( tick + 12 )) \
 			./skate-headless --assets "$DATA/assets" --replay "$ride" > /dev/null 2> "$OUT/$name-trace.txt"
 	fi
 done

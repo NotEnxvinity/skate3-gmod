@@ -1,0 +1,49 @@
+diff --git a/skate/crates/skate-host/src/physics/frame.rs b/skate/crates/skate-host/src/physics/frame.rs
+index fbf1274..82eea30 100644
+--- a/skate/crates/skate-host/src/physics/frame.rs
++++ b/skate/crates/skate-host/src/physics/frame.rs
+@@ -147,6 +147,7 @@ pub(super) fn advance(
+         )?;
+     }
+     player_state::pre_state(physics, skater)?;
++    super::offboard_audit_trace::stage(tick, "prestate", physics, skater, controls);
+     match skater.player_state.current() {
+         skate_core::player::state::PhysicalStateId::RevertGround => super::revert_state::update(physics,skater)?,
+         skate_core::player::state::PhysicalStateId::HandPlant => super::handplant::update(physics,skater)?,
+@@ -168,9 +169,12 @@ pub(super) fn advance(
+             );
+             //PhysicsGround::PreUpdate82D37C50 clears the previous push suppression
+             //after Reckoning; this frame's propulsion may then set it again.
++            super::offboard_audit_trace::stage(tick, "reckoned", physics, skater, controls);
+             skater.ground.state.push_suppressed_2730 = false;
+             ground_phase::advance(physics, skater)?;
++            super::offboard_audit_trace::stage(tick, "ground", physics, skater, controls);
+             super::handplant::ground_update(physics,skater)?;
++            super::offboard_audit_trace::stage(tick, "handplant", physics, skater, controls);
+             input_phase::update_ground(physics, skater)?;
+         }
+         skate_core::player::state::PhysicalStateId::PhysicsAir => {
+diff --git a/skate/crates/skate-host/src/physics/offboard_audit_trace.rs b/skate/crates/skate-host/src/physics/offboard_audit_trace.rs
+index 67b3fab..f62f2cf 100644
+--- a/skate/crates/skate-host/src/physics/offboard_audit_trace.rs
++++ b/skate/crates/skate-host/src/physics/offboard_audit_trace.rs
+@@ -81,6 +81,19 @@ pub(super) fn stage(
+         s.offboard_contact.readiness(),
+         s.biped_ground.contact
+     );
++    {
++        let r = &s.animated_skeleton.roots;
++        eprintln!(
++            "OFFBOARD_AUDIT_RECKON tick={tick} phase={phase} reckoning={:?} reckoning_frames={:?} heading_alignment={:?} animation_to_board={:?} predicted={:?} animation_board={:?} deck={:?}",
++            physics.riding.reckoning,
++            physics.riding.reckoning_frames,
++            r.heading_alignment,
++            r.animation_to_board,
++            r.predicted_board_position,
++            s.animated_skeleton.animation_board,
++            physics.board.part_transforms()[skate_core::physics::board::BodyId::Deck.index()],
++        );
++    }
+     if phase == "state" || phase == "solve" {
+         eprintln!(
+             "OFFBOARD_AUDIT_POSE tick={tick} phase={phase} mapped={:?} targets={:?} physical={:?}",
