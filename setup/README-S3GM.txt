@@ -1,5 +1,5 @@
-S3GM v2.0.2 early test build: Skate 3 in Garry's Mod
-====================================================
+S3GM v2.2.0: Skate 3 in Garry's Mod
+===================================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
 grinds, manuals and bails, on any map, with any playermodel.
