@@ -548,8 +548,14 @@ end
 -- from the skater's (Master Chief) got a stretched neck.
 local cv_neck = CreateClientConVar("skate3_neck_keep", "1", true, false,
 	"Neck and head keep the playermodel's own neck length (0 = placed at the skater's, the older way)")
-local neckChain = {} -- { { bone, its offset from its parent at rest }, ... } neck first
+-- The same goes for the spine and collarbones: placed at the skater's, a
+-- model with a longer torso than the skater's (Gordon's HEV suit) got its
+-- chest squashed up under its chin and its shoulders shrugged.
+local cv_torso = CreateClientConVar("skate3_torso_keep", "1", true, false,
+	"Spine and collarbones keep the playermodel's own lengths (0 = placed at the skater's, the older way)")
+local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
+local TORSO = { "Spine", "Spine1", "Spine2", "Spine3", "Spine4", "L_Clavicle", "R_Clavicle" }
 
 local function FindNeck(ent)
 	neckChain, kids = {}, {}
@@ -557,13 +563,15 @@ local function FindNeck(ent)
 		local p = ent:GetBoneParent(i)
 		if p and p >= 0 then kids[p] = kids[p] or {} table.insert(kids[p], i) end
 	end
-	for _, name in ipairs({ "Neck1", "Head1" }) do
+	local function add(name, cv)
 		local i = ent:LookupBone("ValveBiped.Bip01_" .. name)
 		local p = i and ent:GetBoneParent(i)
 		if i and p and p >= 0 and rest[i] and rest[p] then
-			neckChain[#neckChain + 1] = { i, (rest[p]:GetInverseTR() * rest[i]):GetTranslation() }
+			neckChain[#neckChain + 1] = { i, (rest[p]:GetInverseTR() * rest[i]):GetTranslation(), cv }
 		end
 	end
+	for _, name in ipairs(TORSO) do add(name, cv_torso) end
+	for _, name in ipairs({ "Neck1", "Head1" }) do add(name, cv_neck) end
 end
 
 local function Shift(world, i, by)
@@ -577,11 +585,10 @@ local function Shift(world, i, by)
 end
 
 local function KeepNeck(ent, world)
-	if not cv_neck:GetBool() then return end
 	for _, link in ipairs(neckChain) do
 		local i = link[1]
 		local p = ent:GetBoneParent(i)
-		if world[i] and world[p] then
+		if link[3]:GetBool() and world[i] and world[p] then
 			local want = world[p] * link[2]
 			Shift(world, i, want - world[i]:GetTranslation())
 		end
