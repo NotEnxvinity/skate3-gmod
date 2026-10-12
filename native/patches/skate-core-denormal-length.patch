@@ -1,0 +1,17 @@
+diff --git a/skate/crates/skate-core/src/physics/board_motion_output.rs b/skate/crates/skate-core/src/physics/board_motion_output.rs
+index 1d05494..216cbb3 100644
+--- a/skate/crates/skate-core/src/physics/board_motion_output.rs
++++ b/skate/crates/skate-core/src/physics/board_motion_output.rs
+@@ -64,6 +64,12 @@ pub(crate) fn subtract(a: Vector3, b: Vector3) -> Vector3 {
+     Vector3::new(a.x - b.x, a.y - b.y, a.z - b.z)
+ }
+ pub(crate) fn inverse_length_squared(squared: f32, refinements: usize) -> f32 {
++    // The 360's vector unit flushes denormals to zero, so a vector this short
++    // has length zero there and callers' zero checks catch it. Here the
++    // refinement squares an estimate past f32's range and returns NaN.
++    if squared > 0.0 && squared < f32::MIN_POSITIVE {
++        return 0.0;
++    }
+     let mut inverse = native_arithmetic::reciprocal_square_root_estimate(squared);
+     for _ in 0..refinements {
+         let correction = (-squared).mul_add(inverse * inverse, 1.0);
