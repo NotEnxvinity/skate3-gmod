@@ -568,8 +568,10 @@ local LIMBS = {
 -- lengths and the hips at the skater's height they squatted. The hips are
 -- lifted away from the ankles by how much longer the model's legs are, so
 -- knees bend as much as the skater's do.
-local cv_height = CreateClientConVar("skate3_body_height", "1", true, false,
-	"Hips sit as high as the playermodel's legs are long (0 = at the skater's height, the older way; needs skate3_limbs_keep)")
+-- All the way up straightened the arms (they couldn't reach the board any
+-- more), so by default the hips go part of the way.
+local cv_height = CreateClientConVar("skate3_body_height", "0.6", true, false,
+	"How far the hips lift towards the playermodel's own leg length: 0 = the skater's height (squats), 1 = all the way (straight arms)")
 local legScale -- the model's hip-to-ankle height over the skater's
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
@@ -622,11 +624,12 @@ local function KeepNeck(ent, world)
 	-- Here every foot is still at the skater's ankle.
 	local hip = ent:LookupBone("ValveBiped.Bip01_Pelvis")
 	local lf, rf = ent:LookupBone("ValveBiped.Bip01_L_Foot"), ent:LookupBone("ValveBiped.Bip01_R_Foot")
-	if legScale and cv_height:GetBool() and cv_limbs:GetBool() and hip and world[hip]
+	local lift = math.Clamp(cv_height:GetFloat(), 0, 1)
+	if legScale and lift > 0 and cv_limbs:GetBool() and hip and world[hip]
 		and lf and rf and world[lf] and world[rf] then
 		local ankles = (world[lf]:GetTranslation() + world[rf]:GetTranslation()) / 2
 		local at = world[hip]:GetTranslation()
-		Shift(world, hip, (at - ankles) * (legScale - 1))
+		Shift(world, hip, (at - ankles) * ((legScale - 1) * lift))
 	end
 	for _, link in ipairs(neckChain) do
 		local i = link[1]
