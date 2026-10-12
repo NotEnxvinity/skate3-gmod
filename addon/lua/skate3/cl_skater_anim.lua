@@ -26,6 +26,8 @@ local cv_curl = CreateClientConVar("skate3_finger_curl", "1", true, false,
 	"How far fingers curl, 1 = normal; a negative number bends them the other way, for a model whose fingers curl backwards")
 local cv_ik = CreateClientConVar("skate3_foot_ik", "1", true, false,
 	"Lift or lower the legs so the playermodel's soles sit where the skater's do (0 = off)")
+local cv_hands_ik = CreateClientConVar("skate3_hand_ik", "1", true, false,
+	"Reach the playermodel's hands to where the skater's are, so they hold the board (0 = off)")
 local cv_soles = CreateClientConVar("skate3_foot_clear", "1", true, false,
 	"Tip feet up so toes don't sink through the board (0 = off)")
 local cv_face = CreateClientConVar("skate3_face", "1", true, false,
@@ -285,6 +287,10 @@ function Anim.Setup(ent, rest, skater, stand)
 		info.hands[side] = hand or false
 		info.handWhy = info.handWhy or why
 		info.legs[side] = FindLeg(ent, rest, side, bind, side == "L" and "LEFT" or "RIGHT", floor) or false
+		local upper, fore, wrist = Bone(ent, side .. "_UpperArm"), Bone(ent, side .. "_Forearm"), Bone(ent, side .. "_Hand")
+		info.arms = info.arms or {}
+		info.arms[side] = upper and fore and wrist and rest[upper] and rest[fore] and rest[wrist]
+			and { thigh = upper, calf = fore, foot = wrist, skateHand = (side == "L" and "LEFT" or "RIGHT") .. "HAND" } or false
 	end
 	info.skateFloor = floor
 	-- How high each bone of the foot sits off the floor when the model
@@ -422,10 +428,24 @@ local function Feet(info, world, pose)
 	end
 end
 
--- Degrees per finger joint, base to tip: relaxed, and gripping the board.
+-- Hands onto the skater's hands: the arms keep the model's own lengths, so
+-- the elbow bends to land the wrist where the skater's is (holding the board
+-- in a grab or carrying it), and the hand keeps its turn.
+local function Arms(info, world, pose)
+	if not cv_hands_ik:GetBool() then return end
+	for _, arm in pairs(info.arms or {}) do
+		local skate = arm and pose.bones[arm.skateHand]
+		if skate and world[arm.foot] then
+			Reach(world, arm, Mat(skate):GetTranslation(), info.below)
+		end
+	end
+end
+
+-- Degrees per finger joint, base to tip: relaxed, gripping the board, and
+-- carrying it (fingers nearly straight along the deck, thumb curled over).
 local CURL = {
-	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 } },
-	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 } },
+	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 }, carry = { 12, 12, 8 } },
+	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 }, carry = { 30, 45, 35 } },
 }
 local GRIP_DISTANCE = 9 -- a hand this close to the deck holds it
 
@@ -453,15 +473,19 @@ local function Hands(info, world, pose)
 		local hm = hand and world[hand.hand]
 		if hm then
 			local p = hm:GetTranslation()
-			local holding = not onFoot and deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE
+			local near = deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE
+			local holding = not onFoot and near
 			-- 0 open (flailing in a bail), 1 relaxed, 2 gripping.
 			hand.wanted = holding and 2 or bailing and 0.3 or 1
+			-- Carrying the board on foot: a flat hand with the thumb over.
+			local carrying = onFoot and near and 1 or 0
 			-- Ease towards it, once a frame (this runs for every view and
 			-- shadow drawn): a grip closes fast, letting go is slower.
 			if hand.frame ~= FrameNumber() then
 				hand.frame = FrameNumber()
 				local rate = hand.wanted > (hand.now or 1) and 18 or 8
 				hand.now = Lerp(1 - math.exp(-rate * dt), hand.now or 1, hand.wanted)
+				hand.carry = Lerp(1 - math.exp(-12 * dt), hand.carry or 0, carrying)
 			end
 			if scale ~= 0 then
 				local turn = Turn(hm)
@@ -473,6 +497,7 @@ local function Hands(info, world, pose)
 							local relaxed, grip = set.relaxed[j] or 0, set.grip[j] or 0
 							local deg = hand.now <= 1 and relaxed * hand.now
 								or Lerp(hand.now - 1, relaxed, grip)
+							deg = Lerp(hand.carry or 0, deg, set.carry[j] or 0)
 							if world[i] and deg ~= 0 then
 								local r = AxisAngle(axis, math.rad(deg * scale))
 								local at = world[i]:GetTranslation()
@@ -492,6 +517,7 @@ function Anim.PostPose(ent, world, pose)
 	local info = per[ent]
 	if not info or not pose or not pose.bones then return end
 	Feet(info, world, pose)
+	Arms(info, world, pose)
 	Hands(info, world, pose)
 end
 

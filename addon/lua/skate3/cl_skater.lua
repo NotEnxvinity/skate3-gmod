@@ -553,6 +553,17 @@ local cv_neck = CreateClientConVar("skate3_neck_keep", "1", true, false,
 -- chest squashed up under its chin and its shoulders shrugged.
 local cv_torso = CreateClientConVar("skate3_torso_keep", "1", true, false,
 	"Spine and collarbones keep the playermodel's own lengths (0 = placed at the skater's, the older way)")
+-- And the arms and legs: placed at the skater's joints, a model's own
+-- calves, feet, forearms and hands were stretched or squashed to the
+-- skater's lengths (Maxine's paws pushed up into her ankles, hands into
+-- wrists). They keep their own lengths, and the leg and arm reach in
+-- cl_skater_anim.lua puts the ankles and hands back where the skater's are.
+local cv_limbs = CreateClientConVar("skate3_limbs_keep", "1", true, false,
+	"Arms and legs keep the playermodel's own lengths (0 = stretched to the skater's, the older way)")
+local LIMBS = {
+	"L_UpperArm", "L_Forearm", "L_Hand", "R_UpperArm", "R_Forearm", "R_Hand",
+	"L_Thigh", "L_Calf", "L_Foot", "L_Toe0", "R_Thigh", "R_Calf", "R_Foot", "R_Toe0",
+}
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
 local TORSO = { "Spine", "Spine1", "Spine2", "Spine3", "Spine4", "L_Clavicle", "R_Clavicle" }
@@ -572,6 +583,7 @@ local function FindNeck(ent)
 	end
 	for _, name in ipairs(TORSO) do add(name, cv_torso) end
 	for _, name in ipairs({ "Neck1", "Head1" }) do add(name, cv_neck) end
+	for _, name in ipairs(LIMBS) do add(name, cv_limbs) end
 end
 
 local function Shift(world, i, by)
