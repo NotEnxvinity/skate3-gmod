@@ -12,7 +12,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.0.2 early test build (test-13)")
+print("[skate3] lua build: v2.0.2 early test build (test-14)")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
@@ -59,6 +59,24 @@ local function ExtraTriangles(bsp)
 	return out
 end
 
+-- The map's brush entities as the game has them now, as the flat
+-- {model, solid, x, y, z, pitch, yaw, roll, ...} list skate3.LoadMap takes:
+-- the .bsp alone can't tell which ones the map switched off at the start or
+-- where a door sits.
+local function LiveBrushes()
+	local out = {}
+	for _, ent in ipairs(ents.GetAll()) do
+		local n = tonumber((ent:GetModel() or ""):match("^%*(%d+)$"))
+		if n then
+			local pos, ang = ent:GetPos(), ent:GetAngles()
+			for _, v in ipairs({ n, ent:IsSolid() and 1 or 0, pos.x, pos.y, pos.z, ang.p, ang.y, ang.r }) do
+				out[#out + 1] = v
+			end
+		end
+	end
+	return out
+end
+
 local function Load()
 	if jit.arch ~= "x64" then
 		Say("Skate 3 mode needs 64-bit Garry's Mod (the x86-64 beta branch).")
@@ -85,7 +103,7 @@ local function Load()
 		Say("Couldn't read this map's .bsp.")
 		return
 	end
-	local started, loadErr = skate3.LoadMap(bsp, ExtraTriangles(bsp))
+	local started, loadErr = skate3.LoadMap(bsp, ExtraTriangles(bsp), LiveBrushes())
 	if not started then
 		Say(loadErr)
 		return

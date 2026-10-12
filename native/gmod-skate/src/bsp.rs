@@ -38,9 +38,25 @@ pub struct Solids {
 }
 
 pub fn parse(data: &[u8]) -> Result<Solids, String> {
+    parse_live(data, &[])
+}
+
+/// A brush entity as the game has it right now: the map's own keys can't
+/// say what switched off at the start (gm_construct turns pieces of its
+/// colour room off) or where something sits after moving.
+#[derive(Clone, Copy)]
+pub struct Live {
+    pub model: usize,
+    pub solid: bool,
+    pub origin: Vec3,
+    /// Pitch, yaw and roll in degrees.
+    pub angles: Vec3,
+}
+
+pub fn parse_live(data: &[u8], live: &[Live]) -> Result<Solids, String> {
     let bsp = Bsp::new(data)?;
     let planes = bsp.planes()?;
-    let owners = bsp.solid_brushes();
+    let owners = bsp.solid_brushes(live);
     Ok(Solids {
         brushes: bsp.brushes(&planes, owners.as_ref())?,
         triangles: bsp.displacements(&planes)?,
@@ -135,7 +151,7 @@ impl<'a> Bsp<'a> {
     /// Where each brush of the world or a solid brush entity sits (None for
     /// the rest), or None when the map's tree can't be read, in which case
     /// every brush counts where it was compiled.
-    fn solid_brushes(&self) -> Option<Vec<Option<Place>>> {
+    fn solid_brushes(&self, live: &[Live]) -> Option<Vec<Option<Place>>> {
         let count = self.lump(LUMP_BRUSHES, 12).ok()?.len() / 12;
         let models = self.lump(LUMP_MODELS, 48).ok()?;
         let nodes = self.lump(LUMP_NODES, 32).ok()?;
@@ -146,7 +162,21 @@ impl<'a> Bsp<'a> {
         let solid_models = self
             .lump(LUMP_ENTITIES, 1)
             .map(solid_brush_models)
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(
+                |(model, place)| match live.iter().find(|l| l.model == model) {
+                    Some(l) if !l.solid => None,
+                    Some(l) => Some((
+                        model,
+                        Place {
+                            origin: l.origin,
+                            angles: l.angles,
+                        },
+                    )),
+                    None => Some((model, place)),
+                },
+            );
         let mut keep = vec![None; count];
         let mut seen = vec![false; nodes.len() / 32];
         for (model, place) in std::iter::once((0, Place::default())).chain(solid_models) {
@@ -612,6 +642,37 @@ pub(crate) mod tests {
         assert!(!inside(&brushes[1], Vec3::new(1000., -500., 20.)));
         let up = brushes[1].iter().find(|q| q[1] > 0.99).unwrap();
         assert!((up[3] - (-500. + 64.)).abs() < 0.01);
+    }
+
+    #[test]
+    fn the_game_says_what_is_switched_off_or_moved() {
+        let world = "{\n\"classname\" \"worldspawn\"\n}\n";
+        let data = world_and_entity(&format!(
+            "{world}{{\n\"classname\" \"func_brush\" \"origin\" \"1000 0 0\" \"model\" \"*1\"\n}}\n"
+        ));
+        let at = |origin: Vec3, solid: bool| Live {
+            model: 1,
+            solid,
+            origin,
+            angles: Vec3::ZERO,
+        };
+        let off = parse_live(&data, &[at(Vec3::ZERO, false)]).unwrap().brushes;
+        assert_eq!(off.len(), 1);
+        let moved = parse_live(&data, &[at(Vec3::new(0., 3000., 0.), true)])
+            .unwrap()
+            .brushes;
+        assert_eq!(moved.len(), 2);
+        assert!(
+            moved[1]
+                .iter()
+                .any(|q| q[1] > 0.99 && (q[3] - 3064.).abs() < 0.01)
+        );
+        // Some other model's entry changes nothing.
+        let other = Live {
+            model: 5,
+            ..at(Vec3::ZERO, false)
+        };
+        assert_eq!(parse_live(&data, &[other]).unwrap().brushes.len(), 2);
     }
 
     #[test]

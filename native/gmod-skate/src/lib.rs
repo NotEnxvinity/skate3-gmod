@@ -110,6 +110,20 @@ lua_fn!(load_map, |lua| {
             ]
         })
         .collect();
+    // Optional flat {model, solid (0/1), x, y, z, pitch, yaw, roll, ...}:
+    // the map's brush entities as the game has them now.
+    let live = lua
+        .numbers(3)
+        .unwrap_or_default()
+        .chunks_exact(8)
+        .filter(|e| e[0] >= 1.)
+        .map(|e| crate::bsp::Live {
+            model: e[0] as usize,
+            solid: e[1] != 0.,
+            origin: Vec3::new(e[2], e[3], e[4]),
+            angles: Vec3::new(e[5], e[6], e[7]),
+        })
+        .collect();
     let Some(assets) = ASSETS.lock().ok().and_then(|a| a.clone()) else {
         return lua.fail("call skate3.Init first");
     };
@@ -117,6 +131,7 @@ lua_fn!(load_map, |lua| {
         assets,
         bsp: bsp.to_vec(),
         extra,
+        live,
     };
     match with_runtime(|r| r.send(job)) {
         Some(()) => {

@@ -85,6 +85,13 @@ local function Report()
 		end
 	end
 
+	-- What the game has switched off right now.
+	local off = {}
+	for _, ent in ipairs(ents.GetAll()) do
+		local n = tonumber((ent:GetModel() or ""):match("^%*(%d+)$"))
+		if n and not ent:IsSolid() then off[n] = true end
+	end
+
 	-- Which model owns each brush, from each model's tree.
 	local mo = Lump(bsp, 14)
 	local no = Lump(bsp, 5)
@@ -174,7 +181,8 @@ local function Report()
 		Say(("  %.0f units: brush %d, %s, texture %s, %s%s"):format(h.t, h.brush, ContentNames(h.contents),
 			h.face and Texture(I16(bsp, h.face + 2)) or "(inside it)", who,
 			bit.band(h.contents, SKATE_SOLID) == 0 and " (skate ignores: not solid)"
-				or m and m > 0 and not (owners[m] or ""):find("^func_") and " (skate ignores: not a func_ entity)" or ""))
+				or m and m > 0 and not (owners[m] or ""):find("^func_") and " (skate ignores: not a func_ entity)"
+				or m and off[m] and " (switched off in game, skate ignores it)" or ""))
 	end
 	file.CreateDir("skate3")
 	file.Write("skate3/collision_report.txt", table.concat(lines, "\n"))

@@ -17,6 +17,7 @@ pub enum Job {
         assets: PathBuf,
         bsp: Vec<u8>,
         extra: Vec<[Vec3; 3]>,
+        live: Vec<crate::bsp::Live>,
     },
     Activate {
         pos: Vec3,
@@ -172,13 +173,18 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
         let result: Result<(), String> =
             std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 match job {
-                    Job::Load { assets, bsp, extra } => {
+                    Job::Load {
+                        assets,
+                        bsp,
+                        extra,
+                        live,
+                    } => {
                         set(&|s| {
                             s.status = Status::Loading("reading the map");
                             s.active = false;
                             s.pose = None;
                         });
-                        let solids = crate::bsp::parse(&bsp)?;
+                        let solids = crate::bsp::parse_live(&bsp, &live)?;
                         drop(bsp);
                         let mut triangles = solids.triangles;
                         triangles.extend(extra);
