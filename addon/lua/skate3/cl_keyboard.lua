@@ -53,8 +53,9 @@ end
 local function Listening()
 	if not Keyboard.active or not cv_on:GetBool() then return false end
 	if vgui.CursorVisible() or gui.IsGameUIVisible() or gui.IsConsoleVisible() then return false end
+	-- Dead (clicking or Space respawns) or not spawned in yet: hands off.
 	local ply = LocalPlayer()
-	return not (IsValid(ply) and ply:IsTyping())
+	return IsValid(ply) and ply:Alive() and not ply:IsTyping()
 end
 
 local function Down(b)
