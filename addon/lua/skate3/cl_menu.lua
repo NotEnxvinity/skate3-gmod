@@ -25,6 +25,35 @@ for _, p in ipairs(Boards.PARTS) do
 end
 for _, name in ipairs(Keyboard.CONVARS) do DEFAULTS[#DEFAULTS + 1] = name end
 
+-- The settings also live in data/skate3/settings.json, written on every
+-- change. Garry's Mod only saves its own copy when the game closes normally,
+-- so closing it from Steam (or a crash) used to lose a custom board.
+local SAVED = "skate3/settings.json"
+local loading = false
+local function Save()
+	if loading then return end
+	local out = {}
+	for _, name in ipairs(DEFAULTS) do
+		local cv = GetConVar(name)
+		if cv then out[name] = cv:GetString() end
+	end
+	file.CreateDir("skate3")
+	file.Write(SAVED, util.TableToJSON(out, true))
+end
+-- Once every file has made its convars (stance and camera come later).
+hook.Add("Initialize", "skate3_saved", function()
+	local saved = util.JSONToTable(file.Read(SAVED, "DATA") or "") or {}
+	loading = true
+	for _, name in ipairs(DEFAULTS) do
+		local cv, value = GetConVar(name), saved[name]
+		if cv and isstring(value) and cv:GetString() ~= value then cv:SetString(value) end
+	end
+	loading = false
+	for _, name in ipairs(DEFAULTS) do
+		cvars.AddChangeCallback(name, Save, "skate3_saved")
+	end
+end)
+
 -- Keyboard and mouse, still early: the switch, the mouse feel and every key.
 local function KeyboardChoices(panel)
 	panel:Help("Keyboard and mouse (early)")

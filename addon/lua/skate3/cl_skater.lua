@@ -70,8 +70,13 @@ local function ApplyLook(mat, slot, tint)
 	mat:SetVector("$color2", Vector(tint[1] * color.x, tint[2] * color.y, tint[3] * color.z))
 end
 
+-- A fresh material name each time the board is built: Garry's Mod keeps
+-- materials made with CreateMaterial across map changes, and reusing one from
+-- the last map can leave it without the picked look.
+local builds = 0
+
 local function BoardMaterial(slot, tint)
-	local mat = CreateMaterial("skate3_board_" .. slot, "VertexLitGeneric", {
+	local mat = CreateMaterial("skate3_board_" .. slot .. "_" .. builds, "VertexLitGeneric", {
 		["$basetexture"] = "color/white",
 		["$model"] = 1,
 		["$nocull"] = 1,
@@ -116,6 +121,7 @@ local function BuildMeshes(v)
 end
 
 local function BuildBoard()
+	builds = builds + 1
 	parts = {}
 	for _, p in ipairs(data.parts) do
 		parts[#parts + 1] = {
