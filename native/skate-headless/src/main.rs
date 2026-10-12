@@ -246,6 +246,9 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
     let mut driver = Driver::default();
     let mut state = String::new();
     let mut frame = 0usize;
+    // Simulation ticks run so far, to aim SKATE3_AUDIT_OFFBOARD_TICKS at the
+    // tick that breaks.
+    let mut ticks = 0u64;
     for (i, event) in rec.events.iter().enumerate() {
         let result = match *event {
             Event::Activate {
@@ -264,7 +267,7 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
             } => {
                 frame += 1;
                 driver
-                    .step(&mut session, dt, controls, aspect, |_| {})
+                    .step(&mut session, dt, controls, aspect, |_| ticks += 1)
                     .and_then(|_| {
                         let pose = session.pose();
                         if !pose.root.is_finite() {
@@ -288,7 +291,7 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
             }
         };
         if let Err(e) = result {
-            println!("BROKE at event {i} (frame {frame}): {e}");
+            println!("BROKE at event {i} (frame {frame}, tick {ticks}): {e}");
             return Ok(());
         }
     }
