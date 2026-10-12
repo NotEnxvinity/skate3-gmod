@@ -13,6 +13,7 @@ local function Choices(panel, label, convar, choices)
 end
 
 local Boards = include("skate3/cl_boards.lua")
+local Conflicts = include("skate3/cl_conflicts.lua")
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
@@ -50,6 +51,10 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 	spawnmenu.AddToolMenuOption("Utilities", "Skate 3", "skate3_settings", "Settings", "", "", function(panel)
 		panel:ClearControls()
 		panel:Help("Equip the Skateboard weapon to skate. Y gets on and off the board, A pushes.")
+		for _, c in ipairs(Conflicts.Found()) do
+			local warn = panel:Help("Warning: \"" .. c.title .. "\" " .. c.why .. ". Disable it in the Addons menu.")
+			warn:SetTextColor(Color(220, 120, 0))
+		end
 
 		Choices(panel, "Stance", "skate3_stance", {
 			{ "Regular", "regular" },
