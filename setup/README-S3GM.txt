@@ -1,5 +1,5 @@
-S3GM v2.0.1: Skate 3 in Garry's Mod
-====================================
+S3GM v2.0.2 early test build: Skate 3 in Garry's Mod
+====================================================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
 grinds, manuals and bails, on any map, with any playermodel.
@@ -14,8 +14,11 @@ What you need
 - Your own Skate 3 for Xbox 360, as a disc image (.iso) or an extracted
   folder with default.xex in it.
 - 64-bit Garry's Mod: Steam > Garry's Mod > Properties > Betas > x86-64.
-- A controller. On Steam Deck / SteamOS, Garry's Mod's controller layout
-  must be a "Gamepad" template, not keyboard and mouse.
+- A controller (recommended). On Steam Deck / SteamOS, Garry's Mod's
+  controller layout must be a "Gamepad" template, not keyboard and mouse.
+  Keyboard and mouse also works now, but it's early: WASD, Space pushes,
+  E gets on and off, flick the mouse for tricks, click to grab. Keys are in
+  Utilities > Skate 3 > Settings.
 - Linux / SteamOS: git and python3 (SteamOS has both).
 - Windows: Python 3.10 to 3.13 from python.org (tick "Add python.exe to PATH").
 - macOS (new): git and Python 3.10 to 3.13 (python.org or Homebrew; the
