@@ -2,6 +2,7 @@
 //! Source collision in, Skate collision and grind rails out.
 
 pub mod collision;
+pub mod float_mode;
 pub mod rails;
 pub mod repro;
 pub mod world;

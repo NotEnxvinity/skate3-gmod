@@ -144,6 +144,8 @@ struct MapWorld {
 }
 
 fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
+    // The engine's maths expects the 360's denormal handling.
+    skate_bridge::float_mode::console();
     let set = |f: &dyn Fn(&mut Shared)| {
         f(&mut shared.lock().unwrap_or_else(|e| e.into_inner()));
     };
