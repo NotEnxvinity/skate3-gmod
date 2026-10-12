@@ -149,7 +149,9 @@ function Skater.DrawBoard(pose)
 		local m = pose.bones[part.bone]
 		if m then
 			render.SetMaterial(part.material)
-			cam.PushModelMatrix(Mat(m))
+			local mm = Mat(m)
+			if pose.boardShift then mm:SetTranslation(mm:GetTranslation() + pose.boardShift) end
+			cam.PushModelMatrix(mm)
 			for _, piece in ipairs(part.meshes) do piece:Draw() end
 			cam.PopModelMatrix()
 			drawn = drawn + 1
@@ -570,7 +572,7 @@ local LIMBS = {
 -- knees bend as much as the skater's do.
 -- All the way up straightened the arms (they couldn't reach the board any
 -- more), so by default the hips go part of the way.
-local cv_height = CreateClientConVar("skate3_body_height", "0.6", true, false,
+local cv_height = CreateClientConVar("skate3_body_height", "0.9", true, false,
 	"How far the hips lift towards the playermodel's own leg length: 0 = the skater's height (squats), 1 = all the way (straight arms)")
 local legScale -- the model's hip-to-ankle height over the skater's
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
@@ -919,7 +921,7 @@ local function RealFrame(p)
 		if m and not board[part.bone] then
 			board[part.bone] = true
 			local mm = Mat(m)
-			board[#board + 1] = { name = part.bone, pos = mm:GetTranslation() - origin, q = Body.Quat(mm) }
+			board[#board + 1] = { name = part.bone, pos = mm:GetTranslation() + (p.boardShift or vector_origin) - origin, q = Body.Quat(mm) }
 		end
 	end
 	lastFrame = {
@@ -949,7 +951,7 @@ function Skater.UpdateModel(p)
 		local frame, forward, up = RealFrame(p)
 		Body.Apply(owner, frame, frozen)
 		if not Skater.Skip.board then
-			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up }, Skater.DrawBoard)
+			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up, boardShift = p.boardShift }, Skater.DrawBoard)
 		end
 	end
 end

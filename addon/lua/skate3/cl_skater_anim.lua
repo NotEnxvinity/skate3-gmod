@@ -431,23 +431,8 @@ end
 -- Hands onto the skater's hands: the arms keep the model's own lengths, so
 -- the elbow bends to land the wrist where the skater's is (holding the board
 -- in a grab or carrying it), and the hand keeps its turn.
-local function Arms(info, world, pose)
-	if not cv_hands_ik:GetBool() then return end
-	for _, arm in pairs(info.arms or {}) do
-		local skate = arm and pose.bones[arm.skateHand]
-		if skate and world[arm.foot] then
-			Reach(world, arm, Mat(skate):GetTranslation(), info.below)
-		end
-	end
-end
-
--- Degrees per finger joint, base to tip: relaxed, gripping the board, and
--- carrying it (fingers nearly straight along the deck, thumb curled over).
-local CURL = {
-	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 }, carry = { 12, 12, 8 } },
-	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 }, carry = { 30, 45, 35 } },
-}
 local GRIP_DISTANCE = 9 -- a hand this close to the deck holds it
+local CARRY_GAP = 16 -- the most the carried board moves to meet the hand
 
 local function Closest(p, a, b)
 	local ab = b - a
@@ -455,6 +440,49 @@ local function Closest(p, a, b)
 	return a + ab * t
 end
 
+-- Short arms (Maxine's) can't reach all the way down to the skater's hand,
+-- which left the carried board hanging below it: on foot, the board moves by
+-- whatever gap is left so it stays in the hand. pose.boardShift carries it to
+-- the board drawing.
+local function Arms(info, world, pose)
+	local want = vector_origin
+	if cv_hands_ik:GetBool() then
+		local onFoot = pose.state and pose.state:find("^Biped") ~= nil
+		local deck = onFoot and info.deck and pose.bones[info.deck.bone]
+		local deckA, deckB
+		if deck then
+			local m = Mat(deck)
+			deckA, deckB = m * info.deck.a, m * info.deck.b
+		end
+		local best
+		for _, arm in pairs(info.arms or {}) do
+			local skate = arm and pose.bones[arm.skateHand]
+			if skate and world[arm.foot] then
+				local target = Mat(skate):GetTranslation()
+				Reach(world, arm, target, info.below)
+				local near = deckA and target:Distance(Closest(target, deckA, deckB))
+				if near and near < GRIP_DISTANCE and (not best or near < best) then
+					best = near
+					want = world[arm.foot]:GetTranslation() - target
+					if want:Length() > CARRY_GAP then want = want:GetNormalized() * CARRY_GAP end
+				end
+			end
+		end
+	end
+	if info.shiftFrame ~= FrameNumber() then
+		info.shiftFrame = FrameNumber()
+		local k = 1 - math.exp(-12 * math.min(FrameTime(), 0.1))
+		info.boardShift = LerpVector(k, info.boardShift or vector_origin, want)
+	end
+	pose.boardShift = info.boardShift:LengthSqr() > 1e-4 and info.boardShift or nil
+end
+
+-- Degrees per finger joint, base to tip: relaxed, gripping the board, and
+-- carrying it (fingers mostly straight, tips hooked over the deck, thumb curled over).
+local CURL = {
+	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 }, carry = { 20, 30, 22 } },
+	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 }, carry = { 30, 45, 35 } },
+}
 local function Hands(info, world, pose)
 	local scale = cv_fingers:GetBool() and cv_curl:GetFloat() or 0
 	local dt = math.min(FrameTime(), 0.1)
