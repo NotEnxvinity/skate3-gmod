@@ -564,6 +564,13 @@ local LIMBS = {
 	"L_UpperArm", "L_Forearm", "L_Hand", "R_UpperArm", "R_Forearm", "R_Hand",
 	"L_Thigh", "L_Calf", "L_Foot", "L_Toe0", "R_Thigh", "R_Calf", "R_Foot", "R_Toe0",
 }
+-- Playermodels stand taller than the Skate 3 skater, so with their own leg
+-- lengths and the hips at the skater's height they squatted. The hips are
+-- lifted away from the ankles by how much longer the model's legs are, so
+-- knees bend as much as the skater's do.
+local cv_height = CreateClientConVar("skate3_body_height", "1", true, false,
+	"Hips sit as high as the playermodel's legs are long (0 = at the skater's height, the older way; needs skate3_limbs_keep)")
+local legScale -- the model's hip-to-ankle height over the skater's
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
 local TORSO = { "Spine", "Spine1", "Spine2", "Spine3", "Spine4", "L_Clavicle", "R_Clavicle" }
@@ -584,6 +591,21 @@ local function FindNeck(ent)
 	for _, name in ipairs(TORSO) do add(name, cv_torso) end
 	for _, name in ipairs({ "Neck1", "Head1" }) do add(name, cv_neck) end
 	for _, name in ipairs(LIMBS) do add(name, cv_limbs) end
+	legScale = nil
+	local function Z(name)
+		local i = ent:LookupBone("ValveBiped.Bip01_" .. name)
+		return i and rest[i] and rest[i]:GetTranslation().z
+	end
+	local hip, la, ra = Z("Pelvis"), Z("L_Foot"), Z("R_Foot")
+	local sh, sl, sr = bind.HIPS, bind.LEFTFOOT, bind.RIGHTFOOT
+	if hip and la and ra and sh and sl and sr then
+		local own = hip - (la + ra) / 2
+		local skater = sh:GetTranslation().z - (sl:GetTranslation().z + sr:GetTranslation().z) / 2
+		if own > 1 and skater > 1 then
+			legScale = math.Clamp(own / skater, 0.75, 1.5)
+			print(("[skate3] legs %.0f%% of the skater's, hips lifted to match"):format(legScale * 100))
+		end
+	end
 end
 
 local function Shift(world, i, by)
@@ -597,6 +619,15 @@ local function Shift(world, i, by)
 end
 
 local function KeepNeck(ent, world)
+	-- Here every foot is still at the skater's ankle.
+	local hip = ent:LookupBone("ValveBiped.Bip01_Pelvis")
+	local lf, rf = ent:LookupBone("ValveBiped.Bip01_L_Foot"), ent:LookupBone("ValveBiped.Bip01_R_Foot")
+	if legScale and cv_height:GetBool() and cv_limbs:GetBool() and hip and world[hip]
+		and lf and rf and world[lf] and world[rf] then
+		local ankles = (world[lf]:GetTranslation() + world[rf]:GetTranslation()) / 2
+		local at = world[hip]:GetTranslation()
+		Shift(world, hip, (at - ankles) * (legScale - 1))
+	end
 	for _, link in ipairs(neckChain) do
 		local i = link[1]
 		local p = ent:GetBoneParent(i)
