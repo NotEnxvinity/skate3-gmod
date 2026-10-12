@@ -9,7 +9,7 @@
 //! that owns it. Static and physics props are not in this data; Lua hands
 //! those over separately.
 
-use glam::Vec3;
+use glam::{Mat3, Vec3};
 
 const HEADER_LUMPS: usize = 64;
 const LUMP_ENTITIES: usize = 0;
@@ -40,8 +40,9 @@ pub struct Solids {
 pub fn parse(data: &[u8]) -> Result<Solids, String> {
     let bsp = Bsp::new(data)?;
     let planes = bsp.planes()?;
+    let owners = bsp.solid_brushes();
     Ok(Solids {
-        brushes: bsp.brushes(&planes, bsp.solid_brushes().as_ref())?,
+        brushes: bsp.brushes(&planes, owners.as_ref())?,
         triangles: bsp.displacements(&planes)?,
     })
 }
@@ -131,9 +132,10 @@ impl<'a> Bsp<'a> {
             .collect())
     }
 
-    /// Which brushes belong to the world or a solid brush entity, or None
-    /// when the map's tree can't be read, in which case every brush counts.
-    fn solid_brushes(&self) -> Option<Vec<bool>> {
+    /// Where each brush of the world or a solid brush entity sits (None for
+    /// the rest), or None when the map's tree can't be read, in which case
+    /// every brush counts where it was compiled.
+    fn solid_brushes(&self) -> Option<Vec<Option<Place>>> {
         let count = self.lump(LUMP_BRUSHES, 12).ok()?.len() / 12;
         let models = self.lump(LUMP_MODELS, 48).ok()?;
         let nodes = self.lump(LUMP_NODES, 32).ok()?;
@@ -145,9 +147,9 @@ impl<'a> Bsp<'a> {
             .lump(LUMP_ENTITIES, 1)
             .map(solid_brush_models)
             .unwrap_or_default();
-        let mut keep = vec![false; count];
+        let mut keep = vec![None; count];
         let mut seen = vec![false; nodes.len() / 32];
-        for model in std::iter::once(0).chain(solid_models) {
+        for (model, place) in std::iter::once((0, Place::default())).chain(solid_models) {
             let Some(m) = models.get(model * 48..model * 48 + 48) else {
                 continue;
             };
@@ -171,27 +173,31 @@ impl<'a> Bsp<'a> {
                         if let Some(b) = leaf_brushes.get(i * 2..i * 2 + 2)
                             && let Some(k) = keep.get_mut(u16_at(b, 0) as usize)
                         {
-                            *k = true;
+                            *k = Some(place);
                         }
                     }
                 }
             }
         }
         // A world with no brushes at all means the tree didn't read right.
-        keep.contains(&true).then_some(keep)
+        keep.iter().any(Option::is_some).then_some(keep)
     }
 
     fn brushes(
         &self,
         planes: &[Plane],
-        keep: Option<&Vec<bool>>,
+        keep: Option<&Vec<Option<Place>>>,
     ) -> Result<Vec<Vec<[f32; 4]>>, String> {
         let sides = self.lump(LUMP_BRUSHSIDES, 8)?;
         let mut out = Vec::new();
         for (index, brush) in self.lump(LUMP_BRUSHES, 12)?.chunks_exact(12).enumerate() {
-            if keep.is_some_and(|k| !k.get(index).copied().unwrap_or(false)) {
-                continue;
-            }
+            let place = match keep {
+                Some(k) => match k.get(index).copied().flatten() {
+                    Some(place) => place,
+                    None => continue,
+                },
+                None => Place::default(),
+            };
             let first = i32_at(brush, 0).max(0) as usize;
             // Never trust a count past the sides that exist: a bad one would
             // reserve gigabytes and take the game down with it.
@@ -211,7 +217,8 @@ impl<'a> Bsp<'a> {
                     continue;
                 }
                 if let Some(p) = planes.get(u16_at(side, 0) as usize) {
-                    brush_planes.push([p.normal.x, p.normal.y, p.normal.z, p.dist]);
+                    let (normal, dist) = place.plane(p.normal, p.dist);
+                    brush_planes.push([normal.x, normal.y, normal.z, dist]);
                 }
             }
             if brush_planes.len() >= 4 {
@@ -330,9 +337,52 @@ impl<'a> Bsp<'a> {
     }
 }
 
-/// Brush entities a skater should hit, by model number (`"model" "*3"`):
-/// the func_ ones that stay solid. Triggers and the rest are zones.
-fn solid_brush_models(entities: &[u8]) -> Vec<usize> {
+/// Where a brush entity puts its model. An entity with an "origin" (rotating
+/// doors, many func_brushes) has its brushes compiled around that point
+/// instead of where they show up in the map; left as they were, they stood
+/// as invisible walls around the map's centre (the box by gm_construct's
+/// spawn).
+#[derive(Clone, Copy, Default)]
+struct Place {
+    origin: Vec3,
+    /// Pitch, yaw and roll in degrees.
+    angles: Vec3,
+}
+
+impl Place {
+    fn turn(&self) -> Mat3 {
+        let [sp, sy, sr] =
+            [self.angles.x, self.angles.y, self.angles.z].map(|a| a.to_radians().sin());
+        let [cp, cy, cr] =
+            [self.angles.x, self.angles.y, self.angles.z].map(|a| a.to_radians().cos());
+        // Source's AngleMatrix: forward, left and up as the columns.
+        Mat3::from_cols(
+            Vec3::new(cp * cy, cp * sy, -sp),
+            Vec3::new(sr * sp * cy - cr * sy, sr * sp * sy + cr * cy, sr * cp),
+            Vec3::new(cr * sp * cy + sr * sy, cr * sp * sy - sr * cy, cr * cp),
+        )
+    }
+
+    /// A model-space plane (`n . p <= d` inside) in the map.
+    fn plane(&self, normal: Vec3, dist: f32) -> (Vec3, f32) {
+        if self.origin == Vec3::ZERO && self.angles == Vec3::ZERO {
+            return (normal, dist);
+        }
+        let n = self.turn() * normal;
+        (n, dist + n.dot(self.origin))
+    }
+}
+
+fn three(value: &str) -> Option<Vec3> {
+    let mut parts = value.split_whitespace().map(|v| v.parse::<f32>().ok());
+    let v = Vec3::new(parts.next()??, parts.next()??, parts.next()??);
+    v.is_finite().then_some(v)
+}
+
+/// Brush entities a skater should hit, by model number (`"model" "*3"`),
+/// with where they sit: the func_ ones that stay solid. Triggers and the
+/// rest are zones.
+fn solid_brush_models(entities: &[u8]) -> Vec<(usize, Place)> {
     const NOT_SOLID: &[&str] = &[
         "func_illusionary",
         "func_areaportal",
@@ -370,22 +420,36 @@ fn solid_brush_models(entities: &[u8]) -> Vec<usize> {
         let block = block.split('}').next().unwrap_or("");
         let mut fields = block.split('"').skip(1).step_by(2);
         let (mut class, mut model, mut never_solid) = ("", None, false);
+        let mut place = Place::default();
         while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
             match key.to_ascii_lowercase().as_str() {
                 "classname" => class = value,
                 "model" => model = value.strip_prefix('*').and_then(|n| n.parse().ok()),
                 // func_brush set to "Never Solid".
                 "solidity" => never_solid = value == "1",
+                "origin" => place.origin = three(value).unwrap_or_default(),
+                "angles" => place.angles = three(value).unwrap_or_default(),
                 _ => {}
             }
         }
         let class = class.to_ascii_lowercase();
+        // These read "angles" as the way they move, not as a turn.
+        if [
+            "func_door",
+            "func_movelinear",
+            "func_button",
+            "func_conveyor",
+        ]
+        .contains(&class.as_str())
+        {
+            place.angles = Vec3::ZERO;
+        }
         if let Some(model) = model
             && class.starts_with("func_")
             && !NOT_SOLID.contains(&class.as_str())
             && !never_solid
         {
-            out.push(model);
+            out.push((model, place));
         }
     }
     out
@@ -525,6 +589,29 @@ pub(crate) mod tests {
             with(r#""classname" "func_brush" "Solidity" "0" "model" "*1""#),
             2
         );
+    }
+
+    #[test]
+    fn moves_brush_entities_to_their_origin() {
+        let world = "{\n\"classname\" \"worldspawn\"\n}\n";
+        let data = world_and_entity(&format!(
+            "{world}{{\n\"classname\" \"func_brush\" \"origin\" \"1000 -500 32\" \"angles\" \"0 90 0\" \"model\" \"*1\"\n}}\n"
+        ));
+        let brushes = parse(&data).unwrap().brushes;
+        assert_eq!(brushes.len(), 2);
+        // The world's box stays round the centre, the entity's moves with it:
+        // +x side (64 out) turned to face +y, 64 past the origin's y.
+        let inside = |b: &Vec<[f32; 4]>, p: Vec3| {
+            b.iter()
+                .all(|q| Vec3::new(q[0], q[1], q[2]).dot(p) <= q[3] + 0.01)
+        };
+        assert!(inside(&brushes[0], Vec3::new(0., 0., 8.)));
+        assert!(!inside(&brushes[1], Vec3::new(0., 0., 8.)));
+        assert!(inside(&brushes[1], Vec3::new(1000., -500., 40.)));
+        assert!(inside(&brushes[1], Vec3::new(1060., -440., 40.)));
+        assert!(!inside(&brushes[1], Vec3::new(1000., -500., 20.)));
+        let up = brushes[1].iter().find(|q| q[1] > 0.99).unwrap();
+        assert!((up[3] - (-500. + 64.)).abs() < 0.01);
     }
 
     #[test]

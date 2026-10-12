@@ -104,10 +104,20 @@ pub fn merge(mut controls: Controls, extra: &[f32]) -> Controls {
     let get = |i: usize| extra.get(i).copied().unwrap_or(0.);
     let further = |pad: i16, v: f32| {
         let v = axis(v);
-        if v.unsigned_abs() > pad.unsigned_abs() { v } else { pad }
+        if v.unsigned_abs() > pad.unsigned_abs() {
+            v
+        } else {
+            pad
+        }
     };
-    controls.left = [further(controls.left[0], get(0)), further(controls.left[1], get(1))];
-    controls.right = [further(controls.right[0], get(2)), further(controls.right[1], get(3))];
+    controls.left = [
+        further(controls.left[0], get(0)),
+        further(controls.left[1], get(1)),
+    ];
+    controls.right = [
+        further(controls.right[0], get(2)),
+        further(controls.right[1], get(3)),
+    ];
     for (i, t) in controls.triggers.iter_mut().enumerate() {
         *t = (*t).max((get(4 + i).clamp(0., 1.) * 255.).round() as u8);
     }
@@ -121,7 +131,9 @@ fn axis(v: f32) -> i16 {
 
 #[cfg(target_os = "macos")]
 mod apple {
-    use objc2_game_controller::{GCController, GCControllerButtonInput, GCControllerDirectionPad, GCDevice};
+    use objc2_game_controller::{
+        GCController, GCControllerButtonInput, GCControllerDirectionPad, GCDevice,
+    };
 
     use super::*;
 
@@ -143,8 +155,14 @@ mod apple {
                 (pressed(&dpad.right()), DPAD_RIGHT),
                 (pressed(&pad.buttonMenu()), START),
                 (pad.buttonOptions().is_some_and(|b| pressed(&b)), BACK),
-                (pad.leftThumbstickButton().is_some_and(|b| pressed(&b)), LEFT_THUMB),
-                (pad.rightThumbstickButton().is_some_and(|b| pressed(&b)), RIGHT_THUMB),
+                (
+                    pad.leftThumbstickButton().is_some_and(|b| pressed(&b)),
+                    LEFT_THUMB,
+                ),
+                (
+                    pad.rightThumbstickButton().is_some_and(|b| pressed(&b)),
+                    RIGHT_THUMB,
+                ),
                 (pressed(&pad.leftShoulder()), LEFT_SHOULDER),
                 (pressed(&pad.rightShoulder()), RIGHT_SHOULDER),
                 (pressed(&pad.buttonA()), A),
@@ -156,8 +174,10 @@ mod apple {
                     buttons |= bit;
                 }
             }
-            let trigger = |b: &GCControllerButtonInput| (b.value().clamp(0., 1.) * 255.).round() as u8;
-            let stick = |s: &GCControllerDirectionPad| [axis(s.xAxis().value()), axis(s.yAxis().value())];
+            let trigger =
+                |b: &GCControllerButtonInput| (b.value().clamp(0., 1.) * 255.).round() as u8;
+            let stick =
+                |s: &GCControllerDirectionPad| [axis(s.xAxis().value()), axis(s.yAxis().value())];
             let name = controller
                 .vendorName()
                 .map(|n| n.to_string())

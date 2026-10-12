@@ -69,12 +69,15 @@ local function Report()
 
 	-- Entities: which brush model belongs to which entity.
 	local eo, el = Lump(bsp, 0)
-	local owners = {}
+	local owners, shift = {}, {}
 	for block in bsp:sub(eo, eo + el - 1):gmatch("{(.-)}") do
 		local kv = {}
 		for k, v in block:gmatch('"([^"]*)"%s*"([^"]*)"') do kv[k:lower()] = v end
 		local n = kv.model and tonumber(kv.model:match("^%*(%d+)$"))
 		if n then
+			-- Brushes of an entity with an origin are stored around it.
+			local x, y, z = (kv.origin or ""):match("^%s*(%S+)%s+(%S+)%s+(%S+)")
+			if tonumber(z) then shift[n] = Vector(tonumber(x), tonumber(y), tonumber(z)) end
 			owners[n] = ("%s%s (spawnflags %s%s%s)"):format(kv.classname or "?",
 				kv.targetname and (" '" .. kv.targetname .. "'") or "", kv.spawnflags or "0",
 				kv.solidity and (", solidity " .. kv.solidity) or "",
@@ -130,6 +133,8 @@ local function Report()
 	local so = Lump(bsp, 19)
 	local hits = {}
 	for b = 0, bl / 12 - 1 do
+		local start = origin
+		if brushModel[b] and shift[brushModel[b]] then start = origin + shift[brushModel[b]] * -1 end
 		local first, count, contents = I32(bsp, bo + b * 12), I32(bsp, bo + b * 12 + 4), I32(bsp, bo + b * 12 + 8)
 		local tmin, tmax, face = 0, REACH, nil
 		for s = first, first + count - 1 do
@@ -137,7 +142,7 @@ local function Report()
 			local p = po + U16(bsp, side) * 20
 			local n = Vector(F32(bsp, p), F32(bsp, p + 4), F32(bsp, p + 8))
 			local d = F32(bsp, p + 12)
-			local denom, dist = n:Dot(dir), d - n:Dot(origin)
+			local denom, dist = n:Dot(dir), d - n:Dot(start)
 			if math.abs(denom) < 1e-6 then
 				if dist < 0 then tmin = math.huge break end
 			else
