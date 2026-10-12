@@ -459,10 +459,15 @@ lua_fn!(get_input, |lua| {
 });
 
 lua_fn!(version, |lua| {
-    lua.push_str(&match option_env!("GITHUB_RUN_NUMBER") {
+    let mut version = match option_env!("GITHUB_RUN_NUMBER") {
         Some(run) => format!("{} (build {run})", env!("CARGO_PKG_VERSION")),
         None => env!("CARGO_PKG_VERSION").to_owned(),
-    });
+    };
+    // The game thread's float mode, which the skate thread would inherit.
+    if let Some(csr) = skate_bridge::float_mode::current() {
+        version += &format!(", game float mode {csr:#06x}");
+    }
+    lua.push_str(&version);
     1
 });
 

@@ -113,7 +113,7 @@ const PUSH_EVERY: u32 = 45;
 const PUSH_HOLD: u32 = 6;
 
 fn simulate(assets: &str, park: world::World, ticks: u32) -> Result<(), String> {
-    skate_bridge::float_mode::console();
+    skate_bridge::float_mode::pc();
     let start = std::time::Instant::now();
     let mut session = Session::new(
         std::path::Path::new(assets),
@@ -168,7 +168,7 @@ fn resident_mb() -> Option<f64> {
 /// Rides the park through the Driver, as the game does every frame, and
 /// prints memory every ten seconds of riding.
 fn run_soak(assets: &str, park: world::World, seconds: u32) -> Result<(), String> {
-    skate_bridge::float_mode::console();
+    skate_bridge::float_mode::pc();
     let mut session = Session::new(
         std::path::Path::new(assets),
         park.triangles,
@@ -224,7 +224,7 @@ fn report(label: &str, pose: &skate_bridge::bridge::Pose) {
 
 /// Replays a saved ride on a fresh session, as the mod fed it.
 fn play(assets: &str, path: &str) -> Result<(), String> {
-    skate_bridge::float_mode::console();
+    skate_bridge::float_mode::pc();
     let mut file =
         std::io::BufReader::new(std::fs::File::open(path).map_err(|e| format!("{path}: {e}"))?);
     let rec = Recording::read(&mut file).map_err(|e| format!("{path}: {e}"))?;
