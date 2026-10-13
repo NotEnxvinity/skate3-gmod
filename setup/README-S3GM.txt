@@ -33,7 +33,10 @@ Install
      Windows:  drag your Skate 3 .iso onto S3GM-setup-Windows.bat
                (or double-click it and pick the .iso)
      macOS:    double-click S3GM-setup-Mac.command. The first time, macOS
-               blocks downloaded scripts: right-click it > Open > Open.
+               says it "Not Opened": click Done, then System Settings >
+               Privacy & Security, scroll down, click Open Anyway next to
+               S3GM-setup-Mac.command. Or skip that and paste in Terminal:
+               bash ~/Downloads/S3GM-setup/S3GM-setup-Mac.command
      Linux / SteamOS:  open S3GM-setup in a terminal and run ./skate3-setup.sh
    An .iso sitting next to the S3GM-setup folder (or inside it) is used
    without asking. Setup finds Garry's Mod, installs the skate engine
