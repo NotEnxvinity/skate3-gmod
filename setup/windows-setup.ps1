@@ -88,18 +88,30 @@ if (-not $python) {
 $pyExe = $python[0]; $pyArgs = @($python | Select-Object -Skip 1)
 
 $engine = Join-Path $cache ('engine-' + $EngineRev.Substring(0, 7))
-if (-not (Test-Path (Join-Path $engine 'tools\asset_pipeline'))) {
+$converters = Join-Path $engine 'tools\asset_pipeline'
+if (-not (Test-Path -LiteralPath $converters)) {
     Write-Host "Fetching the Skate 3 engine's converters ($($EngineRev.Substring(0, 7)), one time)..."
     $zip = Join-Path $cache 'engine.zip'
     $partial = "$engine.partial"
-    if (Test-Path $partial) { Remove-Item -Recurse -Force $partial }
-    Invoke-WebRequest -Uri $EngineZip -OutFile $zip -UseBasicParsing
-    Expand-Archive -Path $zip -DestinationPath $partial -Force
-    Remove-Item -Force $zip
+    # What a run that stopped part way left behind: a folder already there
+    # would swallow the new copy one level down, and the converters would
+    # never be found.
+    foreach ($old in @($engine, $partial)) {
+        if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+    }
+    try { Invoke-WebRequest -Uri $EngineZip -OutFile $zip -UseBasicParsing }
+    catch { Die "Downloading the Skate 3 engine's converters from github.com failed: $($_.Exception.Message) Check the internet connection, then run this again." }
+    try { Expand-Archive -LiteralPath $zip -DestinationPath $partial -Force }
+    catch { Die "Unpacking the Skate 3 engine's converters failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
+    Remove-Item -LiteralPath $zip -Force
     # GitHub puts everything in one folder named after the repo and revision.
-    $inner = Get-ChildItem -Directory $partial | Select-Object -First 1
-    Move-Item $inner.FullName $engine
-    Remove-Item -Recurse -Force $partial
+    $inner = Get-ChildItem -LiteralPath $partial -Directory | Select-Object -First 1
+    if (-not $inner) { Die "The Skate 3 engine's converters came down empty. Run this again; if it keeps happening, an antivirus may be emptying $cache." }
+    Move-Item -LiteralPath $inner.FullName -Destination $engine
+    Remove-Item -LiteralPath $partial -Recurse -Force
+    if (-not (Test-Path -LiteralPath $converters)) {
+        Die "The Skate 3 engine's converters were fetched, but $converters is missing. An antivirus may have removed it: allow the folder $cache, delete it, then run this again."
+    }
 }
 
 $vgmDir = Join-Path $cache 'vgmstream'

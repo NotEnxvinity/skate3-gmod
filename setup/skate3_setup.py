@@ -134,6 +134,12 @@ def engine_dir():
     env = os.environ.get('SKATE3_ENGINE')
     if env and (Path(env) / 'tools/asset_pipeline').is_dir():
         return Path(env)
+    if env:
+        # Started by the launcher, so it fetched them, yet they aren't there:
+        # say where it looked, so a broken download can be deleted.
+        raise RuntimeError(f'The Skate 3 engine converters are missing from {env} (no tools/asset_pipeline in it). '
+                           f'Delete the folder {Path(env).parent} and run {launcher()} again; '
+                           'if it keeps happening, an antivirus may be removing files there.')
     raise RuntimeError('The Skate 3 engine converters are missing: start the setup with '
                        + launcher() + ', not skate3_setup.py itself. It fetches the converters and its own Python.')
 

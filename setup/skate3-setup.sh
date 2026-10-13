@@ -116,6 +116,8 @@ if [ ! -d "$engine/tools/asset_pipeline" ]; then
     rm -rf "$engine"
     mv "$engine.partial"/* "$engine"
     rm -rf "$engine.partial"
+    [ -d "$engine/tools/asset_pipeline" ] ||
+        die "The Skate 3 engine's converters were fetched, but $engine/tools/asset_pipeline is missing. Delete $cache and run this again."
 fi
 
 vgmstream="$cache/vgmstream/vgmstream-cli"
