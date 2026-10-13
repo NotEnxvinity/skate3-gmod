@@ -25,6 +25,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_conflicts.lua")
 	AddCSLuaFile("skate3/cl_keyboard.lua")
 	AddCSLuaFile("skate3/cl_collision_report.lua")
+	AddCSLuaFile("skate3/cl_perf.lua")
 	include("skate3/sv_skate3.lua")
 else
 	include("skate3/cl_skate3.lua")

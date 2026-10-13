@@ -4,6 +4,7 @@ util.AddNetworkString("skate3_pose")
 util.AddNetworkString("skate3_bail")
 util.AddNetworkString("skate3_injury")
 util.AddNetworkString("skate3_blood")
+util.AddNetworkString("skate3_watched")
 
 local Pose = include("skate3/sh_pose.lua")
 
@@ -84,7 +85,16 @@ net.Receive("skate3_pose", function(len, ply)
 	local to = RecipientFilter()
 	to:AddPVS(f.origin)
 	to:RemovePlayer(ply)
-	if to:GetCount() == 0 then return end
+	-- Nobody near enough to see them: their game sends far fewer poses
+	-- until someone is, rather than 20 a second for nothing.
+	local watched = to:GetCount() > 0
+	if ply.skate3Watched ~= watched then
+		ply.skate3Watched = watched
+		net.Start("skate3_watched")
+		net.WriteBool(watched)
+		net.Send(ply)
+	end
+	if not watched then return end
 	-- Unreliable: a late frame is useless, a newer one follows.
 	net.Start("skate3_pose", true)
 	net.WriteEntity(ply)
