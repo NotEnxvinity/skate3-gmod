@@ -9,6 +9,8 @@
 //! that owns it. Static and physics props are not in this data; Lua hands
 //! those over separately.
 
+use std::borrow::Cow;
+
 use glam::{Mat3, Vec3};
 
 const HEADER_LUMPS: usize = 64;
@@ -122,19 +124,25 @@ impl<'a> Bsp<'a> {
         })
     }
 
-    /// One lump's bytes, checked for bounds and compression.
-    fn lump(&self, index: usize, stride: usize) -> Result<&'a [u8], String> {
+    /// One lump's bytes, checked for bounds and unpacked when the map stores
+    /// it LZMA-compressed (common in Workshop maps).
+    fn lump(&self, index: usize, stride: usize) -> Result<Cow<'a, [u8]>, String> {
         let (offset, len) = self.span(index);
         let lump = self
             .data
             .get(offset..offset + len)
             .ok_or_else(|| format!("lump {index} runs past the end of the file"))?;
-        if lump.starts_with(b"LZMA") {
-            return Err(format!(
-                "lump {index} is LZMA-compressed, which isn't supported yet"
-            ));
+        let mut lump = if lump.starts_with(b"LZMA") {
+            Cow::Owned(unlzma(lump).map_err(|e| format!("lump {index}: {e}"))?)
+        } else {
+            Cow::Borrowed(lump)
+        };
+        let keep = lump.len() - lump.len() % stride;
+        match &mut lump {
+            Cow::Borrowed(b) => *b = &b[..keep],
+            Cow::Owned(v) => v.truncate(keep),
         }
-        Ok(&lump[..len - len % stride])
+        Ok(lump)
     }
 
     fn planes(&self) -> Result<Vec<Plane>, String> {
@@ -161,7 +169,7 @@ impl<'a> Bsp<'a> {
         let leaf_brushes = self.lump(LUMP_LEAFBRUSHES, 2).ok()?;
         let solid_models = self
             .lump(LUMP_ENTITIES, 1)
-            .map(solid_brush_models)
+            .map(|e| solid_brush_models(&e))
             .unwrap_or_default()
             .into_iter()
             .filter_map(
@@ -401,6 +409,37 @@ impl Place {
         let n = self.turn() * normal;
         (n, dist + n.dot(self.origin))
     }
+}
+
+/// The biggest lump we'll unpack; a bigger claim means a broken file.
+const MAX_UNPACKED: usize = 256 << 20;
+
+/// Unpacks one of Source's LZMA blocks: "LZMA", the unpacked and packed
+/// sizes (u32 each), the 5 LZMA property bytes, then the raw stream. That is
+/// an .lzma file's header minus its 8-byte size, so it's rebuilt as one.
+pub fn unlzma(block: &[u8]) -> Result<Vec<u8>, String> {
+    if block.len() < 17 || !block.starts_with(b"LZMA") {
+        return Err("not an LZMA block".into());
+    }
+    let unpacked = u32::from_le_bytes(block[4..8].try_into().unwrap()) as usize;
+    let packed = u32::from_le_bytes(block[8..12].try_into().unwrap()) as usize;
+    if unpacked > MAX_UNPACKED {
+        return Err(format!("LZMA block claims {unpacked} bytes"));
+    }
+    let stream = block
+        .get(17..17 + packed)
+        .ok_or("LZMA block runs past its lump")?;
+    let mut alone = Vec::with_capacity(13 + stream.len());
+    alone.extend_from_slice(&block[12..17]);
+    alone.extend_from_slice(&(unpacked as u64).to_le_bytes());
+    alone.extend_from_slice(stream);
+    let mut out = Vec::with_capacity(unpacked);
+    lzma_rs::lzma_decompress(&mut &alone[..], &mut out)
+        .map_err(|e| format!("LZMA data is damaged ({e})"))?;
+    if out.len() != unpacked {
+        return Err("LZMA data is damaged (wrong size)".into());
+    }
+    Ok(out)
 }
 
 fn three(value: &str) -> Option<Vec3> {
@@ -681,6 +720,46 @@ pub(crate) mod tests {
         let brushes = lumps[2].1.clone();
         lumps[2].1.extend(brushes);
         assert_eq!(parse(&build(&lumps)).unwrap().brushes.len(), 2);
+    }
+
+    /// Packs a lump the way bspzip -repack -compress does.
+    fn lzma_lump(data: &[u8]) -> Vec<u8> {
+        let mut alone = Vec::new();
+        let options = lzma_rs::compress::Options {
+            unpacked_size: lzma_rs::compress::UnpackedSize::WriteToHeader(Some(data.len() as u64)),
+        };
+        lzma_rs::lzma_compress_with_options(&mut &data[..], &mut alone, &options).unwrap();
+        let stream = &alone[13..];
+        let mut out = b"LZMA".to_vec();
+        out.extend_from_slice(&(data.len() as u32).to_le_bytes());
+        out.extend_from_slice(&(stream.len() as u32).to_le_bytes());
+        out.extend_from_slice(&alone[..5]);
+        out.extend_from_slice(stream);
+        out
+    }
+
+    #[test]
+    fn unpacks_an_lzma_block_with_an_end_marker() {
+        // Made by Python's lzma (LZMA1, end marker) in Source's layout.
+        let block = [
+            76, 90, 77, 65, 128, 0, 0, 0, 29, 0, 0, 0, 93, 0, 0, 1, 0, 0, 57, 154, 200, 72, 108,
+            207, 80, 0, 199, 59, 158, 28, 193, 204, 191, 221, 32, 228, 162, 1, 79, 3, 255, 255,
+            224, 239, 128, 0,
+        ];
+        assert_eq!(unlzma(&block).unwrap(), b"skate collision ".repeat(8));
+        assert!(unlzma(&block[..30]).is_err(), "a cut block fails");
+        assert!(unlzma(b"LZMA").is_err());
+    }
+
+    #[test]
+    fn reads_lzma_compressed_lumps() {
+        let lumps: Vec<_> = box_brush(0x1, 6)
+            .into_iter()
+            .map(|(index, data)| (index, lzma_lump(&data)))
+            .collect();
+        let solids = parse(&build(&lumps)).unwrap();
+        assert_eq!(solids.brushes.len(), 1);
+        assert_eq!(solids.brushes[0].len(), 6);
     }
 
     #[test]

@@ -1156,6 +1156,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "crc"
+version = "3.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5eb8a2a1cd12ab0d987a5d5e825195d372001a4094a0376319d5a0ad71c1ba0d"
+dependencies = [
+ "crc-catalog",
+]
+
+[[package]]
+name = "crc-catalog"
+version = "2.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "217698eaf96b4a3f0bc4f3662aaa55bdf913cd54d7204591faa790070c6d0853"
+
+[[package]]
 name = "crc32fast"
 version = "1.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1550,6 +1565,10 @@ dependencies = [
  "glam 0.30.10",
  "libc",
  "libloading",
+ "lzma-rs",
+ "objc2",
+ "objc2-foundation",
+ "objc2-game-controller",
  "serde_json",
  "skate-bridge",
 ]
@@ -1893,6 +1912,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "lzma-rs"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "297e814c836ae64db86b36cf2a557ba54368d03f6afcd7d947c266692f71115e"
+dependencies = [
+ "byteorder",
+ "crc",
+]
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2094,6 +2123,16 @@ dependencies = [
  "bitflags",
  "objc2",
  "objc2-core-foundation",
+]
+
+[[package]]
+name = "objc2-game-controller"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1962c1882c5abcedb18e5f01acffeaad7b3cbd0a9d4cd8f5ca259ba8a64cb9a3"
+dependencies = [
+ "objc2",
+ "objc2-foundation",
 ]
 
 [[package]]
@@ -2575,12 +2614,10 @@ dependencies = [
 [[package]]
 name = "skate-core"
 version = "0.1.0"
-source = "git+https://github.com/chasmlol/2010-rust-rewrite-mashup?rev=f608f85#f608f85e407ff1b7689d54a9aafdd16e95711ac4"
 
 [[package]]
 name = "skate-data"
 version = "0.1.0"
-source = "git+https://github.com/chasmlol/2010-rust-rewrite-mashup?rev=f608f85#f608f85e407ff1b7689d54a9aafdd16e95711ac4"
 dependencies = [
  "flate2",
  "serde",
@@ -2600,7 +2637,6 @@ dependencies = [
 [[package]]
 name = "skate-host"
 version = "0.1.0"
-source = "git+https://github.com/chasmlol/2010-rust-rewrite-mashup?rev=f608f85#f608f85e407ff1b7689d54a9aafdd16e95711ac4"
 dependencies = [
  "bevy",
  "half",
@@ -2614,7 +2650,6 @@ dependencies = [
 [[package]]
 name = "skate-net"
 version = "0.1.0"
-source = "git+https://github.com/chasmlol/2010-rust-rewrite-mashup?rev=f608f85#f608f85e407ff1b7689d54a9aafdd16e95711ac4"
 dependencies = [
  "blake3",
  "half",

@@ -49,6 +49,30 @@ local function ContentNames(c)
 	return #out > 0 and table.concat(out, "+") or "empty"
 end
 
+-- The map with every LZMA-compressed lump also stored unpacked at the end
+-- and the header pointing there, so offsets into it keep working.
+local function Unpacked(bsp)
+	local tail, size = {}, #bsp
+	local header = { bsp:sub(1, 8) }
+	for i = 0, 63 do
+		local at = 9 + i * 16
+		local entry = bsp:sub(at, at + 15)
+		local ofs, len = I32(bsp, at), I32(bsp, at + 4)
+		if i ~= 35 and len > 0 and bsp:sub(ofs + 1, ofs + 4) == "LZMA" and skate3 and skate3.Unlzma then
+			local data = skate3.Unlzma(bsp:sub(ofs + 1, ofs + len))
+			if data then
+				local function LE(n) return string.char(n % 256, math.floor(n / 256) % 256, math.floor(n / 65536) % 256, math.floor(n / 16777216) % 256) end
+				entry = LE(size) .. LE(#data) .. entry:sub(9)
+				tail[#tail + 1] = data
+				size = size + #data
+			end
+		end
+		header[#header + 1] = entry
+	end
+	if #tail == 0 then return bsp end
+	return table.concat(header) .. bsp:sub(8 + 64 * 16 + 1) .. table.concat(tail)
+end
+
 local function Lump(bsp, i)
 	local at = 9 + i * 16
 	return I32(bsp, at) + 1, I32(bsp, at + 4)
@@ -60,6 +84,7 @@ local function Report()
 	local bsp = f and f:Read(f:Size())
 	if f then f:Close() end
 	if not bsp or bsp:sub(1, 4) ~= "VBSP" then print("[skate3] couldn't read this map's .bsp") return end
+	bsp = Unpacked(bsp)
 	local version = I32(bsp, 5)
 	local lines = {}
 	local function Say(s) lines[#lines + 1] = s print("[skate3] " .. s) end
