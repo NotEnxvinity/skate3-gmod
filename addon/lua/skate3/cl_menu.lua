@@ -140,7 +140,7 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		})
 		panel:CheckBox("Show the status line", "skate3_hud")
 		panel:CheckBox("Hall of Meat", "skate3_hall_of_meat")
-		panel:ControlHelp("Bails score points and break bones, shown in red with the skeleton. Bail on purpose: hold both triggers and click both sticks.")
+		panel:ControlHelp("Bails score points and break bones, shown in red, with the skeleton showing through your skater. Bail on purpose: hold both triggers and click both sticks.")
 
 		BoardChoices(panel)
 		KeyboardChoices(panel)

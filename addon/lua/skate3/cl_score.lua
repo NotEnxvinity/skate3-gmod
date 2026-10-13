@@ -162,7 +162,8 @@ local view -- what to draw this frame, or nil
 
 -- Hall of Meat's score in the same widget, the points in red under a white
 -- "Bail": running while the bail
--- goes on, then held like a finished line, with the skeleton beside it.
+-- goes on, then held like a finished line (the skeleton shows on the
+-- skater, cl_hall_of_meat.lua).
 local function MeatView(now)
 	local b, going = Meat.Current()
 	if not b then return nil end
@@ -246,8 +247,6 @@ local function Minimal(v, cx, cy, s)
 	local color = v.live and WHITE or (v.good and GREEN or RED)
 	Shadowed(v.points, "skate3_points", x, cy - 8 * s, color, alpha, TEXT_ALIGN_LEFT)
 	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, WHITE, alpha, TEXT_ALIGN_LEFT)
-	-- Hall of Meat's skeleton, left of the ring.
-	if v.meat then Meat.DrawSkeleton(cx - r - 40 * s, cy, 150 * s, alpha, v.meat) end
 end
 
 -- Half-Life 2's HUD, laid out like its HEALTH panel on the same row: a dim
@@ -280,7 +279,6 @@ local function HL2(v)
 	draw.SimpleText(mult, "HudSelectionText", x + pad, y + 6 * s, ColorAlpha(HL2_FG, HL2_FG.a * a))
 	draw.SimpleText(label, "HudSelectionText", x + pad, y + 20 * s, ColorAlpha(fg, fg.a * a))
 	draw.SimpleText(number, "HudNumbers", x + w - pad, y + 2 * s, ColorAlpha(fg, fg.a * a), TEXT_ALIGN_RIGHT)
-	if v.meat then Meat.DrawSkeleton(x - 34 * s, y + h / 2, 60 * s, a, v.meat) end
 	if not v.live then return end
 	local segGap = 2 * s
 	local segW = (w - 2 * pad - segGap * (SEGMENTS - 1)) / SEGMENTS
