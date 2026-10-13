@@ -1,6 +1,8 @@
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
+-- Hall of Meat's X-ray skeleton is posed like the body the skater shows.
+Score.Meat.Body = Skater.BodyEntity
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_menu.lua")
 local Props = include("skate3/cl_props.lua")
@@ -13,7 +15,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.2.1-test-7")
+print("[skate3] lua build: v2.2.1-test-8")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")

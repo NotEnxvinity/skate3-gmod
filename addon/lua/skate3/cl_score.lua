@@ -7,6 +7,7 @@
 
 local Score = {}
 local Meat = include("skate3/cl_hall_of_meat.lua")
+Score.Meat = Meat
 
 local cv_score = CreateClientConVar("skate3_score_hud", "1", true, false, "Show the trick score widget")
 local cv_style = CreateClientConVar("skate3_score_style", "world", true, false,

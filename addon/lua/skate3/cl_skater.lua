@@ -1010,6 +1010,12 @@ function Skater.RealBody()
 	return IsValid(model) and model.skate3Real == true and pose ~= nil
 end
 
+-- The body drawn as the skater: your own player while posing it, else the copy.
+function Skater.BodyEntity()
+	if Skater.RealBody() then return owner end
+	if IsValid(model) and not model:GetNoDraw() then return model end
+end
+
 function Skater.HasBoard()
 	return data ~= nil
 end

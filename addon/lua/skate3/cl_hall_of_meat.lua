@@ -264,6 +264,108 @@ local function DrawXray(bones, parts, alpha)
 	end
 end
 
+-- Gmod's own skeleton model, posed bone for bone like the skater's body and
+-- drawn once per injury level with every other bone shrunk away, so each
+-- bone takes its own colour. The lines above stand in when it can't be.
+local SKELETON = "models/player/skeleton.mdl"
+local SKELETON_PARTS = {
+	["ValveBiped.Bip01_Pelvis"] = "pelvis", ["ValveBiped.Bip01_Spine"] = "spine",
+	["ValveBiped.Bip01_Spine1"] = "ribs", ["ValveBiped.Bip01_Spine2"] = "ribs",
+	["ValveBiped.Bip01_Spine4"] = "spine", ["ValveBiped.Bip01_Neck1"] = "spine",
+	["ValveBiped.Bip01_Head1"] = "skull",
+	["ValveBiped.Bip01_L_Clavicle"] = "lcollar", ["ValveBiped.Bip01_R_Clavicle"] = "rcollar",
+	["ValveBiped.Bip01_L_UpperArm"] = "larm", ["ValveBiped.Bip01_R_UpperArm"] = "rarm",
+	["ValveBiped.Bip01_L_Forearm"] = "lforearm", ["ValveBiped.Bip01_R_Forearm"] = "rforearm",
+	["ValveBiped.Bip01_L_Hand"] = "lhand", ["ValveBiped.Bip01_R_Hand"] = "rhand",
+	["ValveBiped.Bip01_L_Thigh"] = "lfemur", ["ValveBiped.Bip01_R_Thigh"] = "rfemur",
+	["ValveBiped.Bip01_L_Calf"] = "lshin", ["ValveBiped.Bip01_R_Calf"] = "rshin",
+	["ValveBiped.Bip01_L_Foot"] = "lfoot", ["ValveBiped.Bip01_R_Foot"] = "rfoot",
+}
+local skeleton, skeletonFailed
+local skel = { pass = nil, parts = nil, from = {}, part = {} } -- this draw's state
+local GONE = Vector(0.001, 0.001, 0.001)
+
+-- Each skeleton bone's part: its own, or the nearest parent's (fingers go
+-- with the hand, toes with the foot).
+local function SkeletonParts(e)
+	local part = {}
+	for i = 0, e:GetBoneCount() - 1 do
+		local p = SKELETON_PARTS[e:GetBoneName(i)]
+		local up = e:GetBoneParent(i)
+		part[i] = p or (up >= 0 and part[up]) or "pelvis"
+	end
+	return part
+end
+
+local function Skeleton()
+	if IsValid(skeleton) or skeletonFailed then return skeleton end
+	if not util.IsValidModel(SKELETON) then skeletonFailed = true return nil end
+	skeleton = ClientsideModel(SKELETON, RENDERGROUP_OPAQUE)
+	if not IsValid(skeleton) then skeletonFailed = true return nil end
+	skeleton:SetNoDraw(true)
+	skeleton:SetLOD(0)
+	skel.part = SkeletonParts(skeleton)
+	skeleton:AddCallback("BuildBonePositions", function(e, count)
+		for i = 0, count - 1 do
+			local m = skel.from[i]
+			if m then
+				if skel.pass and skel.parts and skel.parts[skel.part[i]].level ~= skel.pass then
+					m = Matrix(m)
+					m:Scale(GONE)
+				end
+				e:SetBoneMatrix(i, m)
+			end
+		end
+	end)
+	return skeleton
+end
+
+-- Draws the skeleton in body's pose; false when it can't.
+local function DrawSkeletonModel(body, parts, alpha)
+	local e = Skeleton()
+	if not IsValid(e) or not IsValid(body) then return false end
+	-- Where each of the skeleton's bones is on the body right now.
+	local from, any = {}, false
+	for i = 0, e:GetBoneCount() - 1 do
+		local b = body:LookupBone(e:GetBoneName(i))
+		local m = b and body:GetBoneMatrix(b)
+		if m then from[i], any = m, true end
+	end
+	if not any then return false end
+	-- Bones the body doesn't have go with their parent, shrunk away.
+	for i = 0, e:GetBoneCount() - 1 do
+		if not from[i] then
+			local up = e:GetBoneParent(i)
+			if up >= 0 and from[up] then
+				local m = Matrix(from[up])
+				m:Scale(GONE)
+				from[i] = m
+			end
+		end
+	end
+	skel.from, skel.parts = from, parts
+	local levels = {}
+	for _, state in pairs(parts) do levels[state.level] = true end
+	e:SetPos(body:GetPos())
+	-- Over everything, as an X-ray, but in front of and behind itself.
+	render.ClearDepth()
+	render.SetBlend(alpha)
+	for level = 0, 2 do
+		if levels[level] then
+			local c = LEVEL_COLORS[level]
+			skel.pass = level
+			render.SetColorModulation(c.r / 255, c.g / 255, c.b / 255)
+			e:InvalidateBoneCache()
+			e:SetupBones()
+			e:DrawModel()
+		end
+	end
+	render.SetColorModulation(1, 1, 1)
+	render.SetBlend(1)
+	skel.pass, skel.from, skel.parts = nil, {}, nil
+	return true
+end
+
 hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(_, skybox)
 	if skybox or not lastBones or not Meat.Enabled() then return end
 	local b, going = bail, true
@@ -271,6 +373,7 @@ hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(_, skybo
 	if not b then return end
 	local alpha = going and 1 or math.Clamp((SHOW_AFTER + FADE - (RealTime() - b.endedAt)) / FADE, 0, 1)
 	if alpha <= 0 then return end
+	if Meat.Body and DrawSkeletonModel(Meat.Body(), b.parts, alpha) then return end
 	cam.IgnoreZ(true)
 	DrawXray(lastBones, b.parts, alpha)
 	cam.IgnoreZ(false)
