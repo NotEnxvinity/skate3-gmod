@@ -9,7 +9,10 @@ SWEP.Spawnable = true
 SWEP.Slot = 5
 SWEP.SlotPos = 1
 
-SWEP.ViewModel = ""
+-- A real (empty-handed) view model, never drawn: with none, Gmod's hands,
+-- which follow the view model, spammed the console with "MOVETYPE_FOLLOW
+-- entity (gmod_hands) is parented to entity (viewmodel) with no model".
+SWEP.ViewModel = "models/weapons/c_arms.mdl"
 SWEP.WorldModel = ""
 SWEP.UseHands = false
 SWEP.DrawAmmo = false
@@ -32,6 +35,13 @@ function SWEP:SecondaryAttack() end
 function SWEP:DrawWorldModel() end
 
 if CLIENT then
+	function SWEP:PreDrawViewModel() return true end
+
+	-- Nor the hands while the board is out.
+	hook.Add("PreDrawPlayerHands", "skate3_no_hands", function(_, _, ply, weapon)
+		if IsValid(weapon) and weapon:GetClass() == "weapon_skate3" then return true end
+	end)
+
 	-- The weapon switcher's picture: a board, in the HUD's colour like HL2's.
 	-- The spawn menu's comes from materials/entities/weapon_skate3.png.
 	local icon = Material("skate3/weapon_select.png", "smooth")
