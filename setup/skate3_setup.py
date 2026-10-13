@@ -134,7 +134,35 @@ def engine_dir():
     env = os.environ.get('SKATE3_ENGINE')
     if env and (Path(env) / 'tools/asset_pipeline').is_dir():
         return Path(env)
-    raise RuntimeError('The Skate 3 engine converters are missing from this setup.')
+    raise RuntimeError('The Skate 3 engine converters are missing: start the setup with '
+                       + launcher() + ', not skate3_setup.py itself. It fetches the converters and its own Python.')
+
+
+def launcher():
+    """The script that fetches the converters and starts this, for this OS."""
+    if os.name == 'nt':
+        return 'S3GM-setup-Windows.bat'
+    return 'S3GM-setup-Mac.command' if sys.platform == 'darwin' else 'skate3-setup.sh'
+
+
+def relaunch():
+    """Started straight from skate3_setup.py (a double-click opens .py files
+    with whatever Python is installed): hand over to the launcher, which
+    fetches the converters and a Python they work with. Returns its exit code,
+    or None when this run is already the launcher's."""
+    if FROZEN or os.environ.get('SKATE3_ENGINE') or (ROOT / 'tools/asset_pipeline').is_dir():
+        return None
+    import subprocess
+    if os.name == 'nt':
+        script = HERE / 'windows-setup.ps1'
+        command = ['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', str(script)]
+    else:
+        script = HERE / 'skate3-setup.sh'
+        command = ['bash', str(script)]
+    if not script.is_file():
+        return None
+    print(f'Starting {script.name}, which fetches what the setup needs...', flush=True)
+    return subprocess.call(command + sys.argv[1:])
 
 
 def game_folder(selected, work, report):
@@ -345,6 +373,9 @@ def main():
     if len(sys.argv) > 2 and sys.argv[1] == '--task':
         run_task()
         return 0
+    relaunched = relaunch()
+    if relaunched is not None:
+        return relaunched
     parser = argparse.ArgumentParser(description='S3GM setup')
     parser.add_argument('--game', type=Path, help='your Skate 3 disc image (.iso) or extracted default.xex')
     parser.add_argument('--gmod', type=Path, help='the garrysmod folder (found automatically if left out)')
