@@ -160,7 +160,8 @@ local lastTrick = ""
 local seenAt = -math.huge -- when the widget last had something live to show
 local view -- what to draw this frame, or nil
 
--- Hall of Meat's score in the same widget, in red: running while the bail
+-- Hall of Meat's score in the same widget, the points in red under a white
+-- "Bail": running while the bail
 -- goes on, then held like a finished line, with the skeleton beside it.
 local function MeatView(now)
 	local b, going = Meat.Current()
@@ -171,7 +172,7 @@ local function MeatView(now)
 	return {
 		alpha = alpha, live = false, timer = 0, multiplier = 1,
 		points = Points(points), value = points, good = false,
-		trick = "Hall of Meat", meat = b.parts,
+		trick = "Bail", meat = b.parts,
 	}
 end
 
@@ -244,7 +245,7 @@ local function Minimal(v, cx, cy, s)
 	local x = cx + r + 14 * s
 	local color = v.live and WHITE or (v.good and GREEN or RED)
 	Shadowed(v.points, "skate3_points", x, cy - 8 * s, color, alpha, TEXT_ALIGN_LEFT)
-	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, v.meat and RED or WHITE, alpha, TEXT_ALIGN_LEFT)
+	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, WHITE, alpha, TEXT_ALIGN_LEFT)
 	-- Hall of Meat's skeleton, left of the ring.
 	if v.meat then Meat.DrawSkeleton(cx - r - 40 * s, cy, 150 * s, alpha, v.meat) end
 end
@@ -264,7 +265,7 @@ local function HL2(v)
 	local a = v.alpha
 	local s = ScrH() / 480
 	local fg = v.good and HL2_FG or HL2_RED
-	local label = v.meat and "MEAT" or not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
+	local label = v.meat and "BAIL" or not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
 	local mult = v.live and "x" .. Multiplier(v.multiplier):sub(1, -2) or ""
 	local number = tostring(v.value)
 	surface.SetFont("HudSelectionText")
