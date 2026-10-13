@@ -77,11 +77,19 @@ if (-not $python) {
         Write-Host "Fetching Python $PythonVersion for the converters (one time, nothing is installed)..."
         $zip = Join-Path $cache 'python.zip'
         $partial = "$portable.partial"
-        if (Test-Path $partial) { Remove-Item -Recurse -Force $partial }
-        Invoke-WebRequest -Uri $PythonZip -OutFile $zip -UseBasicParsing
-        Expand-Archive -Path $zip -DestinationPath $partial -Force
-        Remove-Item -Force $zip
-        Move-Item $partial $portable
+        # A copy a stopped run left half done would swallow the new one.
+        foreach ($old in @($portable, $partial)) {
+            if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
+        }
+        try { Invoke-WebRequest -Uri $PythonZip -OutFile $zip -UseBasicParsing }
+        catch { Die "Downloading Python from nuget.org failed: $($_.Exception.Message) Check the internet connection, then run this again." }
+        try { Expand-Archive -LiteralPath $zip -DestinationPath $partial -Force }
+        catch { Die "Unpacking Python failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
+        Remove-Item -LiteralPath $zip -Force
+        Move-Item -LiteralPath $partial -Destination $portable
+        if (-not (Test-Path -LiteralPath $portableExe)) {
+            Die "Python was fetched, but $portableExe is missing. An antivirus may have removed it: allow the folder $cache, delete it, then run this again."
+        }
     }
     $python = @($portableExe)
 }
