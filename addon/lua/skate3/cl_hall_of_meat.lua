@@ -225,9 +225,10 @@ local function Line(x1, y1, x2, y2, w, color)
 	local nx, ny = -dy / len * w / 2, dx / len * w / 2
 	surface.SetDrawColor(color)
 	draw.NoTexture()
+	-- Clockwise on screen, or DrawPoly draws nothing.
 	surface.DrawPoly({
-		{ x = x1 + nx, y = y1 + ny }, { x = x2 + nx, y = y2 + ny },
-		{ x = x2 - nx, y = y2 - ny }, { x = x1 - nx, y = y1 - ny },
+		{ x = x1 - nx, y = y1 - ny }, { x = x2 - nx, y = y2 - ny },
+		{ x = x2 + nx, y = y2 + ny }, { x = x1 + nx, y = y1 + ny },
 	})
 end
 
