@@ -5,6 +5,9 @@
 CreateConVar("skate3_spawned_props", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
 	"Let skaters ride and grind props players spawn and the map's movable props (1 on, 0 off)")
 
+CreateConVar("skate3_blood", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
+	"Blood splats where bails hit hard (1 on, 0 off)")
+
 if SERVER then
 	AddCSLuaFile("skate3/cl_skate3.lua")
 	AddCSLuaFile("skate3/cl_live_props.lua")

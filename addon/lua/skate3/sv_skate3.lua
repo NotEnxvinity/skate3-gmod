@@ -2,6 +2,8 @@ util.AddNetworkString("skate3_state")
 util.AddNetworkString("skate3_move")
 util.AddNetworkString("skate3_pose")
 util.AddNetworkString("skate3_bail")
+util.AddNetworkString("skate3_injury")
+util.AddNetworkString("skate3_blood")
 
 local Pose = include("skate3/sh_pose.lua")
 
@@ -121,6 +123,55 @@ net.Receive("skate3_bail", function(_, ply)
 	dmg:SetAttacker(game.GetWorld())
 	dmg:SetInflictor(game.GetWorld())
 	ply:TakeDamageInfo(dmg)
+end)
+
+-- Injuries (cl_hall_of_meat.lua) cost health too while bail damage is on: a
+-- fracture a little, a break a lot, on top of the bail's own hit.
+local cv_fracture = CreateConVar("skate3_bail_damage_fracture", "5", FCVAR_ARCHIVE,
+	"With bail damage on: health a fractured bone costs (times the scale)", 0, 100)
+local cv_break = CreateConVar("skate3_bail_damage_break", "15", FCVAR_ARCHIVE,
+	"With bail damage on: health a broken bone costs (times the scale)", 0, 100)
+-- One bail can't hurt more than every part of the body breaking once.
+local MAX_INJURIES = 36
+
+net.Receive("skate3_injury", function(_, ply)
+	local part, level = net.ReadUInt(5), net.ReadUInt(2)
+	if not cv_bail:GetBool() or not ply.Skate3 or not ply:Alive() then return end
+	if part < 1 or part > 18 or level < 1 or level > 2 then return end
+	local now = CurTime()
+	if now - (ply.skate3InjuryAt or -10) > 5 then ply.skate3Injuries = 0 end
+	ply.skate3InjuryAt = now
+	ply.skate3Injuries = (ply.skate3Injuries or 0) + 1
+	if ply.skate3Injuries > MAX_INJURIES then return end
+	local scale = math.Clamp(cv_bailScale:GetFloat(), 0.1, 10)
+	local amount = math.ceil((level == 2 and cv_break or cv_fracture):GetFloat() * scale)
+	if amount <= 0 then return end
+	local dmg = DamageInfo()
+	dmg:SetDamage(amount)
+	dmg:SetDamageType(DMG_FALL)
+	dmg:SetAttacker(game.GetWorld())
+	dmg:SetInflictor(game.GetWorld())
+	ply:TakeDamageInfo(dmg)
+end)
+
+-- Blood where a bail's hard hits land, for everyone to see. Skate 3 never
+-- bled, so the server can turn it off.
+local cv_blood = GetConVar("skate3_blood")
+-- How far from where the server has the skater a splat may be.
+local BLOOD_REACH = 256
+
+net.Receive("skate3_blood", function(_, ply)
+	local pos, normal = net.ReadVector(), net.ReadNormal()
+	if not cv_blood:GetBool() or not ply.Skate3 or not ply:Alive() then return end
+	local now = CurTime()
+	if now - (ply.skate3BloodAt or -10) < 0.1 then return end
+	ply.skate3BloodAt = now
+	if pos:DistToSqr(ply:GetPos()) > BLOOD_REACH * BLOOD_REACH then return end
+	util.Decal("Blood", pos + normal * 4, pos - normal * 8, ply)
+	local fx = EffectData()
+	fx:SetOrigin(pos)
+	fx:SetNormal(normal)
+	util.Effect("BloodImpact", fx, true, true)
 end)
 
 hook.Add("PlayerDeath", "skate3_stop", ForceStop)

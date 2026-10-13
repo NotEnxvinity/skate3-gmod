@@ -1,8 +1,11 @@
--- Hall of Meat, after Skate 3's: with it on, every bail scores. Each body
--- part is watched while the skater tumbles; a hard hit on something counts,
--- and enough of them fracture (yellow) or break (red) it, shown on a
--- skeleton beside the score. The engine has no injuries of its own, so the
--- hits are read off the bail's bones here; the numbers are our tuning.
+-- Injuries, and Hall of Meat after Skate 3's. Each body part is watched
+-- while the skater tumbles; a hard hit on something counts, and enough of
+-- them fracture or break it. That always runs: the server's bail damage
+-- (skate3_bail_damage) charges for injuries and its blood (skate3_blood)
+-- splats where the hard hits land. With Hall of Meat on, bails also score,
+-- in red, with a skeleton beside the score showing fractures yellow and
+-- breaks red. The engine has no injuries of its own, so the hits are read
+-- off the bail's bones here; the numbers are our tuning.
 -- Bail on purpose: both triggers and both sticks clicked.
 
 local Meat = {}
@@ -30,6 +33,10 @@ local FRACTURE_POINTS, BREAK_POINTS = 750, 2000
 local TUMBLE_POINTS = 25 -- per metre
 -- One part counts one hit at a time while it scrapes along.
 local COOLDOWN = 0.2
+-- Hits at least this hard (m/s) bleed, when the server allows blood.
+local BLOOD_HIT = 6
+local BLOOD_GAP = 0.15
+local lastBlood = -math.huge
 
 -- Body parts: the bones they're read from, and where they sit on the
 -- skeleton (facing you, so the skater's left is on the right).
@@ -76,7 +83,26 @@ local function PartPos(bones, part)
 	return n > 0 and sum / n or nil
 end
 
-local function Hit(part, state, severity, now)
+local cv_blood = GetConVar("skate3_blood")
+
+-- The server applies injury damage and draws blood for everyone.
+local function Tell(index, level)
+	net.Start("skate3_injury")
+	net.WriteUInt(index, 5)
+	net.WriteUInt(level, 2)
+	net.SendToServer()
+end
+
+local function Bleed(tr, now)
+	if not (cv_blood and cv_blood:GetBool()) or now - lastBlood < BLOOD_GAP then return end
+	lastBlood = now
+	net.Start("skate3_blood")
+	net.WriteVector(tr.HitPos)
+	net.WriteNormal(tr.HitNormal)
+	net.SendToServer()
+end
+
+local function Hit(index, state, severity, now)
 	state.damage = state.damage + severity
 	bail.points = bail.points + severity * severity * HIT_POINTS
 	local level = state.level
@@ -87,7 +113,8 @@ local function Hit(part, state, severity, now)
 	end
 	if level > state.level then
 		-- The engine's own broken-bone shot: slow motion and a shake.
-		if level == 2 and skate3 and skate3.BrokenBone then skate3.BrokenBone(1) end
+		if level == 2 and Meat.Enabled() and skate3 and skate3.BrokenBone then skate3.BrokenBone(1) end
+		Tell(index, level)
 		bail.points = bail.points + (level == 2 and BREAK_POINTS or FRACTURE_POINTS)
 			- (state.level == 1 and FRACTURE_POINTS or 0)
 		state.level = level
@@ -106,7 +133,7 @@ function Meat.Update(pose, ply)
 		skate3.SetHallOfMeat(told and 1 or 0)
 	end
 	local bailing = pose and pose.state and pose.state:find("^Wipeout") ~= nil
-	if not Meat.Enabled() or not bailing or not pose.bones then
+	if not bailing or not pose.bones then
 		if bail then
 			last, bail = bail, nil
 			last.endedAt = now
@@ -130,7 +157,7 @@ function Meat.Update(pose, ply)
 		bail.points = bail.points + hips:Distance(hipsAt) / UNITS * TUMBLE_POINTS
 	end
 	hipsAt = hips
-	for _, part in ipairs(PARTS) do
+	for index, part in ipairs(PARTS) do
 		local pos = PartPos(pose.bones, part)
 		if pos then
 			local t = track[part.id]
@@ -145,7 +172,8 @@ function Meat.Update(pose, ply)
 						local reach = t.vel:GetNormalized() * (t.vel:Length() * dt + 6)
 						local tr = util.TraceLine({ start = t.pos, endpos = t.pos + reach, mask = MASK_SOLID, filter = ply })
 						if tr.Hit then
-							Hit(part, bail.parts[part.id], change, now)
+							Hit(index, bail.parts[part.id], change, now)
+							if change >= BLOOD_HIT then Bleed(tr, now) end
 							t.coolUntil = now + COOLDOWN
 						end
 					end
@@ -159,6 +187,7 @@ end
 -- The bail to show: the one going on, or the last one, with its points and
 -- injuries; nil when there's none.
 function Meat.Current()
+	if not Meat.Enabled() then return nil end
 	if bail then return bail, true end
 	return last, false
 end

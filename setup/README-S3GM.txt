@@ -63,9 +63,13 @@ Settings
 Spawn menu > Utilities > Skate 3: stance, camera, sounds (Skate 3's from
 your disc, or Half-Life 2's), bail sounds, footsteps, volume, the trick
 score's look, and a button to reset them all to the defaults.
-Servers: skate3_bail_damage turns bail damage on or off, skate3_spawned_props 0
-makes spawned props passable to the board again, skate3_enabled 0 turns the
-mode off.
+Hall of Meat (Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
+score, in red, with a skeleton showing fractured bones yellow and broken ones
+red. Bail on purpose: hold both triggers and click both sticks.
+Servers: skate3_bail_damage turns bail damage on or off (fractures and breaks
+cost extra: skate3_bail_damage_fracture, skate3_bail_damage_break),
+skate3_blood 0 turns off blood splats, skate3_spawned_props 0 makes spawned
+props passable to the board again, skate3_enabled 0 turns the mode off.
 
 
 Credits
