@@ -1,17 +1,25 @@
-# S3GM (Skate 3 in Garry's Mod) setup for Windows, run with your own Python.
-# The Windows twin of skate3-setup.sh; S3GM-setup-Windows.bat starts it.
+# S3GM (Skate 3 in Garry's Mod) setup for Windows. The Windows twin of
+# skate3-setup.sh; S3GM-setup-Windows.bat starts it.
 #
-#   S3GM-setup-Windows.bat                                  the setup window
-#   S3GM-setup-Windows.bat --game "D:\Skate 3\skate3.iso"   the same without it
+#   drag your Skate 3 .iso onto S3GM-setup-Windows.bat     no questions asked
+#   double-click S3GM-setup-Windows.bat                    uses an .iso beside
+#                                                          it, or asks for one
+#   S3GM-setup-Windows.bat --game "D:\Skate 3\skate3.iso"  [--gmod <folder>]
 #
-# Needs Python 3.10 to 3.13 from python.org. The first run downloads the
-# Skate 3 engine's converters and vgmstream into %LOCALAPPDATA%\skate3-gmod,
-# and numpy and Pillow into a private Python environment there.
+# The Lua addon comes from the Steam Workshop; this installs the skate module
+# and converts what it needs from the disc. Nothing needs installing first:
+# without a Python 3.10 to 3.13 on the computer, the first run downloads
+# Python's own portable build (the "python" package Python publishes on
+# NuGet) into %LOCALAPPDATA%\skate3-gmod, along with the Skate 3 engine's
+# converters, vgmstream, and numpy and Pillow in a private environment.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
 # The engine revision the skate host was built from (the same as skate3-setup.sh).
 $EngineRev = 'cb7968930f14dad38457e98720d1a274e469eec2'
+# Python's portable Windows build, published by Python itself on NuGet.
+$PythonVersion = '3.13.16'
+$PythonZip = "https://api.nuget.org/v3-flatcontainer/python/$PythonVersion/python.$PythonVersion.nupkg"
 $EngineZip = "https://github.com/SK8-ENGINE/skate-3-rust-engine/archive/$EngineRev.zip"
 $VgmstreamZip = 'https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-win64.zip'
 
@@ -19,7 +27,34 @@ $here = $PSScriptRoot
 $cache = Join-Path $env:LOCALAPPDATA 'skate3-gmod'
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 
-function Die($message) { Write-Host "error: $message" -ForegroundColor Red; exit 1 }
+Add-Type -AssemblyName System.Windows.Forms
+function Die($message) {
+    Write-Host "error: $message" -ForegroundColor Red
+    [void][System.Windows.Forms.MessageBox]::Show($message, 'S3GM setup', 'OK', 'Error')
+    exit 1
+}
+
+# What to convert: a disc image dragged onto the .bat, --game, an .iso (or
+# extracted default.xex) sitting beside the setup, or one picked in a window.
+$rest = @()
+$game = $null
+for ($i = 0; $i -lt $args.Count; $i++) {
+    if ($args[$i] -eq '--game' -and $i + 1 -lt $args.Count) { $game = $args[$i + 1]; $i++ }
+    elseif ($args[$i] -notlike '--*' -and -not $game -and (Test-Path -LiteralPath $args[$i])) { $game = $args[$i] }
+    else { $rest += $args[$i] }
+}
+if (-not $game) {
+    $beside = @(Get-ChildItem -LiteralPath $here, (Split-Path $here -Parent) -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Extension -eq '.iso' -or $_.Name -eq 'default.xex' })
+    if ($beside.Count -eq 1) { $game = $beside[0].FullName; Write-Host "Using $game" }
+}
+if (-not $game) {
+    $dialog = New-Object System.Windows.Forms.OpenFileDialog
+    $dialog.Title = 'Select your Skate 3 (Xbox 360) disc image, or default.xex'
+    $dialog.Filter = 'Skate 3 disc image (*.iso;default.xex)|*.iso;default.xex|All files (*.*)|*.*'
+    if ($dialog.ShowDialog() -ne 'OK') { Die 'No Skate 3 disc picked, so nothing was installed.' }
+    $game = $dialog.FileName
+}
 
 # A Python that numpy 2.2 has wheels for: 3.10 to 3.13.
 $python = $null
@@ -29,7 +64,22 @@ foreach ($candidate in @(@('py', '-3.13'), @('py', '-3.12'), @('py', '-3.11'), @
     $version = & $exe @rest -c 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))' 2>$null
     if ($LASTEXITCODE -eq 0 -and $version -in @('3.10', '3.11', '3.12', '3.13')) { $python = $candidate; break }
 }
-if (-not $python) { Die 'Python 3.10 to 3.13 is needed. Install Python 3.13 from python.org (tick "Add python.exe to PATH"), then run this again.' }
+if (-not $python) {
+    # None installed: Python's own portable build, kept with the rest.
+    $portable = Join-Path $cache "python-$PythonVersion"
+    $portableExe = Join-Path $portable 'tools\python.exe'
+    if (-not (Test-Path $portableExe)) {
+        Write-Host "Fetching Python $PythonVersion for the converters (one time, nothing is installed)..."
+        $zip = Join-Path $cache 'python.zip'
+        $partial = "$portable.partial"
+        if (Test-Path $partial) { Remove-Item -Recurse -Force $partial }
+        Invoke-WebRequest -Uri $PythonZip -OutFile $zip -UseBasicParsing
+        Expand-Archive -Path $zip -DestinationPath $partial -Force
+        Remove-Item -Force $zip
+        Move-Item $partial $portable
+    }
+    $python = @($portableExe)
+}
 $pyExe = $python[0]; $pyArgs = @($python | Select-Object -Skip 1)
 
 $engine = Join-Path $cache ('engine-' + $EngineRev.Substring(0, 7))
@@ -77,6 +127,15 @@ if (-not $ready) {
 
 $env:SKATE3_ENGINE = $engine
 $env:SKATE3_VGMSTREAM = $vgmstream
-# --with-addon keeps this build's Lua, as on Linux.
-& $venvPython (Join-Path $here 'skate3_setup.py') --with-addon @args
-exit $LASTEXITCODE
+$setup = Join-Path $here 'skate3_setup.py'
+& $venvPython $setup --game $game @rest
+if ($LASTEXITCODE -eq 2) {
+    # Garry's Mod wasn't found in any Steam library.
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = 'Garry''s Mod wasn''t found. Select its garrysmod folder (Steam > Garry''s Mod > Manage > Browse local files, then the garrysmod folder inside).'
+    if ($dialog.ShowDialog() -ne 'OK') { Die 'No garrysmod folder picked, so nothing was installed.' }
+    & $venvPython $setup --game $game --gmod $dialog.SelectedPath @rest
+}
+if ($LASTEXITCODE -ne 0) { Die 'Setup stopped with an error; the window above says why.' }
+[void][System.Windows.Forms.MessageBox]::Show("All set! Subscribe to S3GM on the Steam Workshop if you haven't, then start Garry's Mod, load a map and equip the Skateboard.", 'S3GM setup')
+exit 0

@@ -19,37 +19,33 @@ What you need
   Keyboard and mouse also works now, but it's early: WASD, Space pushes,
   E gets on and off, flick the mouse for tricks, click to grab. Keys are in
   Utilities > Skate 3 > Settings.
-- Linux / SteamOS: git and python3 (SteamOS has both).
-- Windows: Python 3.10 to 3.13 from python.org (tick "Add python.exe to PATH").
-- macOS (new): git and Python 3.10 to 3.13 (python.org or Homebrew; the
-  python3 that comes with macOS is too old).
+- Nothing else: the setup brings its own Python the first time (it needs
+  internet for that, a few hundred MB).
 
 
 Install
 -------
-1. Open your Garry's Mod folder: Steam > right-click Garry's Mod > Manage >
-   Browse local files. It's the folder called "GarrysMod" (it has a
-   "garrysmod" folder inside).
-2. Extract this zip right there. It adds two things:
-     garrysmod/addons/skate3   the addon (merges into the garrysmod folder)
-     S3GM-setup/               the setup
-   macOS: use the Mac zip, which has only S3GM-setup in it; the setup
-   installs the addon itself. Never drag a garrysmod folder in on a Mac:
-   Finder's "Replace" deletes your whole garrysmod folder.
+1. Subscribe to "S3GM: Skate 3 in Gmod" on the Steam Workshop. That's the
+   addon itself.
+2. Extract this zip anywhere, Downloads is fine. You get one folder,
+   S3GM-setup. Don't put it in your Garry's Mod folder, it finds Gmod itself.
 3. Run the setup once (and again after every S3GM update):
-     Linux / SteamOS:  open S3GM-setup in a terminal and run  ./skate3-setup.sh
-     Windows:          double-click S3GM-setup\S3GM-setup-Windows.bat
-     macOS:            open Terminal, type  bash  and a space, drag
-                       skate3-setup.sh from S3GM-setup into the window,
-                       press Return
-   Pick your Skate 3 .iso (or default.xex) in the window. It finds Garry's
-   Mod, installs the skate engine module, and converts the skater,
-   animations and sounds from your disc. The first run
-   downloads a few helpers, so give it a few minutes.
+     Windows:  drag your Skate 3 .iso onto S3GM-setup-Windows.bat
+               (or double-click it and pick the .iso)
+     macOS:    double-click S3GM-setup-Mac.command. The first time, macOS
+               blocks downloaded scripts: right-click it > Open > Open.
+     Linux / SteamOS:  open S3GM-setup in a terminal and run ./skate3-setup.sh
+   An .iso sitting next to the S3GM-setup folder (or inside it) is used
+   without asking. Setup finds Garry's Mod, installs the skate engine
+   module, and converts the skater, animations and sounds from your disc.
+   The first run downloads a few helpers, so give it a few minutes.
    Without a window: add  --game "/path/to/Skate 3.iso"  (and
    --gmod "/path/to/garrysmod" if it can't find Garry's Mod).
 4. Start Garry's Mod, load a map, and equip the Skateboard
    (spawn menu > Weapons > Skate 3).
+
+Joining someone's server? You need this setup too: everyone's skating runs
+from their own disc.
 
 
 Controls
@@ -64,8 +60,9 @@ Settings
 Spawn menu > Utilities > Skate 3: stance, camera, sounds (Skate 3's from
 your disc, or Half-Life 2's), bail sounds, footsteps, volume, the trick
 score's look, and a button to reset them all to the defaults.
-Servers: skate3_bail_damage turns bail damage on or off, skate3_enabled 0
-turns the mode off.
+Servers: skate3_bail_damage turns bail damage on or off, skate3_spawned_props 0
+makes spawned props passable to the board again, skate3_enabled 0 turns the
+mode off.
 
 
 Credits
