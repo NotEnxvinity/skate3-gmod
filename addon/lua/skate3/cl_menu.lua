@@ -139,6 +139,8 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Half-Life 2", "hl2" },
 		})
 		panel:CheckBox("Show the status line", "skate3_hud")
+		panel:CheckBox("Hall of Meat", "skate3_hall_of_meat")
+		panel:ControlHelp("Bails score points and break bones, shown in red with the skeleton. Bail on purpose: hold both triggers and click both sticks.")
 
 		BoardChoices(panel)
 		KeyboardChoices(panel)

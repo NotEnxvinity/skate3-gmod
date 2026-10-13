@@ -282,6 +282,21 @@ lua_fn!(step, |lua| {
     0
 });
 
+// Hall of Meat: the engine's own mode switch (1 or 0), which turns on its
+// broken-bone camera.
+lua_fn!(set_hall_of_meat, |lua| {
+    skate_bridge::hall_of_meat::set_enabled(lua.number(1).unwrap_or(0.) != 0.);
+    0
+});
+
+// A bone just broke: the camera's broken-bone slow motion and shake for the
+// given seconds (default 1).
+lua_fn!(broken_bone, |lua| {
+    let seconds = lua.number(1).unwrap_or(1.).clamp(0., 5.);
+    skate_bridge::hall_of_meat::break_bone((seconds * 60.) as u32);
+    0
+});
+
 lua_fn!(suspend, |lua| {
     with_runtime(|r| r.send(Job::Suspend));
     let _ = lua;
@@ -581,6 +596,8 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Init", init as lua::CFunction),
         (c"LoadMap", load_map),
         (c"SetProps", set_props),
+        (c"SetHallOfMeat", set_hall_of_meat),
+        (c"BrokenBone", broken_bone),
         (c"Status", status),
         (c"Activate", activate),
         (c"Step", step),

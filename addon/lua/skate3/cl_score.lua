@@ -6,6 +6,7 @@
 -- HUD panels.
 
 local Score = {}
+local Meat = include("skate3/cl_hall_of_meat.lua")
 
 local cv_score = CreateClientConVar("skate3_score_hud", "1", true, false, "Show the trick score widget")
 local cv_style = CreateClientConVar("skate3_score_style", "world", true, false,
@@ -159,13 +160,37 @@ local lastTrick = ""
 local seenAt = -math.huge -- when the widget last had something live to show
 local view -- what to draw this frame, or nil
 
+-- Hall of Meat's score in the same widget, in red: running while the bail
+-- goes on, then held like a finished line, with the skeleton beside it.
+local function MeatView(now)
+	local b, going = Meat.Current()
+	if not b then return nil end
+	local alpha = going and 1 or math.Clamp((HOLD + FADE - (now - b.endedAt)) / FADE, 0, 1)
+	if alpha <= 0 then return nil end
+	local points = math.floor(b.points + 0.5)
+	return {
+		alpha = alpha, live = false, timer = 0, multiplier = 1,
+		points = Points(points), value = points, good = false,
+		trick = "Hall of Meat", meat = b.parts,
+	}
+end
+
 -- Works out this frame's view from the engine's score.
 local function Update(pose)
 	view = nil
+	Meat.Update(pose, LocalPlayer())
 	if not cv_score:GetBool() or not pose or not pose.score then return end
 	local sc = pose.score
 	local now = RealTime()
 	local bailing = pose.state and pose.state:find("^Wipeout") ~= nil
+	if Meat.Enabled() then
+		view = MeatView(now)
+		if view then
+			-- The bail took the line with it; don't flash "Bail" after.
+			flash, last = nil, { banked = sc.banked, active = sc.active, sequence = sc.sequence, line = sc.line }
+			return
+		end
+	end
 
 	if last then
 		if sc.banked > last.banked + 0.5 then
@@ -219,7 +244,9 @@ local function Minimal(v, cx, cy, s)
 	local x = cx + r + 14 * s
 	local color = v.live and WHITE or (v.good and GREEN or RED)
 	Shadowed(v.points, "skate3_points", x, cy - 8 * s, color, alpha, TEXT_ALIGN_LEFT)
-	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, WHITE, alpha, TEXT_ALIGN_LEFT)
+	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, v.meat and RED or WHITE, alpha, TEXT_ALIGN_LEFT)
+	-- Hall of Meat's skeleton, left of the ring.
+	if v.meat then Meat.DrawSkeleton(cx - r - 40 * s, cy, 150 * s, alpha, v.meat) end
 end
 
 -- Half-Life 2's HUD, laid out like its HEALTH panel on the same row: a dim
@@ -237,7 +264,7 @@ local function HL2(v)
 	local a = v.alpha
 	local s = ScrH() / 480
 	local fg = v.good and HL2_FG or HL2_RED
-	local label = not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
+	local label = v.meat and "MEAT" or not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
 	local mult = v.live and "x" .. Multiplier(v.multiplier):sub(1, -2) or ""
 	local number = tostring(v.value)
 	surface.SetFont("HudSelectionText")
@@ -252,6 +279,7 @@ local function HL2(v)
 	draw.SimpleText(mult, "HudSelectionText", x + pad, y + 6 * s, ColorAlpha(HL2_FG, HL2_FG.a * a))
 	draw.SimpleText(label, "HudSelectionText", x + pad, y + 20 * s, ColorAlpha(fg, fg.a * a))
 	draw.SimpleText(number, "HudNumbers", x + w - pad, y + 2 * s, ColorAlpha(fg, fg.a * a), TEXT_ALIGN_RIGHT)
+	if v.meat then Meat.DrawSkeleton(x - 34 * s, y + h / 2, 60 * s, a, v.meat) end
 	if not v.live then return end
 	local segGap = 2 * s
 	local segW = (w - 2 * pad - segGap * (SEGMENTS - 1)) / SEGMENTS
@@ -346,6 +374,7 @@ function Score.DrawWorld(pos)
 end
 
 function Score.Reset()
+	Meat.Reset()
 	last, flash, shown, lastTrick, seenAt, view, worldOffset = nil, nil, 0, "", -math.huge, nil, nil
 end
 

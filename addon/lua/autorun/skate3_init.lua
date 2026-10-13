@@ -8,6 +8,7 @@ CreateConVar("skate3_spawned_props", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCV
 if SERVER then
 	AddCSLuaFile("skate3/cl_skate3.lua")
 	AddCSLuaFile("skate3/cl_live_props.lua")
+	AddCSLuaFile("skate3/cl_hall_of_meat.lua")
 	AddCSLuaFile("skate3/cl_skater.lua")
 	AddCSLuaFile("skate3/cl_body.lua")
 	AddCSLuaFile("skate3/cl_others.lua")

@@ -1,0 +1,78 @@
+diff --git a/skate/crates/skate-host/src/hall_of_meat.rs b/skate/crates/skate-host/src/hall_of_meat.rs
+new file mode 100644
+index 0000000..121012e
+--- /dev/null
++++ b/skate/crates/skate-host/src/hall_of_meat.rs
+@@ -0,0 +1,35 @@
++//! Hall of Meat for a host that scores it itself (S3GM): the original's mode
++//! switch (game settings +184) and the broken-bone duration Scoring2 keeps at
++//! +200, which the camera reads for its broken-bone slow motion and shake.
++
++use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
++
++static ENABLED: AtomicBool = AtomicBool::new(false);
++/// Camera publications the current broken bone still lasts.
++static BROKEN: AtomicU32 = AtomicU32::new(0);
++
++pub fn set_enabled(on: bool) {
++    ENABLED.store(on, Ordering::Relaxed);
++    if !on {
++        BROKEN.store(0, Ordering::Relaxed);
++    }
++}
++
++pub fn enabled() -> bool {
++    ENABLED.load(Ordering::Relaxed)
++}
++
++/// A bone just broke: the camera's broken-bone shot runs for `ticks`.
++pub fn break_bone(ticks: u32) {
++    if enabled() {
++        BROKEN.store(ticks, Ordering::Relaxed);
++    }
++}
++
++/// Seconds left on the broken bone, counting one tick down per call.
++pub(crate) fn broken_duration() -> f32 {
++    let left = BROKEN
++        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| n.checked_sub(1))
++        .unwrap_or(0);
++    left as f32 / 60.0
++}
+diff --git a/skate/crates/skate-host/src/lib.rs b/skate/crates/skate-host/src/lib.rs
+index d844700..2b26d82 100644
+--- a/skate/crates/skate-host/src/lib.rs
++++ b/skate/crates/skate-host/src/lib.rs
+@@ -15,5 +15,6 @@ mod crash_context;
+ mod tuning;
+ 
+ pub use physics::bridge;
++pub mod hall_of_meat;
+ 
+ mod session_marker;
+diff --git a/skate/crates/skate-host/src/physics/animation_phase.rs b/skate/crates/skate-host/src/physics/animation_phase.rs
+index f971996..f73b421 100644
+--- a/skate/crates/skate-host/src/physics/animation_phase.rs
++++ b/skate/crates/skate-host/src/physics/animation_phase.rs
+@@ -345,7 +345,7 @@ pub(crate) fn publish_feedback(
+     skater.player_input.physical.scoring.capabilities_204 =
+         skate_core::player::conditioner_capabilities::ConditionerCapabilityContext {
+             in_front_end: false,
+-            hall_of_meat_enabled: false,
++            hall_of_meat_enabled: crate::hall_of_meat::enabled(),
+             challenge_query_active: false,
+             challenge_configuration_enabled: false,
+         }
+diff --git a/skate/crates/skate-host/src/physics/camera_output.rs b/skate/crates/skate-host/src/physics/camera_output.rs
+index 1b186bb..5efa632 100644
+--- a/skate/crates/skate-host/src/physics/camera_output.rs
++++ b/skate/crates/skate-host/src/physics/camera_output.rs
+@@ -152,7 +152,7 @@ pub(crate) fn publish(
+             //Completed State503 Fill82D4E0A8, consumed as Ground322 by the camera.
+             hippy_jump_322: physical.ground.hippy_jumping_322,
+             //Scoring2 reset82DE4468; HoM duration stays inactive in this host.
+-            broken_bone_duration_200: 0.0,
++            broken_bone_duration_200: crate::hall_of_meat::broken_duration(),
+             //AirCollector82DA78D0 publishes the world conditioner capability mask.
+             capabilities_204: physical.scoring.capabilities_204,
+         },

@@ -7,4 +7,4 @@ pub mod rails;
 pub mod repro;
 pub mod world;
 
-pub use skate_host::bridge;
+pub use skate_host::{bridge, hall_of_meat};
