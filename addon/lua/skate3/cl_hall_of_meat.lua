@@ -197,78 +197,33 @@ function Meat.Reset()
 	bail, last, track, lastTick, hipsAt, lastBones = nil, nil, {}, nil, nil, nil
 end
 
--- Skate 3's X-ray: the skeleton drawn through the skater's body, each bone
--- white, yellow when fractured and red when broken, while the bail goes on
--- and while its score shows after.
+-- Skate 3's X-ray: the skeleton drawn through the skater's body, while the
+-- bail goes on and while its score shows after. Each bone looks like Gmod's
+-- Edit Bones view, tinted white, yellow when fractured and red when broken.
 local WHITE = Color(235, 235, 235)
 local YELLOW = Color(255, 210, 40)
 local RED = Color(255, 50, 40)
-local OUTLINE = Color(0, 0, 0, 170)
 local LEVEL_COLORS = { [0] = WHITE, YELLOW, RED }
 local SHOW_AFTER, FADE = 2.5, 0.5 -- as the score's
-
--- Bones joined, and the body part each one belongs to.
-local BONES = {
-	{ "HIPS", "SPINE", "pelvis" }, { "SPINE", "SPINE1", "ribs" }, { "SPINE1", "SPINE2", "ribs" },
-	{ "SPINE2", "SPINE3", "spine" }, { "SPINE3", "NECK", "spine" }, { "NECK", "HEAD", "skull" },
-	{ "SPINE3", "LEFTSHOULDER", "lcollar" }, { "LEFTSHOULDER", "LEFTARM", "lcollar" },
-	{ "LEFTARM", "LEFTFOREARM", "larm" }, { "LEFTFOREARM", "LEFTHAND", "lforearm" },
-	{ "SPINE3", "RIGHTSHOULDER", "rcollar" }, { "RIGHTSHOULDER", "RIGHTARM", "rcollar" },
-	{ "RIGHTARM", "RIGHTFOREARM", "rarm" }, { "RIGHTFOREARM", "RIGHTHAND", "rforearm" },
-	{ "HIPS", "LEFTUPLEG", "pelvis" }, { "LEFTUPLEG", "LEFTLEG", "lfemur" },
-	{ "LEFTLEG", "LEFTFOOT", "lshin" }, { "LEFTFOOT", "LEFTTOEBASE", "lfoot" },
-	{ "HIPS", "RIGHTUPLEG", "pelvis" }, { "RIGHTUPLEG", "RIGHTLEG", "rfemur" },
-	{ "RIGHTLEG", "RIGHTFOOT", "rshin" }, { "RIGHTFOOT", "RIGHTTOEBASE", "rfoot" },
-}
--- Joints drawn as knobs, with the part they show.
-local KNOBS = {
-	{ "HEAD", "skull", 4.5 }, { "LEFTHAND", "lhand", 1.6 }, { "RIGHTHAND", "rhand", 1.6 },
-	{ "LEFTARM", "larm", 1.3 }, { "RIGHTARM", "rarm", 1.3 }, { "LEFTLEG", "lshin", 1.4 }, { "RIGHTLEG", "rshin", 1.4 },
-}
+-- The bone pictures Edit Bones draws.
+local BONE = Material("widgets/bone.png", "unlitsmooth")
+local BONE_SMALL = Material("widgets/bone_small.png", "unlitsmooth")
 
 local function LevelColor(level, alpha)
 	local c = LEVEL_COLORS[level] or WHITE
-	return ColorAlpha(c, c.a * alpha)
+	return ColorAlpha(c, 255 * alpha)
 end
 
-local function DrawXray(bones, parts, alpha)
-	local at = {}
-	for name, m in pairs(bones) do at[name] = Pos(m) end
-	local shade = ColorAlpha(OUTLINE, OUTLINE.a * alpha)
-	render.SetColorMaterial()
-	-- Ribs: hoops across the chest, side to side between the shoulders.
-	local side = at.LEFTSHOULDER and at.RIGHTSHOULDER and (at.LEFTSHOULDER - at.RIGHTSHOULDER):GetNormalized()
-	local ribs = {}
-	if side then
-		for _, pair in ipairs({ { "SPINE1", 0.55 }, { "SPINE2", 0.8 }, { "SPINE2", 0.4 } }) do
-			local c = at[pair[1]]
-			if c then
-				local half = side * (at.LEFTSHOULDER:Distance(at.RIGHTSHOULDER) * 0.5 * pair[2] + 2)
-				ribs[#ribs + 1] = { c - half, c + half }
-			end
-		end
-	end
-	for pass = 1, 2 do
-		local width = pass == 1 and 2.4 or 1.4
-		for _, b in ipairs(BONES) do
-			local a, z = at[b[1]], at[b[2]]
-			if a and z then render.DrawBeam(a, z, width, 0, 1, pass == 1 and shade or LevelColor(parts[b[3]].level, alpha)) end
-		end
-		for _, r in ipairs(ribs) do
-			render.DrawBeam(r[1], r[2], width * 0.8, 0, 1, pass == 1 and shade or LevelColor(parts.ribs.level, alpha))
-		end
-		for _, k in ipairs(KNOBS) do
-			local p = at[k[1]]
-			if p then render.DrawSphere(p, k[3] + (pass == 1 and 0.6 or 0), 10, 10, pass == 1 and shade or LevelColor(parts[k[2]].level, alpha)) end
-		end
-	end
+local function Bone(a, b, color)
+	local length = a:Distance(b)
+	if length < 0.5 then return end
+	render.SetMaterial(length < 6 and BONE_SMALL or BONE)
+	render.DrawBeam(a, b, math.Clamp(length * 0.3, 1, 5), 0, 1, color)
 end
 
--- Gmod's own skeleton model, posed bone for bone like the skater's body and
--- drawn once per injury level with every other bone shrunk away, so each
--- bone takes its own colour. The lines above stand in when it can't be.
-local SKELETON = "models/player/skeleton.mdl"
-local SKELETON_PARTS = {
+-- The playermodel's bones and the body part each belongs to: its own, or the
+-- nearest parent's (fingers go with the hand, toes with the foot).
+local BODY_PARTS = {
 	["ValveBiped.Bip01_Pelvis"] = "pelvis", ["ValveBiped.Bip01_Spine"] = "spine",
 	["ValveBiped.Bip01_Spine1"] = "ribs", ["ValveBiped.Bip01_Spine2"] = "ribs",
 	["ValveBiped.Bip01_Spine4"] = "spine", ["ValveBiped.Bip01_Neck1"] = "spine",
@@ -281,89 +236,58 @@ local SKELETON_PARTS = {
 	["ValveBiped.Bip01_L_Calf"] = "lshin", ["ValveBiped.Bip01_R_Calf"] = "rshin",
 	["ValveBiped.Bip01_L_Foot"] = "lfoot", ["ValveBiped.Bip01_R_Foot"] = "rfoot",
 }
-local skeleton, skeletonFailed
-local skel = { pass = nil, parts = nil, from = {}, part = {} } -- this draw's state
-local GONE = Vector(0.001, 0.001, 0.001)
+local skeletons = {} -- model -> { [bone] = { parent, part } }, ValveBiped bones only
 
--- Each skeleton bone's part: its own, or the nearest parent's (fingers go
--- with the hand, toes with the foot).
-local function SkeletonParts(e)
-	local part = {}
-	for i = 0, e:GetBoneCount() - 1 do
-		local p = SKELETON_PARTS[e:GetBoneName(i)]
-		local up = e:GetBoneParent(i)
-		part[i] = p or (up >= 0 and part[up]) or "pelvis"
+local function SkeletonOf(ent)
+	local model = ent:GetModel()
+	if skeletons[model] then return skeletons[model] end
+	local out, part = {}, {}
+	for i = 0, ent:GetBoneCount() - 1 do
+		local name = ent:GetBoneName(i) or ""
+		local up = ent:GetBoneParent(i)
+		part[i] = BODY_PARTS[name] or (up >= 0 and part[up]) or nil
+		-- Only the body's own skeleton: hair, capes and tails aren't bones.
+		if up >= 0 and part[i] and name:find("^ValveBiped%.Bip01_") then
+			out[i] = { parent = up, part = part[i] }
+		end
 	end
-	return part
+	skeletons[model] = out
+	return out
 end
 
-local function Skeleton()
-	if IsValid(skeleton) or skeletonFailed then return skeleton end
-	if not util.IsValidModel(SKELETON) then skeletonFailed = true return nil end
-	skeleton = ClientsideModel(SKELETON, RENDERGROUP_OPAQUE)
-	if not IsValid(skeleton) then skeletonFailed = true return nil end
-	skeleton:SetNoDraw(true)
-	skeleton:SetLOD(0)
-	skel.part = SkeletonParts(skeleton)
-	skeleton:AddCallback("BuildBonePositions", function(e, count)
-		for i = 0, count - 1 do
-			local m = skel.from[i]
-			if m then
-				if skel.pass and skel.parts and skel.parts[skel.part[i]].level ~= skel.pass then
-					m = Matrix(m)
-					m:Scale(GONE)
-				end
-				e:SetBoneMatrix(i, m)
-			end
+-- The body's own bones; false when it has none of the usual ones.
+local function DrawBodyBones(body, parts, alpha)
+	if not IsValid(body) then return false end
+	local any = false
+	for i, b in pairs(SkeletonOf(body)) do
+		local m, pm = body:GetBoneMatrix(i), body:GetBoneMatrix(b.parent)
+		if m and pm then
+			Bone(pm:GetTranslation(), m:GetTranslation(), LevelColor(parts[b.part].level, alpha))
+			any = true
 		end
-	end)
-	return skeleton
+	end
+	return any
 end
 
--- Draws the skeleton in body's pose; false when it can't.
-local function DrawSkeletonModel(body, parts, alpha)
-	local e = Skeleton()
-	if not IsValid(e) or not IsValid(body) then return false end
-	-- Where each of the skeleton's bones is on the body right now.
-	local from, any = {}, false
-	for i = 0, e:GetBoneCount() - 1 do
-		local b = body:LookupBone(e:GetBoneName(i))
-		local m = b and body:GetBoneMatrix(b)
-		if m then from[i], any = m, true end
+-- Without a playermodel: the skater's own bones, the same way.
+local ENGINE_BONES = {
+	{ "HIPS", "SPINE", "pelvis" }, { "SPINE", "SPINE1", "ribs" }, { "SPINE1", "SPINE2", "ribs" },
+	{ "SPINE2", "SPINE3", "spine" }, { "SPINE3", "NECK", "spine" }, { "NECK", "HEAD", "skull" },
+	{ "SPINE3", "LEFTSHOULDER", "lcollar" }, { "LEFTSHOULDER", "LEFTARM", "lcollar" },
+	{ "LEFTARM", "LEFTFOREARM", "larm" }, { "LEFTFOREARM", "LEFTHAND", "lforearm" },
+	{ "SPINE3", "RIGHTSHOULDER", "rcollar" }, { "RIGHTSHOULDER", "RIGHTARM", "rcollar" },
+	{ "RIGHTARM", "RIGHTFOREARM", "rarm" }, { "RIGHTFOREARM", "RIGHTHAND", "rforearm" },
+	{ "HIPS", "LEFTUPLEG", "pelvis" }, { "LEFTUPLEG", "LEFTLEG", "lfemur" },
+	{ "LEFTLEG", "LEFTFOOT", "lshin" }, { "LEFTFOOT", "LEFTTOEBASE", "lfoot" },
+	{ "HIPS", "RIGHTUPLEG", "pelvis" }, { "RIGHTUPLEG", "RIGHTLEG", "rfemur" },
+	{ "RIGHTLEG", "RIGHTFOOT", "rshin" }, { "RIGHTFOOT", "RIGHTTOEBASE", "rfoot" },
+}
+
+local function DrawEngineBones(bones, parts, alpha)
+	for _, b in ipairs(ENGINE_BONES) do
+		local m, n = bones[b[1]], bones[b[2]]
+		if m and n then Bone(Pos(m), Pos(n), LevelColor(parts[b[3]].level, alpha)) end
 	end
-	if not any then return false end
-	-- Bones the body doesn't have go with their parent, shrunk away.
-	for i = 0, e:GetBoneCount() - 1 do
-		if not from[i] then
-			local up = e:GetBoneParent(i)
-			if up >= 0 and from[up] then
-				local m = Matrix(from[up])
-				m:Scale(GONE)
-				from[i] = m
-			end
-		end
-	end
-	skel.from, skel.parts = from, parts
-	local levels = {}
-	for _, state in pairs(parts) do levels[state.level] = true end
-	e:SetPos(body:GetPos())
-	-- Over everything, as an X-ray, but in front of and behind itself.
-	render.ClearDepth()
-	render.SetBlend(alpha)
-	for level = 0, 2 do
-		if levels[level] then
-			local c = LEVEL_COLORS[level]
-			skel.pass = level
-			render.SetColorModulation(c.r / 255, c.g / 255, c.b / 255)
-			e:InvalidateBoneCache()
-			e:SetupBones()
-			e:DrawModel()
-		end
-	end
-	render.SetColorModulation(1, 1, 1)
-	render.SetBlend(1)
-	skel.pass, skel.from, skel.parts = nil, {}, nil
-	return true
 end
 
 hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(_, skybox)
@@ -373,9 +297,10 @@ hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(_, skybo
 	if not b then return end
 	local alpha = going and 1 or math.Clamp((SHOW_AFTER + FADE - (RealTime() - b.endedAt)) / FADE, 0, 1)
 	if alpha <= 0 then return end
-	if Meat.Body and DrawSkeletonModel(Meat.Body(), b.parts, alpha) then return end
 	cam.IgnoreZ(true)
-	DrawXray(lastBones, b.parts, alpha)
+	if not (Meat.Body and DrawBodyBones(Meat.Body(), b.parts, alpha)) then
+		DrawEngineBones(lastBones, b.parts, alpha)
+	end
 	cam.IgnoreZ(false)
 end)
 
