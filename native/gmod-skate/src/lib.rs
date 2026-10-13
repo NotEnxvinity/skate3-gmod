@@ -142,6 +142,31 @@ lua_fn!(load_map, |lua| {
     }
 });
 
+// Objects on top of the map that the board should hit and grind, such as
+// spawned props, as a flat {x1,y1,z1, x2,y2,z2, ...} of triangles. Replaces
+// the last set; swapped in mid-ride once built.
+lua_fn!(set_props, |lua| {
+    let extra = lua
+        .numbers(1)
+        .unwrap_or_default()
+        .chunks_exact(9)
+        .map(|t| {
+            [
+                Vec3::new(t[0], t[1], t[2]),
+                Vec3::new(t[3], t[4], t[5]),
+                Vec3::new(t[6], t[7], t[8]),
+            ]
+        })
+        .collect();
+    match with_runtime(|r| r.send(Job::Props { extra })) {
+        Some(()) => {
+            lua.push_bool(true);
+            1
+        }
+        None => lua.fail("call skate3.Init first"),
+    }
+});
+
 lua_fn!(status, |lua| {
     lua.new_table();
     let pad = input::poll().ok().and_then(|p| p.name);
@@ -155,11 +180,17 @@ lua_fn!(status, |lua| {
                     s.rails.len(),
                     s.active,
                     s.error.clone(),
+                    s.revision,
+                    s.props,
                 )
             })
             .map_err(|_| ())
     }) {
-        let (state, triangles, rails, active, ride_error) = s;
+        let (state, triangles, rails, active, ride_error, revision, props) = s;
+        lua.push_number(revision as f64);
+        lua.set_field(-2, c"revision");
+        lua.push_number(props as f64);
+        lua.set_field(-2, c"props");
         if let Status::Loading(step) = state {
             lua.push_str(step);
             lua.set_field(-2, c"stage");
@@ -549,6 +580,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
     for (name, f) in [
         (c"Init", init as lua::CFunction),
         (c"LoadMap", load_map),
+        (c"SetProps", set_props),
         (c"Status", status),
         (c"Activate", activate),
         (c"Step", step),

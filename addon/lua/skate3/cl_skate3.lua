@@ -4,6 +4,7 @@ local Score = include("skate3/cl_score.lua")
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_menu.lua")
 local Props = include("skate3/cl_props.lua")
+local LiveProps = include("skate3/cl_live_props.lua")(Props)
 local Pose = include("skate3/sh_pose.lua")
 include("skate3/cl_others.lua")(Skater)
 include("skate3/cl_collision_report.lua")
@@ -12,7 +13,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.2.0")
+print("[skate3] lua build: v2.2.1-test-1")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
@@ -36,6 +37,7 @@ local resumeYaw -- the heading to start at instead of the view's
 local stepOffFrame = 0
 local pose
 local rails
+local railsRevision -- the collision swap the rails above came from
 local status = {}
 local nextStatus = 0
 local loadStage, loadStartedAt -- the collision build's current step, for the console
@@ -354,9 +356,12 @@ hook.Add("Think", "skate3_step", function()
 				process and ("%.0f MB"):format(process) or "?"))
 			if not loadStage then loadStartedAt = nil end
 		end
-		if status.state == "ready" and not rails then
-			rails = skate3.GetRails()
-			print(("[skate3] collision ready: %d triangles, %d grind rails"):format(status.triangles, status.rails))
+		if status.state == "ready" and (not rails or status.revision ~= railsRevision) then
+			-- Again after each prop swap, for skate3_debug_rails.
+			if not rails then
+				print(("[skate3] collision ready: %d triangles, %d grind rails"):format(status.triangles, status.rails))
+			end
+			rails, railsRevision = skate3.GetRails(), status.revision
 		elseif active and (status.state == "failed" or status.error) then
 			-- The full reason goes to the console; chat gets the gist.
 			local why = tostring(status.error)
@@ -380,6 +385,7 @@ hook.Add("Think", "skate3_step", function()
 			end
 		end
 	end
+	if status.state == "ready" then LiveProps.Think(now, active and pose and pose.state) end
 	if not active then return end
 	-- The simulation always spawns on the board, so tap Y for the player
 	-- until the skater is on foot.

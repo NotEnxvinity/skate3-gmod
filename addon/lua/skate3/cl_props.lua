@@ -106,6 +106,30 @@ local function Hulls(model)
 	return out
 end
 
+Props.Hulls = Hulls
+
+-- Appends a model's hull triangles, placed by matrix `m`, to the flat list
+-- `out` holding `n` numbers. Returns the new count.
+function Props.AppendHulls(out, n, hs, m)
+	for _, verts in ipairs(hs) do
+		local centre = Vector()
+		for _, v in ipairs(verts) do centre:Add(v) end
+		centre:Div(#verts)
+		for t = 1, #verts - 2, 3 do
+			local a, b, c = verts[t], verts[t + 1], verts[t + 2]
+			-- The module only collides with a triangle's front, so
+			-- each one faces out of its hull, counterclockwise.
+			if (b - a):Cross(c - a):Dot(a - centre) < 0 then b, c = c, b end
+			for _, v in ipairs({ a, b, c }) do
+				local w = m * v
+				out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
+				n = n + 3
+			end
+		end
+	end
+	return n
+end
+
 local cache = { map = nil, tris = {} }
 
 -- Every solid static prop's hull triangles in world space, as the flat
@@ -126,22 +150,7 @@ function Props.Triangles(bsp)
 			local m = Matrix()
 			m:Translate(prop.pos)
 			m:Rotate(prop.ang)
-			for _, verts in ipairs(hs) do
-				local centre = Vector()
-				for _, v in ipairs(verts) do centre:Add(v) end
-				centre:Div(#verts)
-				for t = 1, #verts - 2, 3 do
-					local a, b, c = verts[t], verts[t + 1], verts[t + 2]
-					-- The module only collides with a triangle's front, so
-					-- each one faces out of its hull, counterclockwise.
-					if (b - a):Cross(c - a):Dot(a - centre) < 0 then b, c = c, b end
-					for _, v in ipairs({ a, b, c }) do
-						local w = m * v
-						out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
-						n = n + 3
-					end
-				end
-			end
+			n = Props.AppendHulls(out, n, hs, m)
 			used = used + 1
 			if n / 9 >= MAX_TRIANGLES then
 				print(("[skate3] prop collision stopped at %d triangles"):format(MAX_TRIANGLES))

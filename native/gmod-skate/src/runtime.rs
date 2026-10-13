@@ -31,6 +31,8 @@ pub enum Job {
         aspect: f32,
     },
     Suspend,
+    /// Objects on top of the map, such as spawned props, in Source units.
+    Props { extra: Vec<[Vec3; 3]> },
 }
 
 #[derive(Clone, Default)]
@@ -84,6 +86,11 @@ pub struct Shared {
     /// Why the last ride stopped, if the simulation gave up on it. The map
     /// stays loaded, so the next activation starts a fresh ride.
     pub error: Option<String>,
+    /// Counts collision swaps since the module loaded, so Lua knows when to
+    /// fetch the rails again.
+    pub revision: u32,
+    /// Triangles of the objects laid over the map.
+    pub props: usize,
 }
 
 pub struct Runtime {
@@ -140,8 +147,69 @@ fn panic_message(panic: &(dyn std::any::Any + Send)) -> &str {
 /// A loaded map's collision in Skate space.
 struct MapWorld {
     assets: PathBuf,
+    /// The map plus whatever props are in it now.
     triangles: Vec<[[f32; 3]; 3]>,
     rails: Vec<Vec<[f32; 3]>>,
+    /// The map alone, which prop collision is built on top of.
+    base_triangles: Arc<Vec<[[f32; 3]; 3]>>,
+    base_rails: Arc<Vec<Vec<[f32; 3]>>>,
+}
+
+/// Collision with props built off the simulation thread, ready to swap in.
+struct Built {
+    map: u64,
+    prepared: Result<skate_bridge::bridge::PreparedCollision, String>,
+    triangles: Vec<[[f32; 3]; 3]>,
+    rails: Vec<Vec<[f32; 3]>>,
+    props: usize,
+}
+
+/// Starts building the map with `extra` on top, on its own thread.
+fn build_props(
+    builder: skate_bridge::bridge::CollisionBuilder,
+    map: &MapWorld,
+    map_id: u64,
+    extra: Vec<[Vec3; 3]>,
+    done: mpsc::Sender<Built>,
+) -> Option<std::thread::JoinHandle<()>> {
+    let base_triangles = Arc::clone(&map.base_triangles);
+    let base_rails = Arc::clone(&map.base_rails);
+    std::thread::Builder::new()
+        .name("skate3-props".into())
+        .stack_size(32 * 1024 * 1024)
+        .spawn(move || {
+            skate_bridge::float_mode::pc();
+            let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                let added = world::extra(&base_triangles, &extra);
+                let props = added.triangles.len();
+                let mut triangles = base_triangles.to_vec();
+                triangles.extend(added.triangles);
+                let mut rails = base_rails.to_vec();
+                // The engine counts rails in a u16; the map's own come first.
+                let room = (u16::MAX as usize).saturating_sub(rails.len());
+                rails.extend(added.rails.into_iter().take(room));
+                let prepared = builder.build(triangles.clone(), rails.clone());
+                Built {
+                    map: map_id,
+                    prepared,
+                    triangles,
+                    rails,
+                    props,
+                }
+            }))
+            .unwrap_or_else(|panic| Built {
+                map: map_id,
+                prepared: Err(format!(
+                    "building prop collision crashed: {}",
+                    panic_message(&*panic)
+                )),
+                triangles: Vec::new(),
+                rails: Vec::new(),
+                props: 0,
+            });
+            let _ = done.send(built);
+        })
+        .ok()
 }
 
 fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
@@ -166,7 +234,92 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     // Set once the simulation failed: some of its state may be non-finite
     // beyond what a teleport resets, so the next ride starts a fresh session.
     let mut broken = false;
-    while let Ok(job) = jobs.recv() {
+    // Prop collision: built on its own thread, one build at a time, with the
+    // newest set of props waiting its turn. Builds for a map since replaced
+    // are dropped.
+    let (built_tx, built_rx) = mpsc::channel::<Built>();
+    let mut building: Option<std::thread::JoinHandle<()>> = None;
+    let mut pending: Option<Vec<[Vec3; 3]>> = None;
+    let mut map_id: u64 = 0;
+    loop {
+        let job = match jobs.recv_timeout(std::time::Duration::from_millis(50)) {
+            Ok(job) => Some(job),
+            Err(mpsc::RecvTimeoutError::Timeout) => None,
+            Err(mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        while let Ok(done) = built_rx.try_recv() {
+            if let Some(h) = building.take() {
+                let _ = h.join();
+            }
+            if done.map != map_id {
+                continue;
+            }
+            let installed = match (done.prepared, session.as_mut()) {
+                (Ok(prepared), Some(session)) => {
+                    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        session.install_collision(prepared)
+                    }))
+                    .unwrap_or_else(|panic| {
+                        Err(format!(
+                            "swapping in prop collision crashed: {}",
+                            panic_message(&*panic)
+                        ))
+                    })
+                }
+                (Ok(_), None) => Err("the map isn't loaded".into()),
+                (Err(e), _) => Err(e),
+            };
+            match installed {
+                Ok(()) => {
+                    let rails: Vec<Vec<Vec3>> = done
+                        .rails
+                        .iter()
+                        .map(|r| {
+                            r.iter()
+                                .map(|p| collision::from_skate(Vec3::from_array(*p)))
+                                .collect()
+                        })
+                        .collect();
+                    let count = done.triangles.len();
+                    if let Some(map) = map.as_mut() {
+                        // A ride recorded from here replays on the new collision.
+                        recording = Some(Recording::new(done.triangles.clone(), done.rails.clone()));
+                        recording_full = false;
+                        map.triangles = done.triangles;
+                        map.rails = done.rails;
+                    }
+                    set(&|s| {
+                        s.triangles = count;
+                        s.rails = rails.clone();
+                        s.props = done.props;
+                        s.revision = s.revision.wrapping_add(1);
+                    });
+                }
+                Err(e) => eprintln!("[skate3] prop collision not swapped in: {e}"),
+            }
+        }
+        if building.is_none()
+            && let (Some(s), Some(m)) = (session.as_ref(), map.as_ref())
+            && let Some(extra) = pending.take()
+        {
+            building = build_props(s.collision_builder(), m, map_id, extra, built_tx.clone());
+        }
+        let Some(job) = job else { continue };
+        if let Job::Props { extra } = job {
+            pending = Some(extra);
+            if building.is_none()
+                && let (Some(s), Some(m)) = (session.as_ref(), map.as_ref())
+                && let Some(extra) = pending.take()
+            {
+                building = build_props(s.collision_builder(), m, map_id, extra, built_tx.clone());
+            }
+            continue;
+        }
+        if matches!(job, Job::Load { .. }) {
+            // Props belong to the map they were placed in.
+            map_id = map_id.wrapping_add(1);
+            pending = None;
+        }
         let riding = !matches!(job, Job::Load { .. });
         // A panic in the engine fails this job instead of silently killing
         // the thread, which would leave the map loading forever.
@@ -205,6 +358,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             assets: assets.clone(),
                             triangles: built.triangles.clone(),
                             rails: built.rails.clone(),
+                            base_triangles: Arc::new(built.triangles.clone()),
+                            base_rails: Arc::new(built.rails.clone()),
                         });
                         // A fresh session for every map, even one already
                         // running: a replay starts from a new session, so one
@@ -230,6 +385,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             s.status = Status::Ready;
                             s.triangles = count;
                             s.rails = rails.clone();
+                            s.props = 0;
+                            s.revision = s.revision.wrapping_add(1);
                         });
                     }
                     Job::Activate {
@@ -312,6 +469,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             set(&|s| s.pose = Some(pose.clone()));
                         }
                     }
+                    Job::Props { .. } => {}
                     Job::Suspend => {
                         if let Some(session) = session.as_mut().filter(|_| !broken) {
                             record(&mut recording, &mut recording_full, Event::Suspend);
@@ -376,6 +534,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 });
             }
         }
+    }
+    // No thread may still run this library's code once the game unloads it.
+    if let Some(h) = building.take() {
+        let _ = h.join();
     }
 }
 

@@ -44,6 +44,12 @@ pub struct RailCensus {
 
 /// Rails over `tris` (map units, z up), each a polyline of two or more points.
 pub fn find(tris: &[[Vec3; 3]]) -> (Vec<Vec<Vec3>>, RailCensus) {
+    find_among(tris, tris.len())
+}
+
+/// Rails on the edges of the first `candidates` triangles only; the rest are
+/// probed for the ground and walls around them but grow no rails of their own.
+pub fn find_among(tris: &[[Vec3; 3]], candidates: usize) -> (Vec<Vec<Vec3>>, RailCensus) {
     let grid = Grid::build(tris);
     let mut probe = Probe {
         tris,
@@ -56,7 +62,7 @@ pub fn find(tris: &[[Vec3; 3]]) -> (Vec<Vec<Vec3>>, RailCensus) {
     // Every edge of a walkable face, once.
     let key = |v: Vec3| v.to_array().map(|x| (x * 8.).round() as i32);
     let mut edges: HashMap<([i32; 3], [i32; 3]), (Vec3, Vec3, Vec3, Vec3)> = HashMap::new();
-    for tri in tris {
+    for tri in &tris[..candidates.min(tris.len())] {
         let normal = (tri[1] - tri[0]).cross(tri[2] - tri[0]).normalize_or_zero();
         if normal.z <= UPWARD_Z {
             continue;
