@@ -44,8 +44,13 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     else { $rest += $args[$i] }
 }
 if (-not $game) {
-    $beside = @(Get-ChildItem -LiteralPath $here, (Split-Path $here -Parent) -File -ErrorAction SilentlyContinue |
+    $parent = Split-Path $here -Parent
+    $beside = @(Get-ChildItem -LiteralPath $here, $parent -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.iso' -or $_.Name -eq 'default.xex' })
+    # An extracted game in a folder of its own beside the setup.
+    $beside += @(Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object { Join-Path $_.FullName 'default.xex' } | Where-Object { Test-Path -LiteralPath $_ } |
+        ForEach-Object { Get-Item -LiteralPath $_ })
     if ($beside.Count -eq 1) { $game = $beside[0].FullName; Write-Host "Using $game" }
 }
 if (-not $game) {

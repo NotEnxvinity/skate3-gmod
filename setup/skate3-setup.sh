@@ -44,8 +44,9 @@ fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
 command -v curl >/dev/null || die "curl is required"
 mkdir -p "$cache"
 
-# What to convert: --game, an .iso (or extracted default.xex) beside the
-# setup or in the folder holding it, or one picked in a window.
+# What to convert: --game, an .iso or an extracted game (default.xex, or a
+# folder holding it) beside the setup or in the folder holding it, or one
+# picked in a window.
 game=
 rest=()
 while [ $# -gt 0 ]; do
@@ -57,7 +58,7 @@ done
 if [ -z "$game" ]; then
     found=()
     for dir in "$here" "$(dirname "$here")"; do
-        for f in "$dir"/*.iso "$dir"/*.ISO "$dir"/default.xex; do
+        for f in "$dir"/*.iso "$dir"/*.ISO "$dir"/default.xex "$dir"/*/default.xex; do
             [ -f "$f" ] && found+=("$f")
         done
     done
