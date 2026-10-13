@@ -946,7 +946,10 @@ function Skater.UpdateModel(p)
 	end
 	if not (IsValid(model) and p) then return end
 	model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
-	if model.skate3Real and frozen and IsValid(owner) and p.bones and not Skater.Skip.bones then
+	-- Only on the model it was measured from: another model's bones are
+	-- numbered differently, and the old frame would stretch it.
+	if model.skate3Real and frozen and IsValid(owner) and p.bones and not Skater.Skip.bones
+		and model.skate3Name == ModelFor(owner) then
 		CheckLanding()
 		local frame, forward, up = RealFrame(p)
 		Body.Apply(owner, frame, frozen)

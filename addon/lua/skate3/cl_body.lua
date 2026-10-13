@@ -666,6 +666,14 @@ end
 function Body.Apply(ply, frame, base)
 	if not IsValid(ply) or not conv or not base then return end
 	local p = posed[ply]
+	if p and p.base ~= base then
+		-- A new model: its bones are numbered differently. Let go of
+		-- everything the last one left (its bone turns and offsets, the
+		-- correction measured on it) as getting off the board does, or a
+		-- model that came out stretched kept every later one stretched.
+		Body.Release(ply)
+		p = nil
+	end
 	if not p then
 		p = {}
 		posed[ply] = p
