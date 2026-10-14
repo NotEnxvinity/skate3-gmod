@@ -618,6 +618,9 @@ function Anim.Think(ent, pose)
 	local hurt = bailing and 1 or (info.flinchUntil and now < info.flinchUntil) and 0.5 or 0
 	local rate = hurt > (info.hurt or 0) and 25 or 3
 	info.hurt = Lerp(1 - math.exp(-rate * dt), info.hurt or 0, hurt)
+	-- Settled: otherwise it creeps towards the target forever and the face's
+	-- flexes are rewritten every frame for nothing.
+	if math.abs(info.hurt - hurt) < 0.002 then info.hurt = hurt end
 	-- Blink every few seconds, not while the eyes are screwed shut anyway.
 	local blink = 0
 	if now >= info.blinkAt then

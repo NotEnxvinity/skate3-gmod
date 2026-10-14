@@ -80,8 +80,15 @@ local GROUND = {
 	asphalt_smooth_hard = "asphalt_smooth",
 }
 
+-- Asked a few times a frame, and a file.Exists looks through every mounted
+-- addon (hundreds with a big Workshop collection): checked every few seconds.
+local hasDisc, hasDiscAt = nil, -math.huge
 function Sounds.HasDisc()
-	return file.Exists("sound/skate3/index.txt", "GAME")
+	local now = RealTime()
+	if hasDisc == nil or now - hasDiscAt > 5 then
+		hasDisc, hasDiscAt = file.Exists("sound/skate3/index.txt", "GAME"), now
+	end
+	return hasDisc
 end
 
 local function Disc()
@@ -344,6 +351,12 @@ local SPIN_FULL = 50 -- km/h at which a spin starts at the very beginning
 local SPIN_HAND_CAP = 0.26
 local spin = { toggle = false }
 
+local spinInstalled = {}
+local function SpinInstalled(path)
+	if spinInstalled[path] == nil then spinInstalled[path] = file.Exists("sound/" .. path, "GAME") end
+	return spinInstalled[path]
+end
+
 local function SpinStop()
 	spin.token = nil
 	if IsValid(spin.channel) then spin.channel:Stop() end
@@ -355,9 +368,9 @@ end
 local function SpinStart(speed, pos, level, hand)
 	SpinStop()
 	local path = SPINS[spin.toggle and 2 or 1]
-	if not file.Exists("sound/" .. path, "GAME") then path = SPINS[spin.toggle and 1 or 2] end
+	if not SpinInstalled(path) then path = SPINS[spin.toggle and 1 or 2] end
 	spin.toggle = not spin.toggle
-	if not file.Exists("sound/" .. path, "GAME") then return end
+	if not SpinInstalled(path) then return end
 	local x = math.Clamp(math.abs(speed) * 3.6 / SPIN_FULL, 0, 1)
 	if hand then x = math.min(x, SPIN_HAND_CAP) end
 	local seek = SPIN_LENGTH * (1 - x)

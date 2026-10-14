@@ -62,6 +62,7 @@ return function(Skater, ride)
 		Add(("riding with everything on: %.0f fps (%.1f ms a frame; start %.0f fps, end %.0f fps)"):format(
 			1000 / baseMs, baseMs, 1000 / base[1], 1000 / base[2]))
 		Add(("the start and end runs differ by %.1f ms, so gains smaller than that are noise"):format(math.abs(base[1] - base[2])))
+		if t.posing then Add(t.posing) end
 		local ranked = {}
 		for _, r in ipairs(t.results) do
 			if r.part[1] ~= nil then ranked[#ranked + 1] = r end
@@ -116,7 +117,17 @@ return function(Skater, ride)
 			local part = PARTS[t.n]
 			if part[1] ~= "off" and not ride.active() then Finish("you got off the board") return end
 			if now - t.since < SETTLE then return end
+			-- During the first run, how the posing's time splits up.
+			local stats = Skater.Body.Stats
+			if t.n == 1 and t.frames == 0 then t.stats0 = table.Copy(stats) end
 			t.sum, t.frames = t.sum + dt, t.frames + 1
+			if t.n == 1 and now - t.since >= SETTLE + MEASURE then
+				local s0, f = t.stats0, t.frames
+				local function d(k) return ((stats[k] or 0) - (s0[k] or 0)) end
+				t.posing = ("posing, per frame: building the pose %.2f ms, applying it %.2f ms (solve %.2f ms in %.1f runs), placing bones %.2f ms in %.1f body setups"):format(
+					d("frame") / f * 1000, d("apply") / f * 1000, d("solve") / f * 1000, d("solves") / f,
+					d("place") / f * 1000, d("places") / f)
+			end
 			if now - t.since < SETTLE + MEASURE then return end
 			t.results[#t.results + 1] = { part = part, ms = t.sum / t.frames * 1000 }
 			if t.n == #PARTS then Finish() else Begin(t.n + 1) end

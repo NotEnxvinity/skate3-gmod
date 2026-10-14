@@ -108,8 +108,13 @@ return function(Skater, Perf)
 	end
 
 	-- The model the frame's bone numbers belong to.
+	local validModel = {}
 	local function ModelOf(ply, f)
-		if f.model and f.model ~= "" and util.IsValidModel(f.model) then return f.model end
+		local m = f.model
+		if m and m ~= "" then
+			if validModel[m] == nil then validModel[m] = util.IsValidModel(m) end
+			if validModel[m] then return m end
+		end
 		return ply:GetModel()
 	end
 

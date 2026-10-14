@@ -437,7 +437,14 @@ local function Local(p, i)
 end
 
 -- Work out and set every turn and offset for the body placed at E.
+local SolveTimed
 local function Solve(ply, p, E)
+	local s = SysTime()
+	SolveTimed(ply, p, E)
+	Body.Stats.solve, Body.Stats.solves = Body.Stats.solve + SysTime() - s, Body.Stats.solves + 1
+end
+
+function SolveTimed(ply, p, E)
 	local f, base = p.frame, p.base
 	local E0 = Matrix()
 	E0:SetAngles(Angle(0, f.yaw, 0))
@@ -477,14 +484,36 @@ local function Solve(ply, p, E)
 			F[i] = Fi
 		end
 	end
-	for i, R in pairs(turns) do ply:ManipulateBoneAngles(i, Body.AnglesFor(R)) end
-	for i, v in pairs(offsets) do ply:ManipulateBonePosition(i, v) end
+	-- Each bone is only written when its value changed: Solve runs a few
+	-- times a frame, and most bones hold still between them.
+	local angSet, posSet = p.angSet or {}, p.posSet or {}
+	p.angSet, p.posSet = angSet, posSet
+	for i, R in pairs(turns) do
+		local a, was = Body.AnglesFor(R), angSet[i]
+		if not was or math.abs(a.p - was.p) + math.abs(a.y - was.y) + math.abs(a.r - was.r) > 1e-3 then
+			ply:ManipulateBoneAngles(i, a)
+			angSet[i] = a
+		end
+	end
+	for i, v in pairs(offsets) do
+		local was = posSet[i]
+		if not was or v:DistToSqr(was) > 1e-6 then
+			ply:ManipulateBonePosition(i, v)
+			posSet[i] = v
+		end
+	end
 	-- Bones set last time but not this time go back to normal.
 	for i in pairs(p.applied or {}) do
-		if not turns[i] then ply:ManipulateBoneAngles(i, angle_zero) end
+		if not turns[i] then
+			ply:ManipulateBoneAngles(i, angle_zero)
+			angSet[i] = nil
+		end
 	end
 	for i in pairs(p.moved or {}) do
-		if not offsets[i] then ply:ManipulateBonePosition(i, vector_origin) end
+		if not offsets[i] then
+			ply:ManipulateBonePosition(i, vector_origin)
+			posSet[i] = nil
+		end
 	end
 	p.applied, p.moved, p.E = turns, offsets, E
 	p.want = F
@@ -670,7 +699,18 @@ local function Tally(ply, p)
 			or "leaving it to Gmod."))
 end
 
+-- Time spent in the posing, for skate3_perf_test's breakdown.
+Body.Stats = { place = 0, places = 0, solve = 0, solves = 0 }
+local Stats = Body.Stats
+
+local PlaceAllTimed
 local function PlaceAll(ply, count)
+	local s = SysTime()
+	PlaceAllTimed(ply, count)
+	Stats.place, Stats.places = Stats.place + SysTime() - s, Stats.places + 1
+end
+
+function PlaceAllTimed(ply, count)
 	local p = posed[ply]
 	if not (p and p.base) then return end
 	local n = math.min(count, p.base.count)
@@ -697,7 +737,7 @@ local function PlaceAll(ply, count)
 	local guard = cv_guard:GetBool()
 	local at = p.frame and p.frame.origin
 	local carry, carryOn = p.base.carry or {}, cv_carry:GetBool()
-	local new = {}
+	local new, invs = {}, {}
 	for i = 0, n - 1 do
 		local was = old[i]
 		if was then
@@ -705,8 +745,13 @@ local function PlaceAll(ply, count)
 			if not m then
 				local par = parents[i]
 				if par and par >= 0 and new[par] and old[par] then
-					-- A bone scaled to nothing has no inverse.
-					local inv = old[par]:GetInverse() or old[par]:GetInverseTR()
+					-- A bone scaled to nothing has no inverse. Worked out once
+					-- per parent: hair and fingers share theirs.
+					local inv = invs[par]
+					if not inv then
+						inv = old[par]:GetInverse() or old[par]:GetInverseTR()
+						invs[par] = inv
+					end
 					local k = carryOn and carry[i]
 					m = k and new[par] * k * inv * was or new[par] * inv * was
 				end

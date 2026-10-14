@@ -855,14 +855,22 @@ local offFrames, offWarned = 0, false
 -- frame's setup against where they were meant to go. Said once per ride in
 -- the console when it's off for a second, since that means this Gmod
 -- places players differently than expected (skate3_body_report says more).
+-- Reading a bone makes the engine set the whole body up again right there
+-- (the posing callback and every jiggle bone included), so this looks only
+-- twice a second instead of every frame.
+local CHECK_EVERY = 0.5
+local nextCheck = 0
 local function CheckLanding()
 	if not (pelvisWant and pelvis and IsValid(owner)) or offWarned then return end
+	local now = RealTime()
+	if now < nextCheck then return end
+	nextCheck = now + CHECK_EVERY
 	local got = owner:GetBoneMatrix(pelvis)
 	if not got then return end
 	local off = got:GetTranslation():Distance(pelvisWant:GetTranslation())
 	local turn = (got:GetForward() - pelvisWant:GetForward()):Length() + (got:GetUp() - pelvisWant:GetUp()):Length()
 	offFrames = (off > 6 or turn > 0.3) and offFrames + 1 or 0
-	if offFrames > 60 then
+	if offFrames > 4 then
 		offWarned = true
 		print(("[skate3] your body isn't landing on the skater: hips %.0f units away, turned off by %.2f. Run skate3_body_report and send the thread data/skate3/body_report.txt; skate3_body copy goes back to the old way."):format(off, turn))
 	end
@@ -939,14 +947,16 @@ local function RealFrame(p)
 			local rel = toFace * world[i]
 			local r = Body.RotOnly(rel)
 			rots[i] = r
-			sent[#sent + 1] = { i = i, q = Body.Quat(r), p = rel:GetTranslation() }
+			-- Turned into numbers to send only when a frame is sent (a few
+			-- times a second), not every frame.
+			sent[#sent + 1] = { i = i, r = r, p = rel:GetTranslation() }
 		end
 	end
 	local hipsAt = pelvis and world[pelvis] and toFace * world[pelvis]:GetTranslation()
 	pelvisWant = pelvis and world[pelvis]
 	lastFrame = {
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
-		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, board = BoardParts(p, origin),
+		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, boardOf = p,
 		model = model.skate3Name,
 	}
 	return { origin = origin, yaw = yaw, rots = rots, final = final, hips = hipsAt and pelvis or nil, hipsAt = hipsAt },
@@ -984,7 +994,16 @@ end
 -- The last frame of your skater, to send to other players.
 function Skater.NetFrame()
 	if not (IsValid(model) and pose) then return nil end
-	if model.skate3Real then return lastFrame end
+	if model.skate3Real then
+		local f = lastFrame
+		if f and f.boardOf then
+			for _, b in ipairs(f.bones) do
+				if b.r then b.q, b.r = Body.Quat(b.r), nil end
+			end
+			f.board, f.boardOf = BoardParts(f.boardOf, f.origin), nil
+		end
+		return f
+	end
 	return CopyFrame(pose)
 end
 
@@ -1015,8 +1034,12 @@ function Skater.UpdateModel(p)
 	if model.skate3Real and frozen and IsValid(owner) and p.bones and not Skater.Skip.bones
 		and model.skate3Name == ModelFor(owner) then
 		CheckLanding()
+		local Stats, s = Body.Stats, SysTime()
 		local frame, forward, up = RealFrame(p)
+		local s2 = SysTime()
 		Body.Apply(owner, frame, frozen)
+		Stats.frame = (Stats.frame or 0) + s2 - s
+		Stats.apply = (Stats.apply or 0) + SysTime() - s2
 		if not Skater.Skip.board then
 			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up, boardShift = p.boardShift }, Skater.DrawBoard)
 		end
