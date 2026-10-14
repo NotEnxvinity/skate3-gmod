@@ -295,8 +295,8 @@ def s3gm_version():
 
 
 WORKSHOP_ID = '3814357793'
-WORKSHOP_NOTE = ('You\'re also subscribed to S3GM on the Steam Workshop, which is an older version. '
-                 'Unsubscribe from it while testing, so the two can\'t mix: '
+WORKSHOP_NOTE = ('You\'re also subscribed to S3GM on the Steam Workshop. That\'s fine while it\'s the same version; '
+                 'if the game seems older than this, unsubscribe from it: '
                  'steamcommunity.com/sharedfiles/filedetails/?id=' + WORKSHOP_ID)
 
 
