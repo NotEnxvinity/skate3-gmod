@@ -291,5 +291,11 @@ while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
     & $venvPython $setup --game $game --gmod $dialog.SelectedPath @rest
 }
 if ($LASTEXITCODE -ne 0) { Die 'Setup stopped with an error; the window above says why.' }
-[void][System.Windows.Forms.MessageBox]::Show(("All set! S3GM $version is installed." -replace '  ', ' ') + "`n`nStart Garry's Mod, load a map and equip the Skateboard (spawn menu > Weapons > Skate 3).", 'S3GM setup')
+$done = ("All set! S3GM $version is installed." -replace '  ', ' ') + "`n`nStart Garry's Mod, load a map and equip the Skateboard (spawn menu > Weapons > Skate 3)."
+# The Workshop S3GM is an older version; both loaded at once can mix.
+$steamapps = Split-Path (Split-Path (Split-Path $gmod -Parent) -Parent) -Parent
+if (Test-Path -LiteralPath (Join-Path $steamapps 'workshop\content\4000\3814357793')) {
+    $done += "`n`nYou're also subscribed to S3GM on the Steam Workshop, which is an older version. Unsubscribe from it while testing, so the two can't mix: steamcommunity.com/sharedfiles/filedetails/?id=3814357793"
+}
+[void][System.Windows.Forms.MessageBox]::Show($done, 'S3GM setup')
 exit 0

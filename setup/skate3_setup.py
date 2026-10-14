@@ -294,6 +294,18 @@ def s3gm_version():
     return ''
 
 
+WORKSHOP_ID = '3814357793'
+WORKSHOP_NOTE = ('You\'re also subscribed to S3GM on the Steam Workshop, which is an older version. '
+                 'Unsubscribe from it while testing, so the two can\'t mix: '
+                 'steamcommunity.com/sharedfiles/filedetails/?id=' + WORKSHOP_ID)
+
+
+def workshop_copy(gmod):
+    """True when the Steam Workshop S3GM is downloaded next to this Garry's Mod."""
+    steamapps = Path(gmod).parent.parent.parent
+    return (steamapps / 'workshop/content/4000' / WORKSHOP_ID).is_dir()
+
+
 def install_addon(gmod, wanted, report):
     """The addon this setup carries goes in addons/skate3, replacing an older
     copy, and loads instead of the Workshop one. With wanted False an old copy
@@ -359,6 +371,8 @@ def install(selected, gmod, report, with_addon=True):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
+    if with_addon and workshop_copy(gmod):
+        report(WORKSHOP_NOTE)
     report(f'All set: S3GM {s3gm_version()} is installed. Start Garry\'s Mod, load a map and equip the Skateboard.'.replace('  ', ' '))
 
 
@@ -488,9 +502,10 @@ def window(gmod, game=None):
                 progress.stop()
                 button.configure(state='normal')
                 if kind == 'done':
-                    messagebox.showinfo('S3GM setup', f'All set! S3GM {version} is installed.\n\n'
-                                        'Start Garry\'s Mod, load a map and equip the Skateboard '
-                                        '(spawn menu > Weapons > Skate 3).'.replace('  ', ' '))
+                    note = '\n\n' + WORKSHOP_NOTE if workshop_copy(target.get()) else ''
+                    messagebox.showinfo('S3GM setup', f'All set! S3GM {version} is installed.'.replace('  ', ' ') +
+                                        '\n\nStart Garry\'s Mod, load a map and equip the Skateboard '
+                                        '(spawn menu > Weapons > Skate 3).' + note)
                 else:
                     say('ERROR: ' + text)
                     messagebox.showerror('S3GM setup', text)
