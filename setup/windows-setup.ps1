@@ -15,6 +15,19 @@
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 
+# Runs a program only to ask it something: its output, or $null when it
+# fails in any way. With errors set to stop, a program that merely writes to
+# stderr (py.exe listing its Pythons when a version is missing) would
+# otherwise end the whole setup.
+function Ask($exe, [string[]]$arguments) {
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $exe @arguments 2>$null
+        if ($LASTEXITCODE -eq 0) { return ("$out").Trim() }
+    } catch {}
+    return $null
+}
+
 # The engine revision the skate host was built from (the same as skate3-setup.sh).
 $EngineRev = 'cb7968930f14dad38457e98720d1a274e469eec2'
 # Python's portable Windows build, published by Python itself on NuGet.
@@ -67,8 +80,8 @@ foreach ($candidate in @(@('py', '-3.13'), @('py', '-3.12'), @('py', '-3.11'), @
     # Not $rest: that holds the player's own arguments for skate3_setup.py.
     $exe = $candidate[0]; $flags = @($candidate | Select-Object -Skip 1)
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
-    $version = & $exe @flags -c 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))' 2>$null
-    if ($LASTEXITCODE -eq 0 -and $version -in @('3.10', '3.11', '3.12', '3.13')) { $python = $candidate; break }
+    $version = Ask $exe ($flags + @('-c', 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))'))
+    if ($version -in @('3.10', '3.11', '3.12', '3.13')) { $python = $candidate; break }
 }
 if (-not $python) {
     # None installed: Python's own portable build, kept with the rest.
@@ -138,8 +151,7 @@ $venv = Join-Path $cache 'venv'
 $venvPython = Join-Path $venv 'Scripts\python.exe'
 $ready = $false
 if (Test-Path $venvPython) {
-    & $venvPython -c 'import numpy, PIL' 2>$null
-    $ready = ($LASTEXITCODE -eq 0)
+    $ready = ($null -ne (Ask $venvPython @('-c', 'import numpy, PIL; print(1)')))
 }
 if (-not $ready) {
     Write-Host 'Creating a Python environment for the converters (one time)...'
