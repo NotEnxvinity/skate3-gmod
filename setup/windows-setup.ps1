@@ -141,7 +141,7 @@ function AddRow($y, $label, $value) {
     $form.Controls.Add($button)
     return @($box, $button)
 }
-$gmodBox, $gmodBrowse = AddRow 14 'Garry''s Mod: the garrysmod folder inside GarrysMod (Steam > Garry''s Mod > Manage > Browse local files)' $gmod
+$gmodBox, $gmodBrowse = AddRow 14 'Your garrysmod folder (lowercase, the one INSIDE GarrysMod: ...\steamapps\common\GarrysMod\garrysmod)' $gmod
 $gameBox, $gameBrowse = AddRow 74 'Your Skate 3 (Xbox 360) disc image (.iso), or default.xex in an extracted copy' $game
 $gmodBrowse.Add_Click({
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog

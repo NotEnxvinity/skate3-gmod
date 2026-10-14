@@ -451,7 +451,7 @@ def window(gmod, game=None):
                                             filetypes=[('Skate 3', '*.iso *.ISO *.xex'), ('All files', '*')])
         if picked:
             disc.set(picked)
-    row('Garry\'s Mod: the garrysmod folder inside GarrysMod (Steam > Garry\'s Mod > Manage > Browse local files)',
+    row('Your garrysmod folder (lowercase, the one INSIDE GarrysMod: .../steamapps/common/GarrysMod/garrysmod)',
         target, browse_gmod)
     row('Your Skate 3 disc image (.iso), or default.xex in an extracted copy', disc, browse_disc)
 

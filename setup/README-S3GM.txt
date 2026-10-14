@@ -31,9 +31,12 @@ Install
                        if it asks)
      Mac:              S3GM-setup-Mac.command (no Mac version of this
                        release yet; it will tell you)
-3. A window shows your Garry's Mod folder and your Skate 3 disc. Fix either
+3. A window shows your garrysmod folder and your Skate 3 disc. Fix either
    with Browse, press Install, and wait for "All set". It shows the S3GM
    version it installed. The first run takes a few minutes.
+   The Gmod folder is the lowercase "garrysmod" folder INSIDE "GarrysMod":
+     ...\steamapps\common\GarrysMod\garrysmod
+   (picking GarrysMod itself works too, setup uses the garrysmod inside it).
 4. Start Garry's Mod, load a map, and equip the Skateboard
    (spawn menu > Weapons > Skate 3).
 
