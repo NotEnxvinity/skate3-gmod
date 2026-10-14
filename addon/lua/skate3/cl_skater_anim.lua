@@ -28,6 +28,8 @@ local cv_ik = CreateClientConVar("skate3_foot_ik", "1", true, false,
 	"Lift or lower the legs so the playermodel's soles sit where the skater's do (0 = off)")
 local cv_hands_ik = CreateClientConVar("skate3_hand_ik", "1", true, false,
 	"Reach the playermodel's hands to where the skater's are, so they hold the board (0 = off)")
+local cv_reach = CreateClientConVar("skate3_hand_reach", "shoulder", true, false,
+	"Where the hands reach while skating: shoulder (default; from the model's own shoulder, scaled to its arm length, so long-legged models keep bent arms) or skater (the older way: the skater's exact hand spot, straight arms on tall models)")
 local cv_soles = CreateClientConVar("skate3_foot_clear", "1", true, false,
 	"Tip feet up so toes don't sink through the board (0 = off)")
 local cv_face = CreateClientConVar("skate3_face", "1", true, false,
@@ -289,8 +291,19 @@ function Anim.Setup(ent, rest, skater, stand)
 		info.legs[side] = FindLeg(ent, rest, side, bind, side == "L" and "LEFT" or "RIGHT", floor) or false
 		local upper, fore, wrist = Bone(ent, side .. "_UpperArm"), Bone(ent, side .. "_Forearm"), Bone(ent, side .. "_Hand")
 		info.arms = info.arms or {}
-		info.arms[side] = upper and fore and wrist and rest[upper] and rest[fore] and rest[wrist]
-			and { thigh = upper, calf = fore, foot = wrist, skateHand = (side == "L" and "LEFT" or "RIGHT") .. "HAND" } or false
+		local s = side == "L" and "LEFT" or "RIGHT"
+		local arm = upper and fore and wrist and rest[upper] and rest[fore] and rest[wrist]
+			and { thigh = upper, calf = fore, foot = wrist, skateHand = s .. "HAND", skateArm = s .. "ARM" } or false
+		-- The model's arm length over the skater's, for reaching from the
+		-- model's own shoulder (see Arms).
+		local sa, sf, sh = bind[s .. "ARM"], bind[s .. "FOREARM"], bind[s .. "HAND"]
+		if arm and sa and sf and sh then
+			local own = (Pos(rest, fore) - Pos(rest, upper)):Length() + (Pos(rest, wrist) - Pos(rest, fore)):Length()
+			local skate = (sf:GetTranslation() - sa:GetTranslation()):Length()
+				+ (sh:GetTranslation() - sf:GetTranslation()):Length()
+			if own > 1 and skate > 1 then arm.scale = math.Clamp(own / skate, 0.5, 2) end
+		end
+		info.arms[side] = arm
 	end
 	info.skateFloor = floor
 	-- How high each bone of the foot sits off the floor when the model
@@ -431,6 +444,13 @@ end
 -- Hands onto the skater's hands: the arms keep the model's own lengths, so
 -- the elbow bends to land the wrist where the skater's is (holding the board
 -- in a grab or carrying it), and the hand keeps its turn.
+-- Aimed at the skater's exact hand spot all the time, a model with longer
+-- legs than the skater's (Maxine, the fox in the montage) had its hips and
+-- shoulders lifted but its hands pulled back down to the skater's, so its
+-- arms hung dead straight. Away from the board the hand now goes where the
+-- skater's is from its shoulder, scaled to the model's arm length: the same
+-- elbow bend as the skater's, wherever the model's shoulder ends up. Only a
+-- hand at the deck (grabs) still reaches for the skater's exact spot.
 local GRIP_DISTANCE = 9 -- a hand this close to the deck holds it
 local CARRY_GAP = 16 -- the most the carried board moves to meet the hand
 
@@ -459,7 +479,24 @@ local function Arms(info, world, pose)
 			local skate = arm and pose.bones[arm.skateHand]
 			if skate and world[arm.foot] then
 				local target = Mat(skate):GetTranslation()
-				Reach(world, arm, target, info.below)
+				local aim = target
+				local shoulder = pose.bones[arm.skateArm]
+				if arm.scale and shoulder and world[arm.thigh] and cv_reach:GetString() ~= "skater" then
+					local own = world[arm.thigh]:GetTranslation()
+						+ (target - Mat(shoulder):GetTranslation()) * arm.scale
+					-- On the board, a hand at the deck holds it: the skater's
+					-- spot there, easing over to the shoulder-relative one
+					-- as the hand leaves the deck.
+					local w = 0
+					if not onFoot and info.deck and pose.bones[info.deck.bone] then
+						local m = Mat(pose.bones[info.deck.bone])
+						local a, b = m * info.deck.a, m * info.deck.b
+						local d = target:Distance(Closest(target, a, b))
+						w = 1 - math.Clamp((d - GRIP_DISTANCE) / GRIP_DISTANCE, 0, 1)
+					end
+					aim = LerpVector(w, own, target)
+				end
+				Reach(world, arm, aim, info.below)
 				local near = deckA and target:Distance(Closest(target, deckA, deckB))
 				if near and near < GRIP_DISTANCE and (not best or near < best) then
 					best = near
