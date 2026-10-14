@@ -35,21 +35,35 @@ export STEAM_COMPAT_CLIENT_INSTALL_PATH=$S
 export STEAM_COMPAT_DATA_PATH=$HOME/.cache/s3gm-ride-check-prefix
 export WINEDEBUG=-all
 mkdir -p "$STEAM_COMPAT_DATA_PATH"
+# Proton's own launcher drops a console program's output, so Proton sets up
+# its prefix once and its Wine then runs the replays directly.
+[ -d "$STEAM_COMPAT_DATA_PATH/pfx" ] || "$PROTON" run cmd /c exit > /dev/null 2>&1
+export WINEPREFIX=$STEAM_COMPAT_DATA_PATH/pfx
+WINE=$(dirname "$PROTON")/files/bin/wine
+[ -x "$WINE" ] || WINE=$(dirname "$PROTON")/dist/bin/wine
+# Runs the replay with stdout to $1 and stderr to $2, both Linux paths.
+if [ -x "$WINE" ] && "$WINE" cmd /c echo s3gm-ok 2>/dev/null | grep -q s3gm-ok; then
+	replay() { "$WINE" ./skate-headless.exe --assets "Z:$DATA/assets" --replay "Z:$ride" > "$1" 2> "$2"; }
+else
+	# No usable Wine of its own: cmd writes the files inside Proton.
+	echo "(running through Proton's launcher)"
+	replay() { "$PROTON" run cmd /c "\"Z:$PWD/skate-headless.exe\" --assets \"Z:$DATA/assets\" --replay \"Z:$ride\" > \"Z:$1\" 2> \"Z:$2\"" > /dev/null 2>&1; }
+fi
 
 OUT=$HOME/Downloads/s3gm-ride-report
 rm -rf "$OUT" && mkdir -p "$OUT"
-echo "$PROTON" > "$OUT/proton.txt"
+echo "$PROTON / $WINE" > "$OUT/proton.txt"
 for ride in "$DATA"/rides/*.sk3r; do
 	name=$(basename "$ride" .sk3r)
 	echo "Replaying $name under Proton (the first one also sets Proton up, give it a few minutes)..."
-	"$PROTON" run ./skate-headless.exe --assets "Z:$DATA/assets" --replay "Z:$ride" > "$OUT/$name.txt" 2>&1
+	replay "$OUT/$name.txt" "$OUT/$name-err.txt"
 	tail -n 1 "$OUT/$name.txt"
 	tick=$(sed -n 's/^BROKE at .*tick \([0-9]*\)).*/\1/p' "$OUT/$name.txt" | tr -d '\r')
 	if [ -n "$tick" ]; then
 		echo "  broke again, tracing the ticks before it..."
 		start=$(( tick > 12 ? tick - 12 : 0 ))
 		SKATE3_AUDIT_OFFBOARD_TICKS=$start:$(( tick + 12 )) \
-			"$PROTON" run ./skate-headless.exe --assets "Z:$DATA/assets" --replay "Z:$ride" > /dev/null 2> "$OUT/$name-trace.txt"
+			replay "$OUT/$name-traced.txt" "$OUT/$name-trace.txt"
 	fi
 done
 cd "$HOME/Downloads" && rm -f s3gm-ride-report.zip && zip -qr s3gm-ride-report.zip s3gm-ride-report
