@@ -577,12 +577,14 @@ local cv_height = CreateClientConVar("skate3_body_height", "0.9", true, false,
 local legScale -- the model's hip-to-ankle height over the skater's
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
+local parentOf = {} -- bone -> its parent
 local TORSO = { "Spine", "Spine1", "Spine2", "Spine3", "Spine4", "L_Clavicle", "R_Clavicle" }
 
 local function FindNeck(ent)
-	neckChain, kids = {}, {}
+	neckChain, kids, parentOf = {}, {}, {}
 	for i = 0, ent:GetBoneCount() - 1 do
 		local p = ent:GetBoneParent(i)
+		parentOf[i] = p
 		if p and p >= 0 then kids[p] = kids[p] or {} table.insert(kids[p], i) end
 	end
 	local function add(name, cv)
@@ -612,17 +614,24 @@ local function FindNeck(ent)
 	end
 end
 
-local function Shift(world, i, by)
-	local m = world[i]
-	if m then
-		m = Matrix(m)
-		m:SetTranslation(m:GetTranslation() + by)
-		world[i] = m
+-- Moves bone i and everything below it by `by`, as KeepNeck's shifts add up
+-- (`own`: the shift put on each bone itself). The moves are only added up
+-- here and applied to the matrices once at the end: moving every bone below
+-- right away, link after link, rebuilt the same matrices dozens of times a
+-- frame.
+local function Moved(own, i)
+	local total
+	local j = i
+	while j and j >= 0 do
+		local o = own[j]
+		if o then total = total and total + o or Vector(o) end
+		j = parentOf[j]
 	end
-	for _, k in ipairs(kids[i] or {}) do Shift(world, k, by) end
+	return total
 end
 
 local function KeepNeck(ent, world)
+	local own = {}
 	-- Here every foot is still at the skater's ankle.
 	local hip = ent:LookupBone("ValveBiped.Bip01_Pelvis")
 	local lf, rf = ent:LookupBone("ValveBiped.Bip01_L_Foot"), ent:LookupBone("ValveBiped.Bip01_R_Foot")
@@ -631,14 +640,39 @@ local function KeepNeck(ent, world)
 		and lf and rf and world[lf] and world[rf] then
 		local ankles = (world[lf]:GetTranslation() + world[rf]:GetTranslation()) / 2
 		local at = world[hip]:GetTranslation()
-		Shift(world, hip, (at - ankles) * ((legScale - 1) * lift))
+		own[hip] = (at - ankles) * ((legScale - 1) * lift)
 	end
 	for _, link in ipairs(neckChain) do
 		local i = link[1]
-		local p = ent:GetBoneParent(i)
+		local p = parentOf[i]
 		if link[3]:GetBool() and world[i] and world[p] then
 			local want = world[p] * link[2]
-			Shift(world, i, want - world[i]:GetTranslation())
+			local mp, mi = Moved(own, p), Moved(own, i)
+			if mp then want = want + mp end
+			local now = world[i]:GetTranslation()
+			if mi then now = now + mi end
+			own[i] = (own[i] or vector_origin) + (want - now)
+		end
+	end
+	if not next(own) then return end
+	-- Every moved bone, once; each bone's total is its parent's plus its own.
+	local totals = {}
+	local function Total(i)
+		if i == nil or i < 0 then return false end
+		local t = totals[i]
+		if t == nil then
+			local up, o = Total(parentOf[i]), own[i]
+			t = up and o and up + o or up or o or false
+			totals[i] = t
+		end
+		return t
+	end
+	for i, m in pairs(world) do
+		local by = Total(i)
+		if by then
+			m = Matrix(m)
+			m:SetTranslation(m:GetTranslation() + by)
+			world[i] = m
 		end
 	end
 end
