@@ -902,6 +902,7 @@ local function RealFrame(p)
 	E0:SetAngles(Angle(0, yaw, 0))
 	E0:SetTranslation(origin)
 	local toFace = E0:GetInverseTR()
+	local Stats, t0 = Body.Stats, SysTime()
 	-- The whole skeleton the way the copy gets it first, so the finishing
 	-- touches (feet on the board, hands round it) can work on it.
 	local world, skins, driven = {}, {}, {}
@@ -925,7 +926,9 @@ local function RealFrame(p)
 		skins[i] = skin
 		if skin and rest[i] then world[i] = skin * rest[i] end
 	end
+	local t1 = SysTime()
 	KeepNeck(model, world)
+	local t2 = SysTime()
 	if not Skater.Skip.anim then
 		local before = {}
 		for i, m in pairs(world) do before[i] = m end
@@ -937,6 +940,10 @@ local function RealFrame(p)
 			if before[i] ~= m and skeleton[i] then driven[i] = true end
 		end
 	end
+	local t3 = SysTime()
+	Stats.fBase = (Stats.fBase or 0) + t1 - t0
+	Stats.fNeck = (Stats.fNeck or 0) + t2 - t1
+	Stats.fAnim = (Stats.fAnim or 0) + t3 - t2
 	lastWorld = world
 	-- The finished pose of every skeleton bone the copy would write, exactly
 	-- as the copy gets it: your body is set to it at the end of each setup.

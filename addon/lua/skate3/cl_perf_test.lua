@@ -127,6 +127,8 @@ return function(Skater, ride)
 				t.posing = ("posing, per frame: building the pose %.2f ms, applying it %.2f ms (solve %.2f ms in %.1f runs), placing bones %.2f ms in %.1f body setups"):format(
 					d("frame") / f * 1000, d("apply") / f * 1000, d("solve") / f * 1000, d("solves") / f,
 					d("place") / f * 1000, d("places") / f)
+					.. ("; building splits into skeleton %.2f ms, hips and neck %.2f ms, feet hands and fingers %.2f ms (%d bones)"):format(
+					d("fBase") / f * 1000, d("fNeck") / f * 1000, d("fAnim") / f * 1000, LocalPlayer():GetBoneCount())
 			end
 			if now - t.since < SETTLE + MEASURE then return end
 			t.results[#t.results + 1] = { part = part, ms = t.sum / t.frames * 1000 }

@@ -756,7 +756,22 @@ function PlaceAllTimed(ply, count)
 					m = k and new[par] * k * inv * was or new[par] * inv * was
 				end
 			end
-			if m and guard and not Placeable(m, at) then
+			local ok = true
+			if m and guard then
+				-- The finished pose is the same for every setup in a frame
+				-- (a few: the view, shadows), so its bones are judged once.
+				if m == final[i] then
+					if p.okFor ~= final then p.okFor, p.ok = final, {} end
+					ok = p.ok[i]
+					if ok == nil then
+						ok = Placeable(m, at)
+						p.ok[i] = ok
+					end
+				else
+					ok = Placeable(m, at)
+				end
+			end
+			if m and not ok then
 				Bad(ply, p, i, final[i] and "posed off the body" or "carried off the body")
 				m = nil
 			end
