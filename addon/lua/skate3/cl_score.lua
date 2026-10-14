@@ -162,7 +162,7 @@ local seenAt = -math.huge -- when the widget last had something live to show
 local view -- what to draw this frame, or nil
 
 -- Hall of Meat's score in the same widget, the points in red under a white
--- "Bail": running while the bail
+-- "Bailed": running while the bail
 -- goes on, then held like a finished line (the skeleton shows on the
 -- skater, cl_hall_of_meat.lua).
 local function MeatView(now)
@@ -174,7 +174,7 @@ local function MeatView(now)
 	return {
 		alpha = alpha, live = false, timer = 0, multiplier = 1,
 		points = Points(points), value = points, good = false,
-		trick = "Bail", meat = b.parts,
+		trick = "Bailed", meat = b.parts,
 	}
 end
 
@@ -265,7 +265,7 @@ local function HL2(v)
 	local a = v.alpha
 	local s = ScrH() / 480
 	local fg = v.good and HL2_FG or HL2_RED
-	local label = v.meat and "BAIL" or not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
+	local label = v.meat and "BAILED" or not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
 	local mult = v.live and "x" .. Multiplier(v.multiplier):sub(1, -2) or ""
 	local number = tostring(v.value)
 	surface.SetFont("HudSelectionText")
