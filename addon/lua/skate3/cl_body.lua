@@ -4,6 +4,10 @@
 -- body's shadow, jiggle bones (hair, tails, capes), eyes, mirrors and every
 -- other player's view all see the skating pose.
 --
+-- (Bone manipulations made on a client stay on that client: other players
+-- see your skating pose because cl_others.lua poses your body on their side
+-- from the frames your game sends, not through these.)
+--
 -- Used for your own skater (cl_skater.lua works out the pose) and for other
 -- skaters (cl_others.lua, from the pose their game sends). The pose comes in
 -- as each bone's world turn relative to the skater's facing; the turns that
@@ -322,7 +326,11 @@ end
 -- per model; a model that isn't ready is tried again a few seconds later).
 local bases, baseRetry = {}, {}
 function Body.BaseFor(ply)
-	local name = ply:GetModel()
+	return Body.BaseForModel(ply:GetModel())
+end
+
+function Body.BaseForModel(name)
+	if not name or name == "" then return nil end
 	if bases[name] then return bases[name] end
 	if RealTime() < (baseRetry[name] or 0) then return nil end
 	baseRetry[name] = RealTime() + 3

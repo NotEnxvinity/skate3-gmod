@@ -14,6 +14,9 @@
 --   pelvis   bone index or nil, with ppos where it goes: from origin, in
 --            the facing's axes
 --   board    list of { name = Skate 3 bone, pos = Vector from origin, q = quat }
+--   model    string, the playermodel the bone numbers belong to ("" when
+--            unknown: then it's the player's own model). Last, so older
+--            versions reading the frame just leave it unread.
 
 local Pose = {}
 
@@ -53,6 +56,13 @@ local function ReadDir()
 	return Vector(net.ReadInt(8) / 127, net.ReadInt(8) / 127, net.ReadInt(8) / 127)
 end
 
+-- A model path worth passing on: a .mdl under models/, nothing odd in it.
+function Pose.CleanModel(name)
+	name = isstring(name) and name:lower():gsub("\\", "/") or ""
+	if #name > 200 or not name:find("^models/[%w_%-%./]+%.mdl$") or name:find("%.%.") then return "" end
+	return name
+end
+
 function Pose.Write(f)
 	net.WriteFloat(f.origin.x)
 	net.WriteFloat(f.origin.y)
@@ -80,6 +90,7 @@ function Pose.Write(f)
 		WriteSmall(board[n].pos, POS_SCALE)
 		WriteQuat(board[n].q)
 	end
+	net.WriteString(Pose.CleanModel(f.model))
 end
 
 -- Nil when the frame is garbage (NaN or off the map).
@@ -104,6 +115,8 @@ function Pose.Read()
 	for n = 1, net.ReadUInt(4) do
 		f.board[n] = { name = net.ReadString(), pos = ReadSmall(POS_SCALE), q = ReadQuat() }
 	end
+	-- An older version's frame ends here: reading on gives "".
+	f.model = Pose.CleanModel(net.ReadString())
 	return f
 end
 

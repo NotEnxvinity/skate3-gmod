@@ -75,7 +75,11 @@ map, `skate3_debug_input 1` shows the controller input, `skate3_data_path` point
 server's `skate3_enabled 0` turns the mode off.
 
 The Skate 3 board is drawn from your converted data and your playermodel is
-posed from the skater's skeleton. Other players don't see either yet.
+posed from the skater's skeleton. Other players see you skate: your game sends
+your pose and they draw a posed copy of your playermodel with the board
+(`skate3_others_body real` poses their real body instead, and
+`skate3_debug_others 1` shows what arrives from each skater). Multiplayer fix
+by undead_corporation.
 
 ## Try the headless runner
 
