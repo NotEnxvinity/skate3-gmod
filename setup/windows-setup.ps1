@@ -9,8 +9,8 @@
 # Either way a small window shows the Garry's Mod folder and disc it found,
 # so the player checks or changes them before anything runs.
 #
-# The Lua addon comes from the Steam Workshop; this installs the skate module
-# and converts what it needs from the disc. Nothing needs installing first:
+# This installs the S3GM addon and skate module into Garry's Mod and converts
+# what it needs from the disc. Nothing needs installing first:
 # without a Python 3.10 to 3.13 on the computer, the first run downloads
 # Python's own portable build (the "python" package Python publishes on
 # NuGet) into %LOCALAPPDATA%\skate3-gmod, along with the Skate 3 engine's
@@ -40,6 +40,9 @@ $EngineZip = "https://github.com/SK8-ENGINE/skate-3-rust-engine/archive/$EngineR
 $VgmstreamZip = 'https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-win64.zip'
 
 $here = $PSScriptRoot
+# The S3GM version this setup installs, shown in its windows.
+$version = ''
+try { $version = (Get-Content -LiteralPath (Join-Path $here 'VERSION') -Raw -ErrorAction Stop).Trim() } catch {}
 $cache = Join-Path $env:LOCALAPPDATA 'skate3-gmod'
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 
@@ -127,7 +130,7 @@ if ($gmod) { $gmod = GarrysmodIn $gmod }
 if (-not $gmod) { try { $gmod = FindGmod } catch { $gmod = $null } }
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $form = New-Object System.Windows.Forms.Form -Property @{
-    Text = 'S3GM setup'; Width = 640; Height = 270; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false
+    Text = ("S3GM $version setup" -replace '  ', ' '); Width = 640; Height = 270; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false
     MinimizeBox = $false; StartPosition = 'CenterScreen'; TopMost = $true
 }
 function AddRow($y, $label, $value) {
@@ -288,5 +291,5 @@ while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
     & $venvPython $setup --game $game --gmod $dialog.SelectedPath @rest
 }
 if ($LASTEXITCODE -ne 0) { Die 'Setup stopped with an error; the window above says why.' }
-[void][System.Windows.Forms.MessageBox]::Show("All set! Subscribe to S3GM on the Steam Workshop if you haven't, then start Garry's Mod, load a map and equip the Skateboard.", 'S3GM setup')
+[void][System.Windows.Forms.MessageBox]::Show(("All set! S3GM $version is installed." -replace '  ', ' ') + "`n`nStart Garry's Mod, load a map and equip the Skateboard (spawn menu > Weapons > Skate 3).", 'S3GM setup')
 exit 0

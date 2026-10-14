@@ -1,19 +1,20 @@
-"""Skate 3 for Garry's Mod setup: pick your own Skate 3 (Xbox 360) disc image
-or extracted game, and this finds Garry's Mod, installs the skate module into
-garrysmod/lua/bin, converts the game data the mod needs into
+"""Skate 3 for Garry's Mod setup: pick your Garry's Mod folder and your own
+Skate 3 (Xbox 360) disc image or extracted game, and this installs the S3GM
+addon into garrysmod/addons/skate3 (replacing any older copy), the skate
+module into garrysmod/lua/bin, converts the game data the mod needs into
 garrysmod/data/skate3 and the skate sounds into garrysmod/sound/skate3. Run it
 once, and again after an update.
-The Lua addon itself comes from the Steam Workshop.
 
 Nothing from the game is downloaded or bundled: everything comes off the disc
 you pick, on your own machine.
 
-    skate3-gmod-setup                    the setup window
-    skate3-gmod-setup --game <iso|xex>   the same without a window
+    skate3_setup.py                      the setup window
+    skate3_setup.py --window [--game <iso|xex>] [--gmod <folder>]
+                                         the window, filled in with these
+    skate3_setup.py --game <iso|xex>     the same without a window
           [--gmod <garrysmod folder>]
-          [--with-addon]                 also install the Lua addon, for
-                                         testing a build the Workshop
-                                         doesn't have yet
+          [--no-addon]                   leave addons/skate3 alone (the
+                                         Workshop copy is used)
 """
 from pathlib import Path
 import argparse, os, queue, re, runpy, shutil, sys, tempfile, threading, traceback
@@ -274,10 +275,29 @@ def game_folder(selected, work, report):
     return selected
 
 
+def s3gm_version():
+    """The S3GM version this setup installs, like 'v2.2.1 (early test 6)'."""
+    try:
+        text = (HERE / 'VERSION').read_text(encoding='utf-8').strip()
+        if text:
+            return text
+    except OSError:
+        pass
+    addon = addon_dir()
+    if addon is not None:
+        try:
+            match = re.search(r'lua build: (v[^"\s]+)', (addon / 'skate3/cl_skate3.lua').read_text(encoding='utf-8'))
+            if match:
+                return match.group(1)
+        except OSError:
+            pass
+    return ''
+
+
 def install_addon(gmod, wanted, report):
-    """The Lua normally comes from the Workshop. A copy in addons/skate3 (from
-    an older setup, or a test build) would load instead of it, so it's only
-    kept when asked for."""
+    """The addon this setup carries goes in addons/skate3, replacing an older
+    copy, and loads instead of the Workshop one. With wanted False an old copy
+    is removed so the Workshop one is used."""
     local = gmod / 'addons/skate3'
     if not wanted:
         if (local / 'lua/skate3').is_dir():
@@ -292,19 +312,24 @@ def install_addon(gmod, wanted, report):
     # Replaced whole, so files an update removed don't linger.
     shutil.rmtree(local / 'lua', ignore_errors=True)
     shutil.copytree(addon, local / 'lua')
+    if (addon.parent / 'addon.json').is_file():
+        shutil.copy2(addon.parent / 'addon.json', local / 'addon.json')
     # The spawn menu and weapon switcher icons sit beside the Lua.
     if (addon.parent / 'materials').is_dir():
         shutil.rmtree(local / 'materials', ignore_errors=True)
         shutil.copytree(addon.parent / 'materials', local / 'materials')
-    report(f'Installed the addon in {local}; it loads instead of the Workshop one until setup runs without it')
+    report(f'Installed the S3GM {s3gm_version()} addon in {local}'.replace('  ', ' '))
 
 
-def install(selected, gmod, report, with_addon=False):
-    gmod = garrysmod_in(gmod) or Path(gmod)
-    if not (gmod / 'gameinfo.txt').is_file() and not (gmod / 'lua').is_dir():
-        raise RuntimeError(f"{gmod} doesn't look like a garrysmod folder.")
+def install(selected, gmod, report, with_addon=True):
+    found = garrysmod_in(gmod)
+    if found is None:
+        raise RuntimeError(f"There's no Garry's Mod in {gmod}. Pick the garrysmod folder inside GarrysMod.")
+    gmod = found
     modules = module_dir()
     if modules is None:
+        if sys.platform == 'darwin':
+            raise RuntimeError('This download has no Mac version of S3GM yet. Stay on the last Mac release for now.')
         raise RuntimeError('The skate modules are missing from this setup.')
     bin_dir = gmod / 'lua/bin'
     bin_dir.mkdir(parents=True, exist_ok=True)
@@ -334,7 +359,7 @@ def install(selected, gmod, report, with_addon=False):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
-    report('All set. Start Garry\'s Mod, load a map and equip the Skateboard.')
+    report(f'All set: S3GM {s3gm_version()} is installed. Start Garry\'s Mod, load a map and equip the Skateboard.'.replace('  ', ' '))
 
 
 def run_task():
@@ -373,41 +398,52 @@ def self_test():
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 
-def window(gmod, with_addon_default=False):
+def window(gmod, game=None):
+    """Like the old setup app: the Garry's Mod folder and disc filled in as
+    best we can, the player checks or changes them, then presses Install."""
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
+    version = s3gm_version()
     root = tk.Tk()
-    root.title('S3GM setup')
-    root.geometry('720x520')
-    root.minsize(560, 420)
+    root.title(f'S3GM {version} setup'.replace('  ', ' '))
+    root.geometry('760x540')
+    root.minsize(600, 440)
     frame = ttk.Frame(root, padding=20)
     frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text='S3GM: Skate 3 in Garry\'s Mod', font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
-    ttk.Label(frame, justify='left', wraplength=620, text=(
-        'Pick your own Skate 3 (Xbox 360) disc image (.iso), or default.xex in an extracted copy. '
-        'Setup installs the skate engine and converts what it needs from your disc; '
-        'the addon itself comes from the Steam Workshop. '
-        'Nothing is downloaded from the game. It takes a few minutes and runs once.')).pack(anchor='w', pady=(6, 12))
+    ttk.Label(frame, text=f'S3GM {version}'.strip(), font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
+    ttk.Label(frame, justify='left', wraplength=680, text=(
+        'Check your Garry\'s Mod folder and your own Skate 3 (Xbox 360) disc image below, then press Install. '
+        'Setup installs the S3GM addon and skate engine and converts what it needs from your disc. '
+        'The first time takes a few minutes.')).pack(anchor='w', pady=(6, 12))
 
     target = tk.StringVar(value=str(gmod) if gmod else '')
-    row = ttk.Frame(frame)
-    row.pack(fill='x')
-    ttk.Label(row, text='Garry\'s Mod:').pack(side='left')
-    ttk.Entry(row, textvariable=target).pack(side='left', fill='x', expand=True, padx=6)
+    disc = tk.StringVar(value=str(game) if game else '')
+
+    def row(label, variable, browse):
+        ttk.Label(frame, text=label).pack(anchor='w', pady=(6, 0))
+        line = ttk.Frame(frame)
+        line.pack(fill='x')
+        ttk.Entry(line, textvariable=variable).pack(side='left', fill='x', expand=True, padx=(0, 6))
+        ttk.Button(line, text='Browse...', command=browse).pack(side='left')
 
     def browse_gmod():
-        picked = filedialog.askdirectory(parent=root, title='Select the garrysmod folder (inside GarrysMod)')
+        picked = filedialog.askdirectory(parent=root, title='Select the garrysmod folder (inside GarrysMod)',
+                                         initialdir=target.get() or None)
         if picked:
-            target.set(picked)
-    ttk.Button(row, text='Change...', command=browse_gmod).pack(side='left')
+            target.set(str(garrysmod_in(picked) or picked))
 
-    with_addon = tk.BooleanVar(value=with_addon_default)
-    ttk.Checkbutton(frame, variable=with_addon, text=(
-        'Also install the Lua addon (only for testing a build that isn\'t on the Workshop yet)')).pack(anchor='w', pady=(10, 0))
+    def browse_disc():
+        picked = filedialog.askopenfilename(parent=root, title='Select your Skate 3 disc image (.iso) or default.xex',
+                                            filetypes=[('Skate 3', '*.iso *.ISO *.xex'), ('All files', '*')])
+        if picked:
+            disc.set(picked)
+    row('Garry\'s Mod: the garrysmod folder inside GarrysMod (Steam > Garry\'s Mod > Manage > Browse local files)',
+        target, browse_gmod)
+    row('Your Skate 3 disc image (.iso), or default.xex in an extracted copy', disc, browse_disc)
 
     # Above the log, so a short window can't push it out of sight.
-    button = ttk.Button(frame, text='Select your Skate 3 disc...')
-    button.pack(anchor='w', pady=(12, 0))
+    button = ttk.Button(frame, text='Install')
+    button.pack(anchor='w', pady=(14, 0))
     log = tk.Text(frame, height=10, state='disabled', wrap='word')
     log.pack(fill='both', expand=True, pady=12)
     progress = ttk.Progressbar(frame, mode='indeterminate')
@@ -421,20 +457,22 @@ def window(gmod, with_addon_default=False):
         log.configure(state='disabled')
 
     def start():
-        if not target.get():
-            messagebox.showerror('Setup', 'Garry\'s Mod wasn\'t found. Use Change... to pick its garrysmod folder.')
+        folder = garrysmod_in(target.get().strip().strip('"')) if target.get().strip() else None
+        if folder is None:
+            messagebox.showerror('S3GM setup', 'There\'s no Garry\'s Mod in that folder. '
+                                 'Press Browse and pick the garrysmod folder inside GarrysMod.')
             return
-        picked = filedialog.askopenfilename(parent=root, title='Select your Skate 3 disc image or default.xex',
-                                            filetypes=[('Skate 3', '*.iso *.xex'), ('All files', '*')])
-        if not picked:
+        target.set(str(folder))
+        picked = disc.get().strip().strip('"')
+        if not picked or not Path(picked).exists():
+            messagebox.showerror('S3GM setup', 'Press Browse and pick your Skate 3 disc image (.iso) or default.xex.')
             return
         button.configure(state='disabled')
         progress.start()
-        wanted = with_addon.get()
 
         def work():
             try:
-                install(picked, target.get(), lambda text: messages.put(('log', text)), wanted)
+                install(picked, folder, lambda text: messages.put(('log', text)))
                 messages.put(('done', None))
             except Exception as error:
                 traceback.print_exc()
@@ -450,15 +488,17 @@ def window(gmod, with_addon_default=False):
                 progress.stop()
                 button.configure(state='normal')
                 if kind == 'done':
-                    messagebox.showinfo('Setup', 'All set! Start Garry\'s Mod, load a map and equip the Skateboard.')
+                    messagebox.showinfo('S3GM setup', f'All set! S3GM {version} is installed.\n\n'
+                                        'Start Garry\'s Mod, load a map and equip the Skateboard '
+                                        '(spawn menu > Weapons > Skate 3).'.replace('  ', ' '))
                 else:
                     say('ERROR: ' + text)
-                    messagebox.showerror('Setup', text)
+                    messagebox.showerror('S3GM setup', text)
         root.after(100, poll)
 
     button.configure(command=start)
     if not gmod:
-        say('Garry\'s Mod wasn\'t found automatically. Use Change... to pick its garrysmod folder.')
+        say('Garry\'s Mod wasn\'t found automatically. Press Browse next to it to pick its garrysmod folder.')
     poll()
     root.mainloop()
 
@@ -473,8 +513,11 @@ def main():
     parser = argparse.ArgumentParser(description='S3GM setup')
     parser.add_argument('--game', type=Path, help='your Skate 3 disc image (.iso) or extracted default.xex')
     parser.add_argument('--gmod', type=Path, help='the garrysmod folder (found automatically if left out)')
-    parser.add_argument('--with-addon', action='store_true',
-                        help='also install the Lua addon, for testing a build the Workshop doesn\'t have yet')
+    parser.add_argument('--window', action='store_true', help='show the setup window, filled in with --game and --gmod')
+    parser.add_argument('--no-addon', action='store_true',
+                        help='don\'t install the Lua addon (removes an old copy, so the Workshop one loads)')
+    # The addon is always installed now; kept so old command lines still work.
+    parser.add_argument('--with-addon', action='store_true', help=argparse.SUPPRESS)
     parser.add_argument('--self-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.self_test:
@@ -482,19 +525,21 @@ def main():
         return 0
     if args.gmod is not None:
         gmod = garrysmod_in(args.gmod)
-        if gmod is None:
+        if gmod is None and (args.window or args.game is None):
+            gmod = find_gmod()
+        elif gmod is None:
             print(f"error: no Garry's Mod found in {args.gmod}; pick the garrysmod folder inside GarrysMod", file=sys.stderr)
             return 2
     else:
         gmod = find_gmod()
-    if args.game is None:
-        window(gmod, args.with_addon)
+    if args.window or args.game is None:
+        window(gmod, args.game)
         return 0
     if gmod is None:
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
         return 2
     try:
-        install(args.game, gmod, lambda text: print(text, flush=True), args.with_addon)
+        install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon)
     except Exception as error:
         traceback.print_exc()
         print(f'error: {error}', file=sys.stderr)

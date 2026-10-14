@@ -46,12 +46,18 @@ def stage_folder(modules, out):
     for path in HERE.glob('*.py'):
         if not path.name.startswith('test_') and path.name != 'package.py':
             shutil.copy2(path, out / path.name)
-    shutil.copy2(HERE / 'skate3-setup.sh', out / 'skate3-setup.sh')
+    for name in ('skate3-setup.sh', 'S3GM-setup-Linux.sh', 'S3GM-setup-Mac.command', 'S3GM-setup-Windows.bat',
+                 'windows-setup.ps1', 'VERSION', 'README-S3GM.txt'):
+        if (HERE / name).is_file():
+            shutil.copy2(HERE / name, out / name)
     (out / 'bin').mkdir()
     for m in MODULES:
-        shutil.copy2(modules / m, out / 'bin' / m)
+        # A download can lack one platform's module (no Mac build yet).
+        if (modules / m).is_file():
+            shutil.copy2(modules / m, out / 'bin' / m)
     shutil.copytree(HERE.parent / 'addon/lua', out / 'addon/lua')
     shutil.copytree(HERE.parent / 'addon/materials', out / 'addon/materials')
+    shutil.copy2(HERE.parent / 'addon/addon.json', out / 'addon/addon.json')
 
 
 def main():
@@ -62,7 +68,8 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--folder', action='store_true')
     args = parser.parse_args()
-    for m in MODULES:
+    # The folder may lack the Mac module; the executable needs all three.
+    for m in MODULES if not args.folder else MODULES[:2]:
         if not (args.modules / m).is_file():
             raise SystemExit(f'missing {args.modules / m}')
     if args.folder:

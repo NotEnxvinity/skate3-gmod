@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# S3GM (Skate 3 in Garry's Mod) setup for Linux / SteamOS and macOS (where
-# S3GM-setup-Mac.command starts it with a double-click).
+# S3GM (Skate 3 in Garry's Mod) setup for Linux / SteamOS and macOS.
+# S3GM-setup-Linux.sh and S3GM-setup-Mac.command start it with a double-click.
 #
-#   ./skate3-setup.sh                                        uses an .iso beside
-#                                                            the setup, or asks
-#   ./skate3-setup.sh --game "/path/to/Skate 3.iso"          (or default.xex)
-#                     [--gmod <garrysmod folder>] [--with-addon]
+#   ./skate3-setup.sh                                        the setup window,
+#                                                            filled in with an
+#                                                            .iso beside it
+#   ./skate3-setup.sh --game "/path/to/Skate 3.iso"          no window
+#                     [--gmod <garrysmod folder>] [--no-addon]
 #
-# The Lua addon comes from the Steam Workshop; this installs the skate module
-# and converts what the mod needs from your disc. Nothing needs installing
+# This installs the S3GM addon and skate module into Garry's Mod and converts
+# what the mod needs from your disc. Nothing needs installing
 # first: without a Python 3.10 to 3.13, the first run downloads a portable
 # Python (python-build-standalone, the build uv uses) into
 # ~/.cache/skate3-gmod, along with the Skate 3 engine's converters, vgmstream,
@@ -36,22 +37,30 @@ die() {
     echo "error: $*" >&2
     if $mac; then
         osascript -e 'on run argv' -e 'display alert "S3GM setup" message (item 1 of argv) as critical' -e 'end run' "$*" >/dev/null 2>&1 || true
+    elif [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
+        if command -v kdialog >/dev/null; then kdialog --title "S3GM setup" --error "$*" >/dev/null 2>&1 || true
+        elif command -v zenity >/dev/null; then zenity --error --title "S3GM setup" --text "$*" >/dev/null 2>&1 || true
+        fi
     fi
     exit 1
 }
 fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
 
 command -v curl >/dev/null || die "curl is required"
+if $mac && [ ! -f "$here/bin/gmcl_skate3_osx64.dll" ]; then
+    die "This download has no Mac version of S3GM yet. Stay on the last Mac release for now."
+fi
 mkdir -p "$cache"
 
-# What to convert: --game, an .iso or an extracted game (default.xex, or a
-# folder holding it) beside the setup or in the folder holding it, or one
-# picked in a window.
+# What to convert: --game (then no window), or the window, filled in with an
+# .iso or an extracted game (default.xex, or a folder holding it) beside the
+# setup or in the folder holding it.
 game=
+given=false
 rest=()
 while [ $# -gt 0 ]; do
     case $1 in
-        --game) game=${2:-}; shift 2 || shift ;;
+        --game) game=${2:-}; given=true; shift 2 || shift ;;
         *) rest+=("$1"); shift ;;
     esac
 done
@@ -64,18 +73,15 @@ if [ -z "$game" ]; then
     done
     if [ ${#found[@]} -eq 1 ]; then
         game=${found[0]}
-        echo "Using $game"
-    elif $mac; then
-        game=$(osascript -e 'POSIX path of (choose file with prompt "Select your Skate 3 (Xbox 360) disc image (.iso), or default.xex")' 2>/dev/null) \
-            || die "No Skate 3 disc picked, so nothing was installed."
     fi
 fi
 
-# A Python that numpy 2.2 has wheels for: 3.10 to 3.13.
+# A Python that numpy 2.2 has wheels for: 3.10 to 3.13, with tkinter for the
+# setup window (SteamOS's own Python has none).
 python=
 for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
     if command -v "$candidate" >/dev/null &&
-        "$candidate" -c 'import sys; sys.exit(not (3, 10) <= sys.version_info[:2] <= (3, 13))' 2>/dev/null; then
+        "$candidate" -c 'import sys, tkinter; sys.exit(not (3, 10) <= sys.version_info[:2] <= (3, 13))' 2>/dev/null; then
         python=$(command -v "$candidate")
         break
     fi
@@ -132,7 +138,7 @@ if [ ! -x "$vgmstream" ]; then
 fi
 
 venv="$cache/venv"
-if [ ! -x "$venv/bin/python" ] || ! "$venv/bin/python" -c 'import numpy, PIL' 2>/dev/null; then
+if [ ! -x "$venv/bin/python" ] || ! "$venv/bin/python" -c 'import numpy, PIL, tkinter' 2>/dev/null; then
     echo "Creating a Python environment for the converters (one time)..."
     rm -rf "$venv"
     "$python" -m venv "$venv"
@@ -142,20 +148,12 @@ fi
 
 export SKATE3_ENGINE="$engine" SKATE3_VGMSTREAM="$vgmstream"
 setup=("$venv/bin/python" "$here/skate3_setup.py")
-# No disc picked yet (Linux): the setup window asks for it.
-if [ -z "$game" ]; then
-    exec "${setup[@]}" ${rest[@]+"${rest[@]}"}
+if ! $given; then
+    # The window: the player checks the Garry's Mod folder and disc, then presses Install.
+    echo "Opening the S3GM setup window..."
+    if [ -n "$game" ]; then
+        exec "${setup[@]}" --window --game "$game" ${rest[@]+"${rest[@]}"}
+    fi
+    exec "${setup[@]}" --window ${rest[@]+"${rest[@]}"}
 fi
-status=0
-"${setup[@]}" --game "$game" ${rest[@]+"${rest[@]}"} || status=$?
-if [ $status -eq 2 ] && $mac; then
-    # Garry's Mod wasn't found in any Steam library.
-    gmod=$(osascript -e 'POSIX path of (choose folder with prompt "Garry'\''s Mod was not found. Select its garrysmod folder (Steam > Garry'\''s Mod > Manage > Browse local files, then garrysmod).")' 2>/dev/null) \
-        || die "No garrysmod folder picked, so nothing was installed."
-    status=0
-    "${setup[@]}" --game "$game" --gmod "$gmod" ${rest[@]+"${rest[@]}"} || status=$?
-fi
-[ $status -eq 0 ] || die "Setup stopped with an error; the Terminal window says why."
-if $mac; then
-    osascript -e 'display dialog "All set! Subscribe to S3GM on the Steam Workshop if you haven'\''t, then start Garry'\''s Mod, load a map and equip the Skateboard." with title "S3GM setup" buttons {"OK"} default button 1' >/dev/null 2>&1 || true
-fi
+"${setup[@]}" --game "$game" ${rest[@]+"${rest[@]}"} || die "Setup stopped with an error; the lines above say why."

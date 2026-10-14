@@ -1,5 +1,5 @@
-"""The Lua addon stays out of garrysmod/addons unless asked for, since the
-Workshop provides it."""
+"""Setup installs the addon it carries into garrysmod/addons/skate3, replacing
+an older copy whole; --no-addon removes an old copy instead."""
 from pathlib import Path
 import tempfile, unittest
 
@@ -26,6 +26,16 @@ class AddonTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as gmod:
             skate3_setup.install_addon(Path(gmod), True, lambda _: None)
             self.assertTrue((Path(gmod) / 'addons/skate3/lua/autorun').is_dir())
+
+    def test_replaces_old_copy(self):
+        with tempfile.TemporaryDirectory() as gmod:
+            stale = Path(gmod) / 'addons/skate3/lua/skate3/cl_gone.lua'
+            stale.parent.mkdir(parents=True)
+            stale.write_text('-- removed in an update')
+            skate3_setup.install_addon(Path(gmod), True, lambda _: None)
+            self.assertFalse(stale.exists())
+            self.assertTrue((Path(gmod) / 'addons/skate3/addon.json').is_file())
+            self.assertTrue((Path(gmod) / 'addons/skate3/lua/skate3/cl_skate3.lua').is_file())
 
 
 if __name__ == '__main__':
