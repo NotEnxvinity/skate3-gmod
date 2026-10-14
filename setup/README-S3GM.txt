@@ -30,8 +30,9 @@ Install
 2. Extract this zip anywhere, Downloads is fine. You get one folder,
    S3GM-setup. Don't put it in your Garry's Mod folder, it finds Gmod itself.
 3. Run the setup once (and again after every S3GM update):
-     Windows:  drag your Skate 3 .iso onto S3GM-setup-Windows.bat
-               (or double-click it and pick the .iso)
+     Windows:  double-click S3GM-setup-Windows.bat (or drag your .iso onto it).
+               A small window shows your Garry's Mod folder and disc: check
+               both, use Browse to fix either, then press Install.
      macOS:    no Mac version of this release yet. Stay on v2.0.1 for now,
                and never drag a whole garrysmod folder onto yours.
      Linux / SteamOS:  open S3GM-setup in a terminal and run ./skate3-setup.sh

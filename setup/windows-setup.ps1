@@ -1,10 +1,13 @@
 # S3GM (Skate 3 in Garry's Mod) setup for Windows. The Windows twin of
 # skate3-setup.sh; S3GM-setup-Windows.bat starts it.
 #
-#   drag your Skate 3 .iso onto S3GM-setup-Windows.bat     no questions asked
-#   double-click S3GM-setup-Windows.bat                    uses an .iso beside
-#                                                          it, or asks for one
+#   drag your Skate 3 .iso onto S3GM-setup-Windows.bat     fills in the disc
+#   double-click S3GM-setup-Windows.bat                    finds an .iso beside
+#                                                          it, if there is one
 #   S3GM-setup-Windows.bat --game "D:\Skate 3\skate3.iso"  [--gmod <folder>]
+#
+# Either way a small window shows the Garry's Mod folder and disc it found,
+# so the player checks or changes them before anything runs.
 #
 # The Lua addon comes from the Steam Workshop; this installs the skate module
 # and converts what it needs from the disc. Nothing needs installing first:
@@ -48,11 +51,13 @@ function Die($message) {
 }
 
 # What to convert: a disc image dragged onto the .bat, --game, an .iso (or
-# extracted default.xex) sitting beside the setup, or one picked in a window.
+# extracted default.xex) sitting beside the setup, or one picked in the window.
 $rest = @()
 $game = $null
+$gmod = $null
 for ($i = 0; $i -lt $args.Count; $i++) {
     if ($args[$i] -eq '--game' -and $i + 1 -lt $args.Count) { $game = $args[$i + 1]; $i++ }
+    elseif ($args[$i] -eq '--gmod' -and $i + 1 -lt $args.Count) { $gmod = $args[$i + 1]; $i++ }
     elseif ($args[$i] -notlike '--*' -and -not $game -and (Test-Path -LiteralPath $args[$i])) { $game = $args[$i] }
     else { $rest += $args[$i] }
 }
@@ -64,15 +69,118 @@ if (-not $game) {
     $beside += @(Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
         ForEach-Object { Join-Path $_.FullName 'default.xex' } | Where-Object { Test-Path -LiteralPath $_ } |
         ForEach-Object { Get-Item -LiteralPath $_ })
-    if ($beside.Count -eq 1) { $game = $beside[0].FullName; Write-Host "Using $game" }
+    if ($beside.Count -eq 1) { $game = $beside[0].FullName }
 }
-if (-not $game) {
+
+# The garrysmod folder inside whatever was given (garrysmod itself, GarrysMod,
+# a Steam library or a drive), or $null. Only a real install counts: a folder
+# an uninstall left behind has no gameinfo.txt.
+function GarrysmodIn($folder) {
+    if (-not $folder) { return $null }
+    foreach ($sub in @('', 'garrysmod', 'GarrysMod\garrysmod', 'common\GarrysMod\garrysmod', 'steamapps\common\GarrysMod\garrysmod',
+                       'SteamLibrary\steamapps\common\GarrysMod\garrysmod', 'Steam\steamapps\common\GarrysMod\garrysmod')) {
+        $candidate = if ($sub) { Join-Path $folder $sub } else { $folder }
+        if (Test-Path -LiteralPath (Join-Path $candidate 'gameinfo.txt') -PathType Leaf) {
+            return (Get-Item -LiteralPath $candidate).FullName
+        }
+    }
+    return $null
+}
+
+# Only a first guess for the window below: the Gmod this setup was unpacked
+# into, else the first real install in any Steam library on any drive.
+function FindGmod {
+    $folder = $here
+    while ($folder) {
+        if ((Split-Path $folder -Leaf) -eq 'garrysmod' -and (GarrysmodIn $folder)) { return $folder }
+        $folder = Split-Path $folder -Parent
+    }
+    $roots = @()
+    foreach ($key in @(@('HKCU:\Software\Valve\Steam', 'SteamPath'), @('HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'InstallPath'),
+                       @('HKLM:\SOFTWARE\Valve\Steam', 'InstallPath'))) {
+        try { $value = (Get-ItemProperty -LiteralPath $key[0] -ErrorAction Stop).($key[1]); if ($value) { $roots += $value } } catch {}
+    }
+    foreach ($drive in @([System.IO.DriveInfo]::GetDrives() | Where-Object { $_.DriveType -eq 'Fixed' -and $_.IsReady })) {
+        foreach ($name in @('Steam', 'SteamLibrary', 'Steam Library', 'Program Files (x86)\Steam', 'Program Files\Steam',
+                            'Games\Steam', 'Games\SteamLibrary')) { $roots += (Join-Path $drive.RootDirectory.FullName $name) }
+    }
+    $libraries = @()
+    foreach ($root in $roots) {
+        if (-not (Test-Path -LiteralPath $root -PathType Container)) { continue }
+        $libraries += $root
+        foreach ($vdf in @((Join-Path $root 'steamapps\libraryfolders.vdf'), (Join-Path $root 'config\libraryfolders.vdf'))) {
+            if (-not (Test-Path -LiteralPath $vdf -PathType Leaf)) { continue }
+            try { $text = Get-Content -LiteralPath $vdf -Raw -ErrorAction Stop } catch { continue }
+            foreach ($m in [regex]::Matches($text, '"path"\s+"([^"]+)"')) { $libraries += $m.Groups[1].Value.Replace('\\', '\') }
+        }
+    }
+    foreach ($library in $libraries) {
+        $found = GarrysmodIn (Join-Path $library 'steamapps\common\GarrysMod\garrysmod')
+        if ($found) { return $found }
+    }
+    return $null
+}
+
+# Like the old setup app: one small window with both folders filled in as
+# best we can, so the player checks them (and fixes them) before anything runs.
+if ($gmod) { $gmod = GarrysmodIn $gmod }
+if (-not $gmod) { try { $gmod = FindGmod } catch { $gmod = $null } }
+[System.Windows.Forms.Application]::EnableVisualStyles()
+$form = New-Object System.Windows.Forms.Form -Property @{
+    Text = 'S3GM setup'; Width = 640; Height = 270; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false
+    MinimizeBox = $false; StartPosition = 'CenterScreen'; TopMost = $true
+}
+function AddRow($y, $label, $value) {
+    $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Text = $label; Left = 16; Top = $y; Width = 590; Height = 20 }))
+    $box = New-Object System.Windows.Forms.TextBox -Property @{ Left = 16; Top = $y + 22; Width = 490; Text = "$value" }
+    $form.Controls.Add($box)
+    $button = New-Object System.Windows.Forms.Button -Property @{ Text = 'Browse...'; Left = 516; Top = $y + 20; Width = 90 }
+    $form.Controls.Add($button)
+    return @($box, $button)
+}
+$gmodBox, $gmodBrowse = AddRow 14 'Garry''s Mod: the garrysmod folder inside GarrysMod (Steam > Garry''s Mod > Manage > Browse local files)' $gmod
+$gameBox, $gameBrowse = AddRow 74 'Your Skate 3 (Xbox 360) disc image (.iso), or default.xex in an extracted copy' $game
+$gmodBrowse.Add_Click({
+    $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+    $dialog.Description = 'Select the garrysmod folder (inside GarrysMod). The GarrysMod folder or your Steam library folder works too.'
+    if ($gmodBox.Text -and (Test-Path -LiteralPath $gmodBox.Text)) { $dialog.SelectedPath = $gmodBox.Text }
+    if ($dialog.ShowDialog($form) -eq 'OK') {
+        $picked = GarrysmodIn $dialog.SelectedPath
+        $gmodBox.Text = if ($picked) { $picked } else { $dialog.SelectedPath }
+    }
+})
+$gameBrowse.Add_Click({
     $dialog = New-Object System.Windows.Forms.OpenFileDialog
     $dialog.Title = 'Select your Skate 3 (Xbox 360) disc image, or default.xex'
     $dialog.Filter = 'Skate 3 disc image (*.iso;default.xex)|*.iso;default.xex|All files (*.*)|*.*'
-    if ($dialog.ShowDialog() -ne 'OK') { Die 'No Skate 3 disc picked, so nothing was installed.' }
-    $game = $dialog.FileName
-}
+    if ($dialog.ShowDialog($form) -eq 'OK') { $gameBox.Text = $dialog.FileName }
+})
+$ok = New-Object System.Windows.Forms.Button -Property @{ Text = 'Install'; Left = 420; Top = 150; Width = 90; Height = 30 }
+$cancel = New-Object System.Windows.Forms.Button -Property @{ Text = 'Cancel'; Left = 516; Top = 150; Width = 90; Height = 30; DialogResult = 'Cancel' }
+$form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
+    Text = 'Check both, then press Install.'; Left = 16; Top = 156; Width = 380; Height = 20 }))
+$ok.Add_Click({
+    $picked = GarrysmodIn $gmodBox.Text.Trim().Trim('"')
+    if (-not $picked) {
+        [void][System.Windows.Forms.MessageBox]::Show($form, "There's no Garry's Mod in that folder. Press Browse and pick the garrysmod folder inside GarrysMod.", 'S3GM setup', 'OK', 'Warning')
+        return
+    }
+    if (-not (Test-Path -LiteralPath $gameBox.Text.Trim().Trim('"') -PathType Leaf)) {
+        [void][System.Windows.Forms.MessageBox]::Show($form, 'Pick your Skate 3 disc image (.iso) or default.xex with Browse.', 'S3GM setup', 'OK', 'Warning')
+        return
+    }
+    $gmodBox.Text = $picked
+    $form.DialogResult = 'OK'
+    $form.Close()
+})
+$form.Controls.Add($ok); $form.Controls.Add($cancel)
+$form.AcceptButton = $ok; $form.CancelButton = $cancel
+if ($form.ShowDialog() -ne 'OK') { Die 'Setup cancelled, so nothing was installed.' }
+$gmod = $gmodBox.Text
+$game = $gameBox.Text.Trim().Trim('"')
+$form.Dispose()
+Write-Host "Garry's Mod: $gmod"
+Write-Host "Skate 3: $game"
 
 # A Python that numpy 2.2 has wheels for: 3.10 to 3.13.
 $python = $null
@@ -166,7 +274,7 @@ if (-not $ready) {
 $env:SKATE3_ENGINE = $engine
 $env:SKATE3_VGMSTREAM = $vgmstream
 $setup = Join-Path $here 'skate3_setup.py'
-& $venvPython $setup --game $game @rest
+& $venvPython $setup --game $game --gmod $gmod @rest
 $tries = 0
 while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
     # Garry's Mod wasn't found in any Steam library on any drive, or the picked folder had no Gmod in it.
