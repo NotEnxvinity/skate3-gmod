@@ -65,16 +65,46 @@ def converter_modules(engine):
     return names
 
 
+def windows_drives():
+    """Every local hard drive and removable drive letter (C:\\, D:\\, ...)."""
+    import ctypes
+    kernel = ctypes.windll.kernel32
+    kernel.SetErrorMode(1)  # an empty card reader must not pop up "no disk"
+    mask = kernel.GetLogicalDrives()
+    drives = []
+    for i in range(26):
+        if mask & (1 << i):
+            drive = f'{chr(65 + i)}:\\'
+            if kernel.GetDriveTypeW(drive) in (2, 3):
+                drives.append(Path(drive))
+    return drives
+
+
 def steam_roots():
     roots = []
     if os.name == 'nt':
         try:
             import winreg
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam') as key:
-                roots.append(Path(winreg.QueryValueEx(key, 'SteamPath')[0]))
-        except OSError:
+            for hive, key_name, value in ((winreg.HKEY_CURRENT_USER, r'Software\Valve\Steam', 'SteamPath'),
+                                          (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\WOW6432Node\Valve\Steam', 'InstallPath'),
+                                          (winreg.HKEY_LOCAL_MACHINE, r'SOFTWARE\Valve\Steam', 'InstallPath')):
+                try:
+                    with winreg.OpenKey(hive, key_name) as key:
+                        roots.append(Path(winreg.QueryValueEx(key, value)[0]))
+                except OSError:
+                    pass
+        except ImportError:
             pass
         roots += [Path(os.environ.get('ProgramFiles(x86)', r'C:\Program Files (x86)')) / 'Steam']
+        # Steam itself or a game library can sit on any drive, under any of the usual names.
+        try:
+            drives = windows_drives()
+        except Exception:
+            drives = []
+        for drive in drives:
+            roots += [drive / name for name in ('Steam', 'SteamLibrary', 'Steam Library', 'Program Files (x86)/Steam',
+                                                 'Program Files/Steam', 'Games/Steam', 'Games/SteamLibrary',
+                                                 'Games/Steam Library')]
     else:
         home = Path.home()
         roots += [home / 'Library/Application Support/Steam', home / '.local/share/Steam', home / '.steam/steam', home / '.steam/root',
@@ -84,20 +114,65 @@ def steam_roots():
 
 def libraries(root):
     found = [root]
-    vdf = root / 'steamapps/libraryfolders.vdf'
-    if vdf.is_file():
-        text = vdf.read_text(encoding='utf-8', errors='replace')
-        found += [Path(p.replace('\\\\', '\\')) for p in re.findall(r'"path"\s+"([^"]+)"', text)]
+    for vdf in (root / 'steamapps/libraryfolders.vdf', root / 'config/libraryfolders.vdf'):
+        if vdf.is_file():
+            text = vdf.read_text(encoding='utf-8', errors='replace')
+            # New format: "path" "D:\\SteamLibrary"; old format: "1" "D:\\SteamLibrary".
+            paths = re.findall(r'"path"\s+"([^"]+)"', text) + re.findall(r'"\d+"\s+"([^"]*[\\/][^"]*)"', text)
+            found += [Path(p.replace('\\\\', '\\')) for p in paths]
     return found
+
+
+def gmod_install_names(library):
+    """GarrysMod, or whatever folder name the library's Gmod manifest says."""
+    names = ['GarrysMod']
+    manifest = library / 'steamapps/appmanifest_4000.acf'
+    if manifest.is_file():
+        match = re.search(r'"installdir"\s+"([^"]+)"', manifest.read_text(encoding='utf-8', errors='replace'))
+        if match and match.group(1) not in names:
+            names.insert(0, match.group(1))
+    return names
+
+
+def is_garrysmod(folder):
+    return (folder / 'gameinfo.txt').is_file() or ((folder / 'lua').is_dir() and (folder / 'addons').is_dir())
+
+
+def garrysmod_in(picked):
+    """The garrysmod folder for whatever the player picked: the garrysmod folder
+    itself, the GarrysMod folder, a Steam library or its steamapps/common, or a
+    whole drive. None if there's no Gmod in there."""
+    picked = Path(picked)
+    for candidate in (picked, picked / 'garrysmod', picked / 'GarrysMod/garrysmod', picked / 'common/GarrysMod/garrysmod',
+                      picked / 'steamapps/common/GarrysMod/garrysmod'):
+        if candidate.is_dir() and is_garrysmod(candidate):
+            return candidate
+    if picked.name.lower() == 'garrysmod' and picked.is_dir():
+        return picked
+    roots = [picked] + [picked / name for name in ('Steam', 'SteamLibrary', 'Steam Library', 'Program Files (x86)/Steam',
+                                                   'Program Files/Steam', 'Games/Steam', 'Games/SteamLibrary')]
+    libraries_found = [library for root in roots if (root / 'steamapps').is_dir() for library in libraries(root)]
+    for library in libraries_found:
+        for name in gmod_install_names(library):
+            folder = library / 'steamapps/common' / name / 'garrysmod'
+            if folder.is_dir():
+                return folder
+    return None
 
 
 def find_gmod():
     """The garrysmod folder of the first Garry's Mod install found, or None."""
+    seen = set()
     for root in steam_roots():
         for library in libraries(root):
-            folder = library / 'steamapps/common/GarrysMod/garrysmod'
-            if folder.is_dir():
-                return folder
+            key = str(library).lower().rstrip('\\/')
+            if key in seen:
+                continue
+            seen.add(key)
+            for name in gmod_install_names(library):
+                folder = library / 'steamapps/common' / name / 'garrysmod'
+                if folder.is_dir():
+                    return folder
     return None
 
 
@@ -212,7 +287,7 @@ def install_addon(gmod, wanted, report):
 
 
 def install(selected, gmod, report, with_addon=False):
-    gmod = Path(gmod)
+    gmod = garrysmod_in(gmod) or Path(gmod)
     if not (gmod / 'gameinfo.txt').is_file() and not (gmod / 'lua').is_dir():
         raise RuntimeError(f"{gmod} doesn't look like a garrysmod folder.")
     modules = module_dir()
@@ -392,7 +467,13 @@ def main():
     if args.self_test:
         self_test()
         return 0
-    gmod = args.gmod or find_gmod()
+    if args.gmod is not None:
+        gmod = garrysmod_in(args.gmod)
+        if gmod is None:
+            print(f"error: no Garry's Mod found in {args.gmod}; pick the garrysmod folder inside GarrysMod", file=sys.stderr)
+            return 2
+    else:
+        gmod = find_gmod()
     if args.game is None:
         window(gmod, args.with_addon)
         return 0

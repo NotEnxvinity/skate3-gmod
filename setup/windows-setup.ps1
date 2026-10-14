@@ -167,11 +167,16 @@ $env:SKATE3_ENGINE = $engine
 $env:SKATE3_VGMSTREAM = $vgmstream
 $setup = Join-Path $here 'skate3_setup.py'
 & $venvPython $setup --game $game @rest
-if ($LASTEXITCODE -eq 2) {
-    # Garry's Mod wasn't found in any Steam library.
+$tries = 0
+while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
+    # Garry's Mod wasn't found in any Steam library on any drive, or the picked folder had no Gmod in it.
+    $tries++
+    $owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
-    $dialog.Description = 'Garry''s Mod wasn''t found. Select its garrysmod folder (Steam > Garry''s Mod > Manage > Browse local files, then the garrysmod folder inside).'
-    if ($dialog.ShowDialog() -ne 'OK') { Die 'No garrysmod folder picked, so nothing was installed.' }
+    $dialog.Description = 'Garry''s Mod wasn''t found. Select its garrysmod folder (Steam > Garry''s Mod > Manage > Browse local files, then the garrysmod folder inside). The GarrysMod folder or your Steam library folder works too.'
+    $picked = $dialog.ShowDialog($owner)
+    $owner.Dispose()
+    if ($picked -ne 'OK') { Die 'No garrysmod folder picked, so nothing was installed.' }
     & $venvPython $setup --game $game --gmod $dialog.SelectedPath @rest
 }
 if ($LASTEXITCODE -ne 0) { Die 'Setup stopped with an error; the window above says why.' }
