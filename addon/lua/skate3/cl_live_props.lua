@@ -86,7 +86,7 @@ local function Triangles(list)
 	table.sort(list, function(a, b) return a:GetPos():DistToSqr(from) < b:GetPos():DistToSqr(from) end)
 	local out, n = {}, 0
 	for _, ent in ipairs(list) do
-		local hs = ent:GetSolid() == SOLID_VPHYSICS and Props.Hulls(ent:GetModel()) or BoxHull(ent)
+		local hs = ent:GetSolid() == SOLID_VPHYSICS and Props.Solid(ent:GetModel()) or BoxHull(ent)
 		if hs then
 			local m = Matrix()
 			m:Translate(ent:GetPos())
