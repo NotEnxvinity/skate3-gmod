@@ -135,7 +135,9 @@ def gmod_install_names(library):
 
 
 def is_garrysmod(folder):
-    return (folder / 'gameinfo.txt').is_file() or ((folder / 'lua').is_dir() and (folder / 'addons').is_dir())
+    # Every real install has gameinfo.txt; a folder left behind by an uninstall
+    # (addons, cfg, data...) doesn't.
+    return (folder / 'gameinfo.txt').is_file()
 
 
 def garrysmod_in(picked):
@@ -147,21 +149,32 @@ def garrysmod_in(picked):
                       picked / 'steamapps/common/GarrysMod/garrysmod'):
         if candidate.is_dir() and is_garrysmod(candidate):
             return candidate
-    if picked.name.lower() == 'garrysmod' and picked.is_dir():
-        return picked
     roots = [picked] + [picked / name for name in ('Steam', 'SteamLibrary', 'Steam Library', 'Program Files (x86)/Steam',
                                                    'Program Files/Steam', 'Games/Steam', 'Games/SteamLibrary')]
     libraries_found = [library for root in roots if (root / 'steamapps').is_dir() for library in libraries(root)]
     for library in libraries_found:
         for name in gmod_install_names(library):
             folder = library / 'steamapps/common' / name / 'garrysmod'
-            if folder.is_dir():
+            if is_garrysmod(folder):
                 return folder
     return None
 
 
+def gmod_holding_setup():
+    """The garrysmod folder this setup was unpacked into, if it was."""
+    for folder in HERE.parents:
+        if folder.name.lower() == 'garrysmod' and is_garrysmod(folder):
+            return folder
+    return None
+
+
 def find_gmod():
-    """The garrysmod folder of the first Garry's Mod install found, or None."""
+    """The garrysmod folder to install into, or None: the one this setup sits
+    in, else the first real Garry's Mod install found. A leftover garrysmod
+    folder from an old install (no gameinfo.txt) is skipped."""
+    holding = gmod_holding_setup()
+    if holding is not None:
+        return holding
     seen = set()
     for root in steam_roots():
         for library in libraries(root):
@@ -171,7 +184,7 @@ def find_gmod():
             seen.add(key)
             for name in gmod_install_names(library):
                 folder = library / 'steamapps/common' / name / 'garrysmod'
-                if folder.is_dir():
+                if is_garrysmod(folder):
                     return folder
     return None
 
