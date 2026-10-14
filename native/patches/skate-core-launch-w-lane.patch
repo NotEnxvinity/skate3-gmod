@@ -1,0 +1,25 @@
+diff --git a/skate/crates/skate-core/src/player/offboard/air_launch.rs b/skate/crates/skate-core/src/player/offboard/air_launch.rs
+index 6976a9f..5902b5a 100644
+--- a/skate/crates/skate-core/src/player/offboard/air_launch.rs
++++ b/skate/crates/skate-core/src/player/offboard/air_launch.rs
+@@ -147,5 +147,20 @@ pub fn produce(
+     }
+     packet.velocity_0 = velocity;
+     packet.secondary_velocity_16 = secondary;
++    // The PC host leaves NaN in some vectors' unused fourth lane (the 360's
++    // vector unit never reads it here); the selector's finiteness check reads
++    // every lane, so an on-foot jump would fail on that lane alone.
++    for v in [
++        &mut packet.velocity_0,
++        &mut packet.secondary_velocity_16,
++        &mut packet.position_32,
++        &mut packet.up_48,
++        &mut packet.forward_64,
++        &mut packet.board_position_80,
++    ] {
++        if !v[3].is_finite() {
++            v[3] = 0.0;
++        }
++    }
+     Ok(())
+ }
