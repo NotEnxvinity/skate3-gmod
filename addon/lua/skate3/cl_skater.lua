@@ -752,15 +752,16 @@ function Skater.ShowModel(ply)
 			print("[skate3] can't pose your own body here (" .. tostring(why) .. "), using a copy of it instead")
 		end
 		model.skate3Real = real
+		-- The bones other players get sent, whichever body skates.
+		skeleton = {}
+		for i = 0, model:GetBoneCount() - 1 do
+			skeleton[i] = (model:GetBoneName(i) or ""):find("^ValveBiped%.Bip01_") ~= nil
+		end
 		if real then
 			-- This copy is only measured, never drawn: your own body skates.
 			model:SetNoDraw(true)
 			frozen = Body.FrozenLocals(model, rest)
 			pelvis = model:LookupBone("ValveBiped.Bip01_Pelvis")
-			skeleton = {}
-			for i = 0, model:GetBoneCount() - 1 do
-				skeleton[i] = (model:GetBoneName(i) or ""):find("^ValveBiped%.Bip01_") ~= nil
-			end
 			print(("[skate3] posing your own body, frozen on %s"):format(frozen.sequence))
 		end
 		local callback = not real and cv_bones:GetString() == "callback"
@@ -853,6 +854,20 @@ local function CheckLanding()
 	end
 end
 
+-- Where each board part is, from the skater, for other players' frames.
+local function BoardParts(p, origin)
+	local board, seen = {}, {}
+	for _, part in ipairs(data and data.parts or {}) do
+		local m = p.bones[part.bone]
+		if m and not seen[part.bone] then
+			seen[part.bone] = true
+			local mm = Mat(m)
+			board[#board + 1] = { name = part.bone, pos = mm:GetTranslation() + (p.boardShift or vector_origin) - origin, q = Body.Quat(mm) }
+		end
+	end
+	return board
+end
+
 -- Your skater's pose p as a frame for Body.Apply (and, the same numbers, for
 -- other players): each posed bone's world turn relative to the way the
 -- skater faces, and where the hips go.
@@ -915,27 +930,48 @@ local function RealFrame(p)
 	end
 	local hipsAt = pelvis and world[pelvis] and toFace * world[pelvis]:GetTranslation()
 	pelvisWant = pelvis and world[pelvis]
-	local board = {}
-	for _, part in ipairs(data and data.parts or {}) do
-		local m = p.bones[part.bone]
-		if m and not board[part.bone] then
-			board[part.bone] = true
-			local mm = Mat(m)
-			board[#board + 1] = { name = part.bone, pos = mm:GetTranslation() + (p.boardShift or vector_origin) - origin, q = Body.Quat(mm) }
-		end
-	end
 	lastFrame = {
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
-		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, board = board,
+		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, board = BoardParts(p, origin),
+		model = model.skate3Name,
 	}
 	return { origin = origin, yaw = yaw, rots = rots, final = final, hips = hipsAt and pelvis or nil, hipsAt = hipsAt },
 		forward, up
 end
 
--- The last frame of your own body, to send to other players; nil when your
--- body isn't the one skating.
+-- With skate3_body copy (or when your own body couldn't be posed), the
+-- frame comes from the copy's last posed skeleton instead. Other players
+-- used to get nothing at all then, and saw you hang crouched in the air.
+local function CopyFrame(p)
+	if not (lastWorld and p and p.bones and p.pos and p.forward and p.up) then return nil end
+	local origin = Vector(p.pos[1], p.pos[2], p.pos[3])
+	local forward = Vector(p.forward[1], p.forward[2], p.forward[3])
+	local up = Vector(p.up[1], p.up[2], p.up[3])
+	local yaw = forward:Angle().y
+	local E0 = Matrix()
+	E0:SetAngles(Angle(0, yaw, 0))
+	E0:SetTranslation(origin)
+	local toFace = E0:GetInverseTR()
+	local sent = {}
+	for i = 0, model:GetBoneCount() - 1 do
+		local w = lastWorld[i]
+		if w and writable[i] and skeleton[i] then
+			local rel = toFace * w
+			sent[#sent + 1] = { i = i, q = Body.Quat(Body.RotOnly(rel)), p = rel:GetTranslation() }
+		end
+	end
+	if #sent == 0 then return nil end
+	return {
+		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
+		bones = sent, board = BoardParts(p, origin), model = model.skate3Name,
+	}
+end
+
+-- The last frame of your skater, to send to other players.
 function Skater.NetFrame()
-	return IsValid(model) and model.skate3Real and pose and lastFrame or nil
+	if not (IsValid(model) and pose) then return nil end
+	if model.skate3Real then return lastFrame end
+	return CopyFrame(pose)
 end
 
 function Skater.UpdateModel(p)
@@ -997,6 +1033,7 @@ function Skater.HideModel()
 	if IsValid(model) and IsValid(model.skate3AnimEnt) then Anim.Clear(model.skate3AnimEnt) end
 	pose = nil
 	lastFrame = nil
+	lastWorld = nil
 	pelvisWant, offFrames, offWarned = nil, 0, false
 	if IsValid(model) then model:SetNoDraw(true) end
 	if IsValid(owner) then
