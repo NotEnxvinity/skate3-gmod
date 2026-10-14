@@ -64,9 +64,10 @@ if (-not $game) {
 # A Python that numpy 2.2 has wheels for: 3.10 to 3.13.
 $python = $null
 foreach ($candidate in @(@('py', '-3.13'), @('py', '-3.12'), @('py', '-3.11'), @('py', '-3.10'), @('python'))) {
-    $exe = $candidate[0]; $rest = @($candidate | Select-Object -Skip 1)
+    # Not $rest: that holds the player's own arguments for skate3_setup.py.
+    $exe = $candidate[0]; $flags = @($candidate | Select-Object -Skip 1)
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
-    $version = & $exe @rest -c 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))' 2>$null
+    $version = & $exe @flags -c 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))' 2>$null
     if ($LASTEXITCODE -eq 0 -and $version -in @('3.10', '3.11', '3.12', '3.13')) { $python = $candidate; break }
 }
 if (-not $python) {
