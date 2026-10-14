@@ -8,6 +8,8 @@
 
 -- Takes cl_props.lua's module, for its physics hull cache.
 local Props
+-- And cl_perf.lua's, to say when a swap landed in a slow frame.
+local Perf
 
 local Live = {}
 
@@ -79,25 +81,52 @@ local current = {} -- ent -> place, as last sent
 local dirty = false
 local lastSwap = -math.huge
 local grindingSince
+-- Each prop's triangles where it stands, kept until it moves: a swap only
+-- works out the props that changed, not every prop again.
+local built = {} -- ent -> { place, tris (flat), count }
 
-local function Triangles(list)
-	local me = LocalPlayer()
-	local from = IsValid(me) and me:GetPos() or vector_origin
-	table.sort(list, function(a, b) return a:GetPos():DistToSqr(from) < b:GetPos():DistToSqr(from) end)
+local function Build(ent, place)
+	local b = built[ent]
+	if b and b.place == place then return b end
+	local hs = ent:GetSolid() == SOLID_VPHYSICS and Props.Solid(ent:GetModel()) or BoxHull(ent)
+	local tris, n = {}, 0
+	if hs then
+		local m = Matrix()
+		m:Translate(ent:GetPos())
+		m:Rotate(ent:GetAngles())
+		local scale = ent:GetModelScale() or 1
+		if scale ~= 1 and ent:GetSolid() == SOLID_VPHYSICS then m:Scale(Vector(scale, scale, scale)) end
+		n = Props.AppendHulls(tris, 0, hs, m)
+	end
+	b = { place = place, tris = tris, count = n }
+	built[ent] = b
+	return b
+end
+
+local function Triangles(still)
+	local list, total = {}, 0
+	for ent, place in pairs(still) do
+		local b = Build(ent, place)
+		if b.count > 0 then
+			list[#list + 1] = { ent = ent, b = b }
+			total = total + b.count
+		end
+	end
+	-- Too many: nearest props first.
+	if total / 9 > MAX_TRIANGLES then
+		local me = LocalPlayer()
+		local from = IsValid(me) and me:GetPos() or vector_origin
+		for _, e in ipairs(list) do e.d = e.ent:GetPos():DistToSqr(from) end
+		table.sort(list, function(a, b) return a.d < b.d end)
+	end
 	local out, n = {}, 0
-	for _, ent in ipairs(list) do
-		local hs = ent:GetSolid() == SOLID_VPHYSICS and Props.Solid(ent:GetModel()) or BoxHull(ent)
-		if hs then
-			local m = Matrix()
-			m:Translate(ent:GetPos())
-			m:Rotate(ent:GetAngles())
-			local scale = ent:GetModelScale() or 1
-			if scale ~= 1 and ent:GetSolid() == SOLID_VPHYSICS then m:Scale(Vector(scale, scale, scale)) end
-			n = Props.AppendHulls(out, n, hs, m)
-			if n / 9 >= MAX_TRIANGLES then
-				print(("[skate3] spawned prop collision stopped at %d triangles"):format(MAX_TRIANGLES))
-				break
-			end
+	for _, e in ipairs(list) do
+		local tris = e.b.tris
+		for i = 1, e.b.count do out[n + i] = tris[i] end
+		n = n + e.b.count
+		if n / 9 >= MAX_TRIANGLES then
+			print(("[skate3] spawned prop collision stopped at %d triangles"):format(MAX_TRIANGLES))
+			break
 		end
 	end
 	return out, n / 9
@@ -114,7 +143,16 @@ function Live.Think(now, state)
 	local still, fresh = {}, {}
 	if on then
 		for _, ent in ipairs(ents.GetAll()) do
-			if Wanted(ent) then
+			if ent:IsDormant() then
+				-- Out of sight in multiplayer, so the game stopped updating
+				-- it: keep it where it was last seen rather than swapping
+				-- the collision every time a prop leaves or comes back.
+				local place = current[ent]
+				if place then
+					still[ent] = place
+					fresh[ent] = seen[ent] or { place = place, since = now }
+				end
+			elseif Wanted(ent) then
 				local place = Place(ent)
 				local s = seen[ent]
 				if not s or s.place ~= place then
@@ -145,15 +183,20 @@ function Live.Think(now, state)
 		if now - grindingSince < GRIND_HOLD then return end
 	end
 	grindingSince = nil
-	local list = {}
-	for ent in pairs(still) do list[#list + 1] = ent end
-	local tris, count = Triangles(list)
+	local started = SysTime()
+	for ent in pairs(built) do
+		if not still[ent] then built[ent] = nil end
+	end
+	local props = table.Count(still)
+	local tris, count = Triangles(still)
 	skate3.SetProps(tris)
 	current, dirty, lastSwap = still, false, now
-	print(("[skate3] spawned props solid for skating: %d (%d triangles)"):format(#list, count))
+	local ms = (SysTime() - started) * 1000
+	Perf.Note(("prop swap: %d props, %d triangles, %.0f ms"):format(props, count, ms))
+	print(("[skate3] spawned props solid for skating: %d (%d triangles, %.0f ms)"):format(props, count, ms))
 end
 
-return function(props)
-	Props = props
+return function(props, perf)
+	Props, Perf = props, perf
 	return Live
 end

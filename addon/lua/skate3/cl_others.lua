@@ -5,7 +5,7 @@
 
 local Pose = include("skate3/sh_pose.lua")
 
-return function(Skater)
+return function(Skater, Perf)
 	local Body = Skater.Body
 
 	local DELAY = 0.1 -- draw this far in the past, between two frames
@@ -14,7 +14,8 @@ return function(Skater)
 
 	local others = {} -- ply -> { frames = { { t, f } } }
 
-	net.Receive("skate3_pose", function()
+	net.Receive("skate3_pose", function(len)
+		Perf.Got(len / 8)
 		local ply = net.ReadEntity()
 		local f = Pose.Read()
 		if not f or not IsValid(ply) or ply == LocalPlayer() then return end
@@ -76,6 +77,8 @@ return function(Skater)
 	end
 
 	hook.Add("Think", "skate3_others", function()
+		if not next(others) then return end
+		Perf.Begin("other skaters")
 		local now = RealTime()
 		for ply, o in pairs(others) do
 			local frames = o.frames
@@ -110,5 +113,6 @@ return function(Skater)
 					forward = f.forward, up = f.up }, Skater.DrawBoard)
 			end
 		end
+		Perf.End("other skaters")
 	end)
 end

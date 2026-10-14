@@ -6,9 +6,10 @@ Score.Meat.Body = Skater.BodyEntity
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_menu.lua")
 local Props = include("skate3/cl_props.lua")
-local LiveProps = include("skate3/cl_live_props.lua")(Props)
+local Perf = include("skate3/cl_perf.lua")
+local LiveProps = include("skate3/cl_live_props.lua")(Props, Perf)
 local Pose = include("skate3/sh_pose.lua")
-include("skate3/cl_others.lua")(Skater)
+include("skate3/cl_others.lua")(Skater, Perf)
 include("skate3/cl_collision_report.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OSX" and "gmcl_skate3_osx64.dll" or "gmcl_skate3_linux64.dll")
@@ -44,6 +45,15 @@ local status = {}
 local nextStatus = 0
 local loadStage, loadStartedAt -- the collision build's current step, for the console
 local nextSend = 0
+-- Your pose goes out 20 times a second while another player can see you,
+-- and only now and then while nobody can (the server says which).
+local watched = true
+local SEND_EVERY, SEND_UNWATCHED = 0.05, 0.5
+local nextPoseSend = 0
+-- The simulation's last tick and when it moved on, to tell a frozen skater
+-- (the skate thread falling behind) from a slow frame.
+local lastTick, tickAt = nil, 0
+local stalls, longestStall = 0, 0
 
 local function Say(...)
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white, ...)
@@ -167,6 +177,7 @@ local function Stop()
 	end
 	SetActive(false)
 	pose = nil
+	lastTick = nil
 	recent, wasBailing = {}, false
 	Skater.HideModel()
 	Sounds.Stop()
@@ -205,6 +216,7 @@ local function Start()
 		return
 	end
 	SetActive(true)
+	lastTick = nil
 	Skater.ShowModel(ply)
 end
 
@@ -271,16 +283,18 @@ local function Health(now)
 	if dt > 0.1 then hitches = hitches + 1 end
 	if now < nextHealth then return end
 	nextHealth = now + HEALTH_EVERY
+	local sent, got = Perf.TakeNet()
 	local process = skate3.Memory and skate3.Memory()
 	local growth = ""
 	if process and lastProcess then growth = (" (%+.1f MB/s)"):format((process - lastProcess) / HEALTH_EVERY) end
 	lastProcess = process
 	local skipping = cv_skip:GetString()
-	print(("[skate3] health: game %s%s, lua %.1f MB, %d entities, worst frame %.3f s, %d hitches, %s%s"):format(
+	print(("[skate3] health: game %s%s, lua %.1f MB, %d entities, worst frame %.3f s, %d hitches, skate sim stalls %d (longest %.2f s), skate net out %.1f KB/s in %.1f KB/s%s, %s%s"):format(
 		process and ("%.0f MB"):format(process) or "?", growth, collectgarbage("count") / 1024, #ents.GetAll(),
-		worstFrame, hitches, active and (pose and pose.state or "riding") or "not riding",
+		worstFrame, hitches, stalls, longestStall, sent / 1024 / HEALTH_EVERY, got / 1024 / HEALTH_EVERY,
+		watched and "" or " (nobody watching)", active and (pose and pose.state or "riding") or "not riding",
 		skipping ~= "" and ", skipping " .. skipping or ""))
-	worstFrame, hitches = 0, 0
+	worstFrame, hitches, stalls, longestStall = 0, 0, 0, 0
 end
 
 -- Whether a climbing "lua" figure is a leak or garbage the collector hasn't
@@ -340,14 +354,19 @@ local function SessionMarker(now)
 	return true
 end
 
+net.Receive("skate3_watched", function()
+	watched = net.ReadBool()
+end)
+
 hook.Add("Think", "skate3_step", function()
+	Perf.Frame()
 	FollowWeapon()
 	if not loaded then return end
 	local now = RealTime()
 	Health(now)
 	if now >= nextStatus then
 		nextStatus = now + 0.25
-		status = skate3.Status()
+		status = Perf.Time("status", skate3.Status)
 		if status.stage ~= loadStage then
 			-- Each step goes to the console as it starts, so if the game dies
 			-- mid-load the log shows which one it was.
@@ -358,12 +377,16 @@ hook.Add("Think", "skate3_step", function()
 				process and ("%.0f MB"):format(process) or "?"))
 			if not loadStage then loadStartedAt = nil end
 		end
-		if status.state == "ready" and (not rails or status.revision ~= railsRevision) then
-			-- Again after each prop swap, for skate3_debug_rails.
-			if not rails then
-				print(("[skate3] collision ready: %d triangles, %d grind rails"):format(status.triangles, status.rails))
-			end
-			rails, railsRevision = skate3.GetRails(), status.revision
+		if status.state == "ready" and railsRevision == nil then
+			print(("[skate3] collision ready: %d triangles, %d grind rails"):format(status.triangles, status.rails))
+			railsRevision = false
+		end
+		if status.state == "ready" and cv_rails:GetBool() and status.revision ~= railsRevision then
+			-- Again after each prop swap. Only while skate3_debug_rails is on:
+			-- a big map has thousands of rails, and fetching them all after
+			-- every prop swap stalled the game.
+			rails, railsRevision = Perf.Time("rails fetch", skate3.GetRails), status.revision
+			Perf.Note(("rails fetched: %d"):format(rails and #rails or 0))
 		elseif active and (status.state == "failed" or status.error) then
 			-- The full reason goes to the console; chat gets the gist.
 			local why = tostring(status.error)
@@ -387,7 +410,7 @@ hook.Add("Think", "skate3_step", function()
 			end
 		end
 	end
-	if status.state == "ready" then LiveProps.Think(now, active and pose and pose.state) end
+	if status.state == "ready" then Perf.Time("prop scan", LiveProps.Think, now, active and pose and pose.state) end
 	if not active then return end
 	-- The simulation always spawns on the board, so tap Y for the player
 	-- until the skater is on foot.
@@ -403,24 +426,40 @@ hook.Add("Think", "skate3_step", function()
 	end
 	local skip = Skater.Skip
 	local keys, analog = Keyboard.Read(FrameTime())
-	if not skip.step then skate3.Step(FrameTime(), ScrW() / ScrH(), bit.bor(press, keys), analog) end
+	if not skip.step then Perf.Time("step", skate3.Step, FrameTime(), ScrW() / ScrH(), bit.bor(press, keys), analog) end
 	if SessionMarker(now) then return end
-	if not skip.pose or not pose then pose = skate3.GetPose() or pose end
-	Skater.UpdateModel(pose)
+	if not skip.pose or not pose then pose = Perf.Time("get pose", skate3.GetPose) or pose end
+	if pose and pose.tick ~= lastTick then
+		local frozen = now - tickAt
+		-- A slow frame holds the simulation up too; this is only the time it
+		-- stood still beyond that.
+		if lastTick and frozen > 0.15 and frozen > FrameTime() * 1.5 + 0.05 then
+			stalls = stalls + 1
+			longestStall = math.max(longestStall, frozen)
+			Perf.Note(("skate sim was frozen %.2f s"):format(frozen))
+		end
+		lastTick, tickAt = pose.tick, now
+	end
+	Perf.Time("body", Skater.UpdateModel, pose)
 	if not skip.net then WatchBail(now, pose) end
-	if skip.sounds then Sounds.Stop() else Sounds.Update(LocalPlayer(), pose) end
+	if skip.sounds then Sounds.Stop() else Perf.Time("sounds", Sounds.Update, LocalPlayer(), pose) end
 	if pose and now >= nextSend and not skip.net then
+		Perf.Begin("net send")
 		nextSend = now + 0.05
 		net.Start("skate3_move")
 		net.WriteVector(V(pose.pos))
+		Perf.Sent(net.BytesWritten() or 0)
 		net.SendToServer()
 		-- Other players see your body posed from this.
-		local frame = Skater.NetFrame()
+		local frame = now >= nextPoseSend and Skater.NetFrame()
 		if frame then
+			nextPoseSend = now + (watched and SEND_EVERY or SEND_UNWATCHED)
 			net.Start("skate3_pose", true)
 			Pose.Write(frame)
+			Perf.Sent(net.BytesWritten() or 0)
 			net.SendToServer()
 		end
+		Perf.End("net send")
 	end
 end)
 
