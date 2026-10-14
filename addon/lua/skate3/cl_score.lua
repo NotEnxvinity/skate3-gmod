@@ -189,7 +189,7 @@ local function Update(pose)
 	if Meat.Enabled() then
 		view = MeatView(now)
 		if view then
-			-- The bail took the line with it; don't flash "Bail" after.
+			-- The bail took the line with it; don't flash "Bailed" after.
 			flash, last = nil, { banked = sc.banked, active = sc.active, sequence = sc.sequence, line = sc.line }
 			return
 		end
@@ -200,7 +200,7 @@ local function Update(pose)
 			flash = { text = "+" .. Points(sc.banked - last.banked), value = sc.banked - last.banked, good = true, at = now }
 		elseif last.active and not sc.active then
 			if bailing then
-				flash = { text = "Bail", value = shown, good = false, at = now } -- the score lost
+				flash = { text = "Bailed", value = shown, good = false, at = now } -- the score lost
 			elseif sc.line <= last.line + 0.5 and last.sequence > 0.5 then
 				-- A trick on its own, not part of a line: it scores but never banks.
 				flash = { text = "+" .. Points(last.sequence), value = last.sequence, good = true, at = now }
@@ -265,7 +265,7 @@ local function HL2(v)
 	local a = v.alpha
 	local s = ScrH() / 480
 	local fg = v.good and HL2_FG or HL2_RED
-	local label = v.meat and "BAILED" or not v.good and "BAIL" or (v.trick ~= "" and v.trick:upper() or "SCORE")
+	local label = v.meat and "BAILED" or not v.good and "BAILED" or (v.trick ~= "" and v.trick:upper() or "SCORE")
 	local mult = v.live and "x" .. Multiplier(v.multiplier):sub(1, -2) or ""
 	local number = tostring(v.value)
 	surface.SetFont("HudSelectionText")
