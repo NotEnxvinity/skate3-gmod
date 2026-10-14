@@ -170,6 +170,10 @@ impl Lua {
     pub fn push_str(&self, s: &str) {
         unsafe { (self.api.lua_pushlstring)(self.state, s.as_ptr().cast(), s.len()) }
     }
+    /// Pushes raw bytes as a Lua string (binary-safe).
+    pub fn push_bytes(&self, b: &[u8]) {
+        unsafe { (self.api.lua_pushlstring)(self.state, b.as_ptr().cast(), b.len()) }
+    }
     pub fn push_function(&self, f: CFunction) {
         unsafe { (self.api.lua_pushcclosure)(self.state, f, 0) }
     }

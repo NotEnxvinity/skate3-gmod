@@ -145,6 +145,21 @@ lua_fn!(load_map, |lua| {
 // Objects on top of the map that the board should hit and grind, such as
 // spawned props, as a flat {x1,y1,z1, x2,y2,z2, ...} of triangles. Replaces
 // the last set; swapped in mid-ride once built.
+// skate3.Unlzma(block): unpacks one of Source's LZMA blocks (a compressed
+// game lump, such as a Workshop map's static props), or nil and why not.
+lua_fn!(unlzma, |lua| {
+    let Some(block) = lua.bytes(1) else {
+        return lua.fail("Unlzma expects an LZMA block as a string");
+    };
+    match bsp::unlzma(block) {
+        Ok(out) => {
+            lua.push_bytes(&out);
+            1
+        }
+        Err(e) => lua.fail(&e),
+    }
+});
+
 lua_fn!(set_props, |lua| {
     let extra = lua
         .numbers(1)
@@ -596,6 +611,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Init", init as lua::CFunction),
         (c"LoadMap", load_map),
         (c"SetProps", set_props),
+        (c"Unlzma", unlzma),
         (c"SetHallOfMeat", set_hall_of_meat),
         (c"BrokenBone", broken_bone),
         (c"Status", status),
