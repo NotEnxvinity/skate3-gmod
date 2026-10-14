@@ -413,7 +413,7 @@ local restFrom = "" -- what the rest pose was read from, for the bone report
 -- The model's rest pose, read once with the entity at the origin.
 -- The bind pose (or the "ragdoll" sequence when it won't line up) of ent,
 -- set at the origin. Returns bindPose or nil, how it was read, ragdoll.
-local function ReadRest(ent)
+local function ReadRest(ent, ragdollOnly)
 	ent:SetPos(vector_origin)
 	ent:SetAngles(angle_zero)
 	local seq = ent:LookupSequence("ragdoll")
@@ -428,7 +428,7 @@ local function ReadRest(ent)
 	-- the stock Valve skeleton in that sequence, with the neck down inside
 	-- the chest, and their heads ended up there.
 	local bindPose, how
-	if cv_rest:GetString() ~= "ragdoll" then bindPose, how = BindPose(ent, ragdoll) end
+	if cv_rest:GetString() ~= "ragdoll" and not ragdollOnly then bindPose, how = BindPose(ent, ragdoll) end
 	return bindPose, how, ragdoll
 end
 
@@ -440,7 +440,7 @@ end
 
 local stand = {} -- bone index -> Matrix, the model standing in Gmod's idle, at the origin
 
-local function CaptureRest(ent)
+local function CaptureRest(ent, ragdollOnly)
 	ent:SetPos(vector_origin)
 	ent:SetAngles(angle_zero)
 	-- How the model stands in Gmod, for its feet: however its foot bones
@@ -457,7 +457,7 @@ local function CaptureRest(ent)
 			break
 		end
 	end
-	local bindPose, how, ragdoll = ReadRest(ent)
+	local bindPose, how, ragdoll = ReadRest(ent, ragdollOnly)
 	restFrom = bindPose and ("bind pose (" .. how .. ")")
 		or ("ragdoll sequence" .. (how and (" (bind pose didn't line up: " .. how .. ")") or ""))
 	print("[skate3] rest pose from the " .. restFrom)
@@ -650,6 +650,13 @@ local lastWorld -- the last posed skeleton, for skate3_anim_report
 local cv_bones = CreateClientConVar("skate3_bone_mode", "override", true, false,
 	"With skate3_body copy, how the copy is posed: override (default) or callback")
 
+-- Whether a bone matrix is fit to write near at (no NaNs, not miles away).
+local function Placeable(m, at)
+	local t = m:GetTranslation()
+	if t.x ~= t.x or t.y ~= t.y or t.z ~= t.z then return false end
+	return t:DistToSqr(at) < 400 * 400
+end
+
 local function BuildBones(ent, count)
 	if not pose or not pose.bones then return end
 	local skins = {}
@@ -679,8 +686,10 @@ local function BuildBones(ent, count)
 	KeepNeck(ent, world)
 	if not Skater.Skip.anim then Anim.PostPose(ent, world, pose) end
 	lastWorld = world
+	local at = Vector(pose.pos[1], pose.pos[2], pose.pos[3])
 	for i = 0, count - 1 do
-		if world[i] and writable[i] then ent:SetBoneMatrix(i, world[i]) end
+		-- A bone that would land far off the skater stays the engine's.
+		if world[i] and writable[i] and Placeable(world[i], at) then ent:SetBoneMatrix(i, world[i]) end
 	end
 end
 
@@ -743,12 +752,17 @@ function Skater.ShowModel(ply)
 		model.skate3Name = name
 		-- Full detail, so every bone the retarget writes is in the skeleton.
 		model:SetLOD(0)
+		-- A model whose own body couldn't be posed (cl_body.lua gave up on
+		-- it) skates as a copy. Its rest pose stays the bind pose: the
+		-- "ragdoll" one has proportion-trick models (Master Chief) in stock
+		-- Valve proportions, and their armour came off the arms.
+		local trouble = Body.Troubled(name)
 		CaptureRest(model)
 		Fit(model)
 		FindNeck(model)
-		local real, why = cv_body:GetString() ~= "copy", nil
+		local real, why = cv_body:GetString() ~= "copy" and not trouble, nil
 		if real then real, why = Body.Ready(model) end
-		if cv_body:GetString() ~= "copy" and not real then
+		if cv_body:GetString() ~= "copy" and not real and not trouble then
 			print("[skate3] can't pose your own body here (" .. tostring(why) .. "), using a copy of it instead")
 		end
 		model.skate3Real = real
@@ -978,6 +992,17 @@ function Skater.UpdateModel(p)
 	pose = p
 	-- The player's model can change mid-ride (or arrive late after spawning).
 	if IsValid(owner) and IsValid(model) and model.skate3Name ~= ModelFor(owner) then
+		Skater.ShowModel(owner)
+	end
+	-- Your own body was given up on mid-ride (it stretched): skate as a
+	-- copy of it from here, as skate3_body copy would.
+	if IsValid(model) and model.skate3Real and Body.Troubled(model.skate3Name) then
+		if IsValid(owner) then
+			Body.Release(owner)
+			Body.HideBoard(owner)
+		end
+		model.skate3Name = nil
+		lastBuild = -math.huge
 		Skater.ShowModel(owner)
 	end
 	if not (IsValid(model) and p) then return end

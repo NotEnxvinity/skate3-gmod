@@ -81,6 +81,32 @@ local function RotOnly(m)
 end
 Body.RotOnly = RotOnly
 
+-- A number that's neither NaN nor endless.
+local function Finite(x)
+	return x == x and x > -1e9 and x < 1e9
+end
+
+-- The turn and position of m with any scale taken out, or nil when there's
+-- no turn left to read (a bone scaled to nothing, or NaNs). Some playermodels
+-- scale bones in their animation (to hide a part, or for their proportions),
+-- and turning such a matrix around as if it had none blows positions up.
+local function Rigid(m)
+	if not m then return nil end
+	local f, r, u = m:GetForward(), m:GetRight(), m:GetUp()
+	local lf, lr, lu = f:Length(), r:Length(), u:Length()
+	if not (Finite(lf) and Finite(lr) and Finite(lu)) or lf < 1e-4 or lr < 1e-4 or lu < 1e-4 then return nil end
+	f:Mul(1 / lf) r:Mul(1 / lr) u:Mul(1 / lu)
+	local t = m:GetTranslation()
+	if not (Finite(t.x) and Finite(t.y) and Finite(t.z)) then return nil end
+	return Matrix({
+		{ f.x, -r.x, u.x, t.x },
+		{ f.y, -r.y, u.y, t.y },
+		{ f.z, -r.z, u.z, t.z },
+		{ 0, 0, 0, 1 },
+	})
+end
+Body.Rigid = Rigid
+
 ---------------------------------------------------------------------------
 -- How Gmod applies a bone manipulation isn't documented: whether the turn
 -- goes before or after the animation's own, how the angle's three numbers
@@ -162,6 +188,7 @@ local function Calibrate(source)
 	ent:ManipulateBonePosition(bone, oldPos or vector_origin)
 	ent:InvalidateBoneCache()
 	Done()
+	P0, B0, P1, B1 = Rigid(P0), Rigid(B0), Rigid(P1), Rigid(B1)
 	if not (P0 and B0 and P1 and B1 and B2) then return "the test bone wasn't set up" end
 	local L0 = RotOnly(P0):GetInverseTR() * RotOnly(B0) -- local turn, untouched
 	local L1 = RotOnly(P1):GetInverseTR() * RotOnly(B1) -- local turn, manipulated
@@ -287,7 +314,9 @@ function Body.FrozenLocals(ent, rest)
 		local w = world[i]
 		if w then
 			local pw = p >= 0 and world[p]
-			locals[i] = pw and pw:GetInverse() * w or (p < 0 and Matrix(w)) or nil
+			-- A parent scaled to nothing has no inverse: that bone is left out.
+			local inv = pw and pw:GetInverse()
+			locals[i] = inv and inv * w or (p < 0 and Matrix(w)) or nil
 		end
 	end
 	-- Bones off the ValveBiped skeleton (Master Chief's real body bones,
@@ -313,11 +342,12 @@ function Body.FrozenLocals(ent, rest)
 	local eyes
 	local id = head and world[head] and ent.LookupAttachment and ent:LookupAttachment("eyes")
 	local att = id and id > 0 and ent:GetAttachment(id)
-	if att then
+	local headInv = att and world[head]:GetInverse()
+	if headInv then
 		local m = Matrix()
 		m:SetAngles(att.Ang)
 		m:SetTranslation(att.Pos)
-		eyes = world[head]:GetInverse() * m
+		eyes = headInv * m
 	end
 	return { locals = locals, parents = parents, count = count, sequence = name, head = head, eyes = eyes, carry = carry }
 end
@@ -547,18 +577,15 @@ local function ReadE(p, get)
 	if not (p.applied and p.needed) then return nil end
 	for i = 0, p.base.count - 1 do
 		local L = p.base.parents[i] < 0 and p.needed[i] and Local(p, i)
-		local got = L and get[i]
+		-- A root bone scaled to nothing (some models hide a spare one) says
+		-- nothing about where the player is; the next one might.
+		local got = L and get[i] and Rigid(get[i])
 		if got then
 			local X = Body.Chain(Matrix(), L, p.applied[i])
 			local off = p.moved and p.moved[i]
 			if off then X:SetTranslation(X:GetTranslation() + Body.OffsetAxes(Matrix(), L, X) * off) end
-			local G = Ortho(got)
-			G:SetTranslation(got:GetTranslation())
-			local E = G * X:GetInverseTR()
 			-- Clean axes, or rounding builds up frame after frame.
-			local clean = Ortho(E)
-			clean:SetTranslation(E:GetTranslation())
-			return clean
+			return Rigid(got * X:GetInverseTR())
 		end
 	end
 	return nil
@@ -576,6 +603,73 @@ end
 local cv_carry = CreateClientConVar("skate3_body_carry", "1", true, false,
 	"Bones off the skeleton (toes, hair, armour) keep the model's own offsets (0 = the engine's, the older way)")
 
+---------------------------------------------------------------------------
+-- Models we can't pose. Some playermodels are built in ways the posing
+-- can't follow (odd skeletons, bones scaled or parented strangely), and
+-- their mesh got stretched off across the map. Every bone is checked before
+-- it's written: one that would land far from the body, or holds NaNs, isn't
+-- written. A model that keeps doing that is given up on for the session;
+-- your own body then skates as a copy (cl_skater.lua), and another player's
+-- body is left to Gmod.
+
+-- Further than this from the skater (or the engine's own hips) is a bone
+-- gone wrong: the biggest playermodels are a few hundred units tall.
+local REACH = 400
+-- Body setups with a bone gone wrong before the model's given up on (a few
+-- run every frame: shadows, the view, the jiggle bones).
+local BAD_SETUPS = 30
+
+local troubled = {} -- model path -> why it can't be posed
+local cv_guard = CreateClientConVar("skate3_body_guard", "1", true, false,
+	"Check every posed bone and fall back to a copy on models whose body stretches (0 = off)")
+
+local function ModelKey(name)
+	return ((name or ""):lower():gsub("\\", "/"))
+end
+
+-- Why the model at this path can't be posed, or nil when it can.
+function Body.Troubled(name)
+	return troubled[ModelKey(name)]
+end
+
+concommand.Add("skate3_body_retry", function()
+	troubled = {}
+	print("[skate3] every playermodel will be tried as your own body again")
+end)
+
+-- Whether m is a bone matrix worth writing near at (no NaNs, no endless
+-- scale, not miles away).
+local function Placeable(m, at)
+	local t = m:GetTranslation()
+	if not (Finite(t.x) and Finite(t.y) and Finite(t.z)) then return false end
+	for _, v in ipairs({ m:GetForward(), m:GetUp(), m:GetRight() }) do
+		local l = v:Length()
+		if not (Finite(l) and l < 20) then return false end
+	end
+	return not at or t:DistToSqr(at) < REACH * REACH
+end
+
+local function Bad(ply, p, i, why)
+	p.badNow = p.badNow or { bone = i, why = why }
+end
+
+-- After a body setup: count it if something went wrong, and give up on
+-- the model once it keeps happening.
+local function Tally(ply, p)
+	local bad = p.badNow
+	p.badNow = nil
+	if not bad or troubled[ModelKey(ply:GetModel())] then return end
+	p.badSetups = (p.badSetups or 0) + 1
+	if p.badSetups < BAD_SETUPS or not cv_guard:GetBool() then return end
+	local name = ply:GetModel()
+	local why = ("%s %s"):format(tostring(ply:GetBoneName(bad.bone)), bad.why)
+	troubled[ModelKey(name)] = why
+	local who = ply == LocalPlayer() and "your" or ((ply.Nick and ply:Nick() or "a player") .. "'s")
+	print(("[skate3] %s playermodel %s can't be posed (%s); %s"):format(who, tostring(name), why,
+		ply == LocalPlayer() and "skating with a copy of it instead. skate3_body_retry tries again."
+			or "leaving it to Gmod."))
+end
+
 local function PlaceAll(ply, count)
 	local p = posed[ply]
 	if not (p and p.base) then return end
@@ -591,10 +685,17 @@ local function PlaceAll(ply, count)
 	-- when the pose was worked out: a server update landing in between
 	-- otherwise got folded into the fix, the next pose put the body that
 	-- far off, and tails/capes/hair got yanked back every update.
-	if E then p.fix = EngineE(ply):GetInverseTR() * E end
+	if E then
+		local fix = EngineE(ply):GetInverseTR() * E
+		-- A correction that big (or NaN) is a misreading, not the player:
+		-- kept, it would throw the whole body off every frame after.
+		if Placeable(fix, vector_origin) then p.fix = fix else p.fix = nil end
+	end
 	if p.needed then Measure(ply, p, old) end
 	local final, parents = p.final, p.base.parents
 	if not final then return end
+	local guard = cv_guard:GetBool()
+	local at = p.frame and p.frame.origin
 	local carry, carryOn = p.base.carry or {}, cv_carry:GetBool()
 	local new = {}
 	for i = 0, n - 1 do
@@ -610,12 +711,21 @@ local function PlaceAll(ply, count)
 					m = k and new[par] * k * inv * was or new[par] * inv * was
 				end
 			end
+			if m and guard and not Placeable(m, at) then
+				Bad(ply, p, i, final[i] and "posed off the body" or "carried off the body")
+				m = nil
+			end
+			-- Bones left to the engine aren't judged: ones it doesn't set up
+			-- (unused helpers, armour bones on proportion-trick models) can
+			-- sit anywhere without anything showing, and counting them gave
+			-- up on models that were fine.
 			if m then
 				new[i] = m
 				ply:SetBoneMatrix(i, m)
 			end
 		end
 	end
+	Tally(ply, p)
 end
 
 local function MarkNeeded(p)
@@ -673,6 +783,10 @@ end
 
 function Body.Apply(ply, frame, base)
 	if not IsValid(ply) or not conv or not base then return end
+	if troubled[ModelKey(ply:GetModel())] then
+		if posed[ply] then Body.Release(ply) end
+		return
+	end
 	local p = posed[ply]
 	if p and p.base ~= base then
 		-- A new model: its bones are numbered differently. Let go of
@@ -759,6 +873,8 @@ end
 -- What's known about a posed body, for skate3_body_report.
 function Body.Report(ply)
 	local p = posed[ply]
+	local why = Body.Troubled(ply:GetModel())
+	if why then return { "gave up posing this model (" .. why .. "); skate3_body_retry tries again" } end
 	if not p or not p.frame then return { "not posed right now" } end
 	local lines = {}
 	local E, f = EngineE(ply), p.frame
