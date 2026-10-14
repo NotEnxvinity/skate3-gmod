@@ -291,7 +291,7 @@ local function DrawEngineBones(bones, parts, alpha)
 end
 
 hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(_, skybox)
-	if skybox or not lastBones or not Meat.Enabled() then return end
+	if skybox or not lastBones or not Meat.Enabled() or (Meat.Skipped and Meat.Skipped()) then return end
 	local b, going = bail, true
 	if not b then b, going = last, false end
 	if not b then return end

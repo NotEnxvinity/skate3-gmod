@@ -3,6 +3,7 @@ local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
 -- Hall of Meat's X-ray skeleton is posed like the body the skater shows.
 Score.Meat.Body = Skater.BodyEntity
+Score.Meat.Skipped = function() return Skater.Skip.hom end
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_menu.lua")
 local Props = include("skate3/cl_props.lua")
@@ -16,7 +17,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.2.1")
+print("[skate3] lua build: v2.2.1-speed-test-1")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
@@ -220,6 +221,19 @@ local function Start()
 	Skater.ShowModel(ply)
 end
 
+include("skate3/cl_perf_test.lua")(Skater, {
+	active = function() return active end,
+	where = function()
+		if not pose then return nil end
+		return V(pose.pos), pose.camera and V(pose.camera.forward):Angle().y or nil
+	end,
+	stop = function() Stop() end,
+	restart = function(at, yaw)
+		resumeAt, resumeYaw = at, yaw
+		Start()
+	end,
+})
+
 concommand.Add("skate3_toggle", function()
 	if active then Stop() else Start() end
 end, nil, "Get on or off the board")
@@ -410,7 +424,7 @@ hook.Add("Think", "skate3_step", function()
 			end
 		end
 	end
-	if status.state == "ready" then Perf.Time("prop scan", LiveProps.Think, now, active and pose and pose.state) end
+	if status.state == "ready" and not Skater.Skip.props then Perf.Time("prop scan", LiveProps.Think, now, active and pose and pose.state) end
 	if not active then return end
 	-- The simulation always spawns on the board, so tap Y for the player
 	-- until the skater is on foot.
@@ -511,7 +525,7 @@ end)
 -- With skate3_body copy, the copy stands in for the player while skating;
 -- the player's own model would otherwise show up in mirrors and portals.
 hook.Add("PrePlayerDraw", "skate3_hide", function(ply)
-	if active and ply == LocalPlayer() and not Skater.RealBody() then return true end
+	if active and ply == LocalPlayer() and (not Skater.RealBody() or Skater.Skip.model) then return true end
 end)
 
 -- The skate camera replaces the first-person view, so no hands or weapon.

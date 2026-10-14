@@ -213,7 +213,7 @@ return function(Skater, Perf)
 	end
 
 	hook.Add("Think", "skate3_others", function()
-		if not next(others) then return end
+		if not next(others) or Skater.Skip.others then return end
 		Perf.Begin("other skaters")
 		local now = RealTime()
 		for ply, o in pairs(others) do

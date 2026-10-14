@@ -1009,6 +1009,9 @@ function Skater.UpdateModel(p)
 	model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
 	-- Only on the model it was measured from: another model's bones are
 	-- numbered differently, and the old frame would stretch it.
+	-- Skipping the posing lets go of the body altogether, so its per-frame
+	-- bone work stops too (for skate3_perf_test).
+	if Skater.Skip.bones and IsValid(owner) and Body.IsPosed(owner) then Body.Release(owner) end
 	if model.skate3Real and frozen and IsValid(owner) and p.bones and not Skater.Skip.bones
 		and model.skate3Name == ModelFor(owner) then
 		CheckLanding()
@@ -1023,7 +1026,7 @@ end
 -- Faces from a Think hook: flex weights are safe there, and nothing in a
 -- render hook may touch the skeleton.
 hook.Add("Think", "skate3_anim_face", function()
-	if IsValid(model) and pose and (model.skate3Real or not model:GetNoDraw()) then
+	if IsValid(model) and pose and (model.skate3Real or not model:GetNoDraw()) and not Skater.Skip.anim then
 		Anim.Think(model.skate3AnimEnt or model, pose)
 	end
 end)
