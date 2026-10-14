@@ -39,8 +39,8 @@ Install
 
 Setup installs everything: the addon (replacing any older copy), the skate
 engine, and what it converts from your disc. Updating = do the same with the
-new zip. Subscribed to S3GM on the Workshop too? Fine: the version setup
-installs is the one that loads.
+new zip. Subscribed to S3GM on the Steam Workshop? Unsubscribe while
+testing early builds: the Workshop one is older (setup reminds you).
 
 Joining someone's server? You need this setup too: everyone's skating runs
 from their own disc.
