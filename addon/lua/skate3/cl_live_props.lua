@@ -22,6 +22,8 @@ local CHECK_EVERY = 0.25
 local STILL_FOR = 0.5
 -- At most one collision swap this often.
 local SWAP_EVERY = 1
+-- And while a skatepark is still loading its tiles.
+local PARK_SWAP_EVERY = 5
 -- Grinds aren't interrupted by a swap for longer than this.
 local GRIND_HOLD = 3
 -- Nearest props first past this many triangles.
@@ -58,8 +60,15 @@ local PASSABLE = {
 	[COLLISION_GROUP_PASSABLE_DOOR] = true,
 }
 
+-- Park pieces (cl_park.lua) are solid for skating whatever the server says
+-- about spawned props, as soon as their data is loaded.
+local function IsPiece(ent)
+	return ent:GetClass() == "skate3_piece"
+end
+
 local function Wanted(ent)
 	if ent:EntIndex() <= 0 then return false end
+	if IsPiece(ent) then return ent.loadedId ~= nil end
 	if ent:IsPlayer() or ent:IsNPC() or ent:IsNextBot() or ent:IsWeapon() or ent:IsRagdoll() then return false end
 	local model = ent:GetModel()
 	if not model or not model:find("%.mdl$") then return false end
@@ -128,6 +137,12 @@ local brushesSent = false
 local function BuildEntity(ent, place)
 	local b = built[ent]
 	if b and b.place == place then return b end
+	if IsPiece(ent) then
+		local tris, n = Skate3Park.Collision(ent)
+		b = { place = place, tris = tris or {}, count = n or 0 }
+		built[ent] = b
+		return b
+	end
 	local hs = ent:GetSolid() == SOLID_VPHYSICS and Props.Solid(ent:GetModel()) or BoxHull(ent)
 	local tris, n = {}, 0
 	if hs then
@@ -163,7 +178,8 @@ local function Build(key, place)
 end
 
 local function PosOf(key)
-	return istable(key) and key.pos or key:GetPos()
+	if istable(key) then return key.pos end
+	return key.WorldCenter and key:WorldCenter() or key:GetPos()
 end
 
 local function Triangles(still)
@@ -262,9 +278,11 @@ local nextCheck = 0
 local function Scan(now)
 	local on = not cv_server or cv_server:GetBool()
 	local still, fresh = {}, {}
-	if on then
+	do
 		for _, ent in ipairs(ents.GetAll()) do
-			if ent:IsDormant() then
+			if not on and not IsPiece(ent) then
+				-- Spawned props are switched off.
+			elseif ent:IsDormant() then
 				-- Out of sight in multiplayer, so the game stopped updating
 				-- it: keep it where it was last seen rather than swapping
 				-- the collision every time a prop leaves or comes back.
@@ -386,7 +404,10 @@ function Live.Think(now, state)
 		nextCheck = now + CHECK_EVERY
 		Scan(now)
 	end
-	if (not dirty and not brushDirty) or now - lastSwap < SWAP_EVERY then return end
+	-- A skatepark's tiles come in over a while: not every second, then.
+	local every = SWAP_EVERY
+	if dirty and Skate3Park and Skate3Park.Pending and Skate3Park.Pending() then every = PARK_SWAP_EVERY end
+	if (not dirty and not brushDirty) or now - lastSwap < every then return end
 	-- Mid-grind, the rail could move under the board: wait for it to end.
 	if state and state:find("^Grind") then
 		grindingSince = grindingSince or now

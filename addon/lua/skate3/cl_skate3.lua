@@ -10,6 +10,7 @@ Score.Meat.Body = Skater.BodyEntity
 Score.Meat.Skipped = function() return Skater.Skip.hom end
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_menu.lua")
+include("skate3/cl_park.lua")
 local Props = include("skate3/cl_props.lua")
 local Perf = include("skate3/cl_perf.lua")
 local LiveProps = include("skate3/cl_live_props.lua")(Props, Perf)

@@ -39,6 +39,8 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_score_skate3.lua")
 	AddCSLuaFile("skate3/cl_menu.lua")
 	AddCSLuaFile("skate3/cl_props.lua")
+	AddCSLuaFile("skate3/cl_park.lua")
+	AddCSLuaFile("skate3/sh_park.lua")
 	AddCSLuaFile("skate3/cl_boards.lua")
 	AddCSLuaFile("skate3/cl_conflicts.lua")
 	AddCSLuaFile("skate3/cl_keyboard.lua")
@@ -46,6 +48,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_perf.lua")
 	AddCSLuaFile("skate3/cl_perf_test.lua")
 	include("skate3/sv_skate3.lua")
+	include("skate3/sv_park.lua")
 else
 	include("skate3/cl_skate3.lua")
 end
