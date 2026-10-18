@@ -26,6 +26,8 @@ SHAPES = ('36', '38', '40', '43', '45', '46', '47', '51', '54', '57', '61', '64'
 HD_SCORE = 'ui/screens/hud2/trickdisplay2/%s.png'
 HD_PANEL = 'ui/screens/hud2/hudphonelist/%s.png'
 HD_BUTTON = 'ui/images/buttons/xbox360/buttons/button_%s_hud.png'
+# The Futura atlases, by font key (heavy is the text colour pass, shadow the black one).
+HD_FONT = {'heavy': 'fonts/atlas-png/futuraheavy.png', 'shadow': 'fonts/atlas-png/futurashadow.png'}
 PANEL = (91.0, 48.0)  # where the quick menu's panel sits on the canvas
 # The front-end archives the extractors read (miscboot.big is names.py's too).
 FROM_DISC = {'data/big/fedata.big', 'data/big/fetexture.big', 'data/big/fedynamic.big', 'data/big/miscboot.big'}
@@ -87,7 +89,8 @@ def build(scoring, marker, out, report=print):
         font = hud['fonts'][family]
         definition = font['definition']
         atlas = definition['textures'][0]
-        name = add_texture('font_' + key, (scoring / font['texture']).read_bytes(), atlas['width'], atlas['height'])
+        name = add_texture('font_' + key, (scoring / font['texture']).read_bytes(), atlas['width'], atlas['height'],
+                           HD_FONT[key])
         glyphs = {g['glyph_index']: g for g in definition['glyphs']}
         chars = {}
         for item in definition['characters']:
@@ -153,7 +156,7 @@ def export(engine, game, out, collections, report):
 def install_hd(source, out, report):
     """The optional HD pack (upscaled copies of the textures above, in the
     folders HD_* name) from a folder or a zip into out (data/skate3/ui-hd).
-    Only .png files under ui/ are taken. Returns how many were installed."""
+    Only .png files under ui/ and fonts/atlas-png/ are taken. Returns how many were installed."""
     import shutil, zipfile
     source, out = Path(source), Path(out)
     count = 0
@@ -166,9 +169,12 @@ def install_hd(source, out, report):
         opener = archive.open
     for name, handle in files:
         parts = [x for x in name.split('/') if x]
-        if 'ui' not in parts:
+        # ui/... (the textures) or fonts/atlas-png/... (the Futura atlases),
+        # with any wrapping Skate3-UI-HD folder dropped.
+        starts = [i for i, x in enumerate(parts) if x == 'ui' or (x == 'fonts' and parts[i + 1:i + 2] == ['atlas-png'])]
+        if not starts:
             continue
-        rel = parts[parts.index('ui'):]  # drops a wrapping Skate3-UI-HD folder
+        rel = parts[starts[0]:]
         if '..' in rel:
             continue
         target = out.joinpath(*rel)
@@ -189,7 +195,7 @@ def find_hd(*here):
         for name in ('Skate3-UI-HD.zip', 'Skate3-UI-HD'):
             pack = place / name
             try:
-                if pack.is_file() or (pack.is_dir() and (pack / 'ui').is_dir()):
+                if pack.is_file() or (pack.is_dir() and ((pack / 'ui').is_dir() or (pack / 'fonts').is_dir())):
                     return pack
             except OSError:
                 continue
