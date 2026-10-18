@@ -42,13 +42,17 @@ def usable(a, b, c):
 
 def clean_collision(flat):
     """A flat list of triangle corners without degenerate or repeated
-    triangles. Corners are rounded the way tiles store them."""
+    triangles (a two-sided surface keeps both sides). Corners are rounded the
+    way tiles store them."""
     out, seen = [], set()
     for i in range(0, len(flat) - 8, 9):
         corners = [tuple(round(v, DECIMALS) for v in flat[i + k:i + k + 3]) for k in (0, 3, 6)]
         if not usable(*corners):
             continue
-        key = tuple(sorted(corners))
+        # The same triangle twice is one; the same corners wound the other
+        # way is the back of a two-sided surface and stays.
+        first = corners.index(min(corners))
+        key = tuple(corners[first:] + corners[:first])
         if key in seen:
             continue
         seen.add(key)

@@ -98,3 +98,20 @@ class GroundHeightTest(unittest.TestCase):
 
     def test_no_floor(self):
         self.assertIsNone(park_tiles.ground_height(self.quad(0.0, up=False)))
+
+
+class CleanCollisionTest(unittest.TestCase):
+    A, B, C = (0, 0, 0), (10, 0, 0), (0, 10, 0)
+
+    def flat(self, *tris):
+        return [v for t in tris for corner in t for v in corner]
+
+    def test_drops_a_repeated_triangle(self):
+        t = (self.A, self.B, self.C)
+        rotated = (self.B, self.C, self.A)
+        self.assertEqual(len(park_tiles.clean_collision(self.flat(t, t, rotated))), 9)
+
+    def test_keeps_the_back_of_a_two_sided_surface(self):
+        front = (self.A, self.C, self.B)
+        back = (self.A, self.B, self.C)
+        self.assertEqual(len(park_tiles.clean_collision(self.flat(front, back))), 18)

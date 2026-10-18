@@ -148,7 +148,8 @@ function ENT:Think()
 	self.meshes = Park.Meshes(id)
 	local b = piece.bounds
 	self.localCenter = Vector((b[1][1] + b[2][1]) / 2, (b[1][2] + b[2][2]) / 2, (b[1][3] + b[2][3]) / 2)
-	self:SetRenderBounds(Vector(b[1][1], b[1][2], b[1][3]), Vector(b[2][1], b[2][2], b[2][3]))
+	self.localMins, self.localMaxs = Vector(b[1][1], b[1][2], b[1][3]), Vector(b[2][1], b[2][2], b[2][3])
+	self:SetRenderBounds(self.localMins, self.localMaxs)
 	-- The same physics client side, so walking on it predicts properly.
 	self:BuildPhysics(piece)
 	self:SyncPhysics()
@@ -166,6 +167,18 @@ end
 function ENT:WorldCenter()
 	if self.localCenter then return self:LocalToWorld(self.localCenter) end
 	return self:GetPos()
+end
+
+-- How far (squared) `pos` is from the piece's box: zero inside it. A tile of
+-- a park is big, and by its middle the one under you can look far away.
+function ENT:DistanceSqrTo(pos)
+	if not self.localMins then return self:GetPos():DistToSqr(pos) end
+	local at = self:WorldToLocal(pos)
+	local out = Vector(
+		math.max(self.localMins.x - at.x, 0, at.x - self.localMaxs.x),
+		math.max(self.localMins.y - at.y, 0, at.y - self.localMaxs.y),
+		math.max(self.localMins.z - at.z, 0, at.z - self.localMaxs.z))
+	return out:LengthSqr()
 end
 
 function ENT:Draw()

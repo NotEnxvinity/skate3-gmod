@@ -214,7 +214,10 @@ local function Triangles(still)
 	if total / 9 > cap then
 		local me = LocalPlayer()
 		local from = IsValid(me) and me:GetPos() or vector_origin
-		for _, e in ipairs(list) do e.d = PosOf(e.key):DistToSqr(from) end
+		for _, e in ipairs(list) do
+			local k = e.key
+			e.d = (not istable(k) and k.DistanceSqrTo) and k:DistanceSqrTo(from) or PosOf(k):DistToSqr(from)
+		end
 		table.sort(list, function(a, b) return a.d < b.d end)
 	end
 	local out, n = {}, 0
