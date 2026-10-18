@@ -572,8 +572,15 @@ local LIMBS = {
 -- knees bend as much as the skater's do.
 -- All the way up straightened the arms (they couldn't reach the board any
 -- more), so by default the hips go part of the way.
-local cv_height = CreateClientConVar("skate3_body_height", "0.9", true, false,
+local cv_height = CreateClientConVar("skate3_body_height", "1", true, false,
 	"How far the hips lift towards the playermodel's own leg length: 0 = the skater's height (squats), 1 = all the way (straight arms)")
+-- 1 became the default in v2.2.2 (0.9 was the old one, saved by every player
+-- who never touched it): move those over once, and leave anyone's own choice.
+if not file.Exists("skate3/body_height_default_1.txt", "DATA") then
+	file.CreateDir("skate3")
+	file.Write("skate3/body_height_default_1.txt", "1")
+	if cv_height:GetString() == "0.9" then cv_height:SetString("1") end
+end
 local legScale -- the model's hip-to-ankle height over the skater's
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children

@@ -18,7 +18,7 @@ local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
-	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_hud" }
+	"skate3_volume", "skate3_score_hud", "skate3_ui_style", "skate3_ui_world", "skate3_menu", "skate3_hud" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
@@ -133,11 +133,15 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:NumSlider("Volume", "skate3_volume", 0, 1, 2)
 
 		panel:CheckBox("Show the trick score", "skate3_score_hud")
-		Choices(panel, "Score look", "skate3_score_style", {
-			{ "Minimal, on screen", "minimal" },
-			{ "Minimal, beside the skater", "world" },
+		Choices(panel, "Interface look", "skate3_ui_style", {
+			{ "Skate 3 (from your disc)", "skate3" },
+			{ "Minimal", "minimal" },
 			{ "Half-Life 2", "hl2" },
 		})
+		panel:ControlHelp("Skate 3's own look comes from your disc: run the S3GM setup again after updating if it isn't there yet (until then you get Minimal).")
+		panel:CheckBox("Trick score beside the skater, not on screen", "skate3_ui_world")
+		panel:CheckBox("Contextual menu (hold L1 or Shift)", "skate3_menu")
+		panel:ControlHelp("Hold L1 for the menu: D-pad down places your marker, hold up goes back to it, left interacts, hold right opens the games list.")
 		panel:CheckBox("Show the status line", "skate3_hud")
 		panel:CheckBox("Hall of Meat", "skate3_hall_of_meat")
 		panel:ControlHelp("Bails score points and break bones, shown in red, with the skeleton showing through your skater. Bail on purpose: hold both triggers and click both sticks.")

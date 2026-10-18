@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, convert, names, xdvdfs  # noqa: E402
+import audio, convert, names, ui, xdvdfs  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -38,6 +38,7 @@ FROM_DISC = {
     'data/content/createacharacter.big',
     *audio.FROM_DISC,
     *names.FROM_DISC,
+    *ui.FROM_DISC,
 }
 FROM_DISC_FOLDERS = ('data/anim/',)
 # The engine's top-level scripts the converters run as steps, and the ones
@@ -330,6 +331,10 @@ def install_addon(gmod, wanted, report):
     if (addon.parent / 'materials').is_dir():
         shutil.rmtree(local / 'materials', ignore_errors=True)
         shutil.copytree(addon.parent / 'materials', local / 'materials')
+    # The fallback font for the minimal look sits beside the Lua.
+    if (addon.parent / 'resource').is_dir():
+        shutil.rmtree(local / 'resource', ignore_errors=True)
+        shutil.copytree(addon.parent / 'resource', local / 'resource')
     report(f'Installed the S3GM {s3gm_version()} addon in {local}'.replace('  ', ' '))
 
 
@@ -363,6 +368,13 @@ def install(selected, gmod, report, with_addon=True):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t read the trick names ({error}); the score widget will spell them out.')
+        # Skate 3's own on-screen look; without it the mod shows the minimal one.
+        try:
+            ui.export(engine_dir(), xex.parent, data / 'assets/ui',
+                      data / 'assets/private/stock/skater-collections.json', report)
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t make the Skate 3 on-screen look ({error}); the mod will show the minimal look.')
         # The mod plays Half-Life 2 sounds without these, so a problem here
         # doesn't undo the rest.
         try:

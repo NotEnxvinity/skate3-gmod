@@ -1,0 +1,317 @@
+-- The pieces S3GM's on-screen UI shares: which look is chosen, Skate 3's own
+-- art and Futura fonts (made from the player's disc by setup, in
+-- data/skate3/assets/ui), the font the "minimal" look uses, and the toast
+-- line. Everything is laid out on Skate 3's 1280x720 canvas and scaled to
+-- the screen (or onto a 3D2D plane for the in-world look).
+--
+-- Other modules reach this through S3GM_UI.
+
+S3GM_UI = S3GM_UI or {}
+local UI = S3GM_UI
+
+local cv_style = CreateClientConVar("skate3_ui_style", "skate3", true, false,
+	"On-screen look: skate3 (Skate 3's own, from your disc), minimal or hl2")
+local cv_world = CreateClientConVar("skate3_ui_world", "0", true, false,
+	"Draw the trick score beside the skater in the world instead of on screen (1 on, 0 off)")
+
+local ART = "skate3/assets/ui/"
+-- Replacements for the disc's images with the same names (an upscaled set),
+-- looked for first. Setup never touches this folder.
+local HD = "skate3/ui-hd/"
+
+---------------------------------------------------------------------------
+-- Which look
+---------------------------------------------------------------------------
+
+local art, artTried
+
+-- Skate 3's art, or nil when setup hasn't made it (or the data folder was
+-- moved with skate3_data_path, which Garry's Mod can't load images from).
+function UI.Art()
+	if artTried then return art end
+	artTried = true
+	local path = GetConVar("skate3_data_path")
+	if path and path:GetString() ~= "" then return nil end
+	local json = file.Read(ART .. "ui.json", "DATA")
+	art = json and util.JSONToTable(json) or nil
+	if art and not art.shapes then art = nil end
+	return art
+end
+
+-- Looks for the art again (after running setup with the game open).
+concommand.Add("skate3_ui_reload", function()
+	artTried, art = false, nil
+	UI.mats = {}
+	print("[skate3] ui art: " .. (UI.Art() and "found" or "not found (run the S3GM setup again)"))
+end, nil, "Reload Skate 3's on-screen art")
+
+UI.mats = {}
+
+local told = false
+-- The look in use: what's chosen, unless that's Skate 3's and its art isn't
+-- installed, which falls back to minimal.
+function UI.Style()
+	local style = cv_style:GetString()
+	if style == "minimal" or style == "hl2" then return style end
+	if UI.Art() then return "skate3" end
+	if not told then
+		told = true
+		print("[skate3] the Skate 3 look needs its art from your disc: run the S3GM setup again. Showing the minimal look until then.")
+	end
+	return "minimal"
+end
+
+function UI.Chosen()
+	local style = cv_style:GetString()
+	return (style == "minimal" or style == "hl2") and style or "skate3"
+end
+
+function UI.World()
+	return cv_world:GetBool() and UI.Style() ~= "hl2"
+end
+
+---------------------------------------------------------------------------
+-- Drawing on the canvas
+---------------------------------------------------------------------------
+
+local T = { ox = 0, oy = 0, s = 1 }
+
+-- Canvas point (x, y) lands on the screen at ox + x * s, oy + y * s.
+function UI.Begin(ox, oy, s)
+	T.ox, T.oy, T.s = ox, oy, s
+end
+
+function UI.Scale() return T.s end
+
+-- The canvas pinned to the screen's bottom left (the score) or top left (the menu).
+function UI.BeginBottomLeft()
+	local s = math.min(ScrH() / 720, ScrW() / 1280)
+	UI.Begin(0, ScrH() - 720 * s, s)
+	return s
+end
+
+function UI.BeginTopLeft()
+	local s = math.min(ScrH() / 720, ScrW() / 1280)
+	UI.Begin(0, 0, s)
+	return s
+end
+
+function UI.P(x, y)
+	return T.ox + x * T.s, T.oy + y * T.s
+end
+
+local function Mat(name)
+	local m = UI.mats[name]
+	if m then return m end
+	local path = ART .. name .. ".png"
+	if file.Exists(HD .. name .. ".png", "DATA") then path = HD .. name .. ".png" end
+	m = Material("../data/" .. path, "smooth noclamp")
+	UI.mats[name] = m
+	return m
+end
+
+-- The four corners DrawPoly is handed for a rectangle, reused every call.
+local verts = { {}, {}, {}, {} }
+
+-- One textured rectangle of the art: q is { {x, y, u, v} x 4 } on the canvas,
+-- moved by (dx, dy) and scaled by k about the origin.
+function UI.Quad(tex, q, dx, dy, k, r, g, b, a)
+	k = k or 1
+	for i = 1, 4 do
+		local p = q[i]
+		local x, y = UI.P((p[1] * k) + dx, (p[2] * k) + dy)
+		local v = verts[i]
+		v.x, v.y, v.u, v.v = x, y, p[3], p[4]
+	end
+	surface.SetMaterial(Mat(tex))
+	surface.SetDrawColor(r, g, b, a)
+	surface.DrawPoly(verts)
+end
+
+-- A shape of the score movie: every piece of it, with its origin at (dx, dy).
+function UI.Shape(id, dx, dy, k, r, g, b, a)
+	local shape = UI.Art() and art.shapes[id]
+	if not shape then return end
+	for _, piece in ipairs(shape) do
+		UI.Quad(piece.tex, piece.quad, dx, dy, k, r, g, b, a * piece.color[4])
+	end
+end
+
+-- A quadrant ring's first `frac` of the way round clockwise from the top
+-- (frac 0..1), with the shape's origin at (dx, dy). The pieces are quadrants
+-- of a ring (mirrored copies of one picture), so each is cut to the wedge it
+-- is swept through, with the picture's own coordinates kept.
+local QUADRANT_START = { ["1,-1"] = 0, ["1,1"] = 0.25, ["-1,1"] = 0.5, ["-1,-1"] = 0.75 }
+local function Edge(angle, half)
+	local c, s = math.cos(angle), math.sin(angle)
+	local d = half / math.max(math.abs(c), math.abs(s))
+	return c * d, s * d
+end
+
+function UI.Sector(id, dx, dy, from, to, r, g, b, a)
+	local shape = UI.Art() and art.shapes[id]
+	if not shape or to <= from then return end
+	for _, piece in ipairs(shape) do
+		local q = piece.quad
+		local x0, y0, x1, y1 = q[1][1], q[1][2], q[3][1], q[3][2]
+		local sx = (x0 + x1) > 0 and 1 or -1
+		local sy = (y0 + y1) > 0 and 1 or -1
+		local start = QUADRANT_START[sx .. "," .. sy]
+		local a0, a1 = math.max(from, start), math.min(to, start + 0.25)
+		if a1 > a0 then
+			local half = math.max(math.abs(x0), math.abs(x1), math.abs(y0), math.abs(y1))
+			local points = { { 0, 0 } }
+			local function Add(frac)
+				local ex, ey = Edge(-math.pi / 2 + frac * math.pi * 2, half)
+				points[#points + 1] = { ex, ey }
+			end
+			Add(a0)
+			-- The corner of the square, where the ray moves to its next edge.
+			local corner = start + 0.125
+			if corner > a0 and corner < a1 then Add(corner) end
+			Add(a1)
+			local ux, uy = q[2][3] - q[1][3], q[2][4] - q[1][4]
+			local vx, vy = q[4][3] - q[1][3], q[4][4] - q[1][4]
+			local poly = {}
+			for i = 1, #points do
+				local px, py = points[i][1], points[i][2]
+				local fx, fy = (px - x0) / (x1 - x0), (py - y0) / (y1 - y0)
+				local X, Y = UI.P(px + dx, py + dy)
+				poly[i] = { x = X, y = Y, u = q[1][3] + fx * ux + fy * vx, v = q[1][4] + fx * uy + fy * vy }
+			end
+			surface.SetMaterial(Mat(piece.tex))
+			surface.SetDrawColor(r, g, b, a * piece.color[4])
+			surface.DrawPoly(poly)
+		end
+	end
+end
+
+-- A button icon of the game's own bank (A, B, X, Y, L_Bumper, DPad_Up ...),
+-- its 64x64 picture with the top left at (x, y).
+function UI.Button(name, x, y, r, g, b, a)
+	local tex = UI.Art() and art.buttons[name]
+	if not tex then return end
+	UI.Quad(tex, { { x, y, 0, 0 }, { x + 64, y, 1, 0 }, { x + 64, y + 64, 1, 1 }, { x, y + 64, 0, 1 } }, 0, 0, 1, r, g, b, a)
+end
+
+---------------------------------------------------------------------------
+-- Skate 3's Futura bitmap text
+---------------------------------------------------------------------------
+
+local function Chars(key)
+	return UI.Art() and art.fonts[key]
+end
+
+-- How wide `text` is at height h (the font's ascent, as the movies give it).
+function UI.FuturaWidth(text, h, key)
+	local font = Chars(key or "heavy")
+	if not font then return 0 end
+	local scale = h / font.ascent
+	local pen = 0
+	for _, cp in utf8.codes(text) do
+		local c = font.chars[tostring(cp)]
+		if c then pen = pen + c[9] * scale end
+	end
+	return pen
+end
+
+local function Run(font, text, x, y, h, r, g, b, a)
+	local scale = h / font.ascent
+	local pen = 0
+	surface.SetMaterial(Mat(font.tex))
+	surface.SetDrawColor(r, g, b, a)
+	for _, cp in utf8.codes(text) do
+		local c = font.chars[tostring(cp)]
+		if c then
+			if c[5] > 0 and c[6] > 0 then
+				local gx = x + pen + c[7] * scale
+				local gy = y + h - c[8] * scale
+				local w, hh = c[5] * scale, c[6] * scale
+				local x0, y0 = UI.P(gx, gy)
+				local x1, y1 = UI.P(gx + w, gy + hh)
+				local v = verts
+				v[1].x, v[1].y, v[1].u, v[1].v = x0, y0, c[1], c[2]
+				v[2].x, v[2].y, v[2].u, v[2].v = x1, y0, c[3], c[2]
+				v[3].x, v[3].y, v[3].u, v[3].v = x1, y1, c[3], c[4]
+				v[4].x, v[4].y, v[4].u, v[4].v = x0, y1, c[1], c[4]
+				surface.DrawPoly(v)
+			end
+			pen = pen + c[9] * scale
+		end
+	end
+end
+
+-- Text the way the game draws it: a black shadow atlas under the heavy one,
+-- shifted a pixel. (x, y) is the left (or centre, or right) of the line's top.
+function UI.Futura(text, x, y, h, color, alpha, align)
+	local heavy, shadow = Chars("heavy"), Chars("shadow")
+	if not heavy then return end
+	if align == TEXT_ALIGN_CENTER then
+		x = x - UI.FuturaWidth(text, h) / 2
+	elseif align == TEXT_ALIGN_RIGHT then
+		x = x - UI.FuturaWidth(text, h)
+	end
+	if shadow then Run(shadow, text, x, y, h, 0, 0, 0, 255 * alpha) end
+	Run(heavy, text, x + 1, y, h, color.r, color.g, color.b, (color.a or 255) * alpha)
+end
+
+---------------------------------------------------------------------------
+-- The minimal look's font: Helvetica Neue Bold
+---------------------------------------------------------------------------
+
+-- Helvetica Neue is a commercial font (Macs and Adobe's apps carry it, but we
+-- can't pass the file on), so it's used when the player has it. If not, the
+-- free Inter Bold that ships with the addon (resource/fonts), then Arial and
+-- Garry's Mod's own Roboto, whichever is first found installed.
+local FACES = { "Helvetica Neue", "S3GM Sans Bold", "Arial", "Roboto" }
+local PROBE = "Wmiqjg0123 Skate"
+local face
+
+function UI.Face()
+	if face then return face end
+	surface.CreateFont("s3gm_probe_none", { font = "S3GM no such font", size = 40, weight = 700 })
+	surface.SetFont("s3gm_probe_none")
+	local none = surface.GetTextSize(PROBE)
+	for _, name in ipairs(FACES) do
+		surface.CreateFont("s3gm_probe", { font = name, size = 40, weight = 700 })
+		surface.SetFont("s3gm_probe")
+		if surface.GetTextSize(PROBE) ~= none then
+			face = name
+			break
+		end
+	end
+	face = face or "Roboto"
+	print("[skate3] ui font: " .. face)
+	return face
+end
+
+local made = {}
+-- A bold font of the minimal look at this pixel size; returns its name.
+function UI.Font(size, italic)
+	size = math.max(8, math.Round(size))
+	local name = ("s3gm_ui_%d%s"):format(size, italic and "i" or "")
+	if not made[name] then
+		made[name] = true
+		surface.CreateFont(name, { font = UI.Face(), size = size, weight = 700, italic = italic or false, extended = true })
+	end
+	return name
+end
+
+---------------------------------------------------------------------------
+-- The toast line (marker set, back at marker ...)
+---------------------------------------------------------------------------
+
+local HOLD, FADE = 2.5, 0.5
+local toast = { text = nil, at = -math.huge }
+
+function UI.Toast(text)
+	toast.text, toast.at = text, RealTime()
+end
+
+-- What the toast says and how opaque it is, or nil when it's gone.
+function UI.CurrentToast()
+	local alpha = math.Clamp((HOLD + FADE - (RealTime() - toast.at)) / FADE, 0, 1)
+	if toast.text and alpha > 0 then return toast.text, alpha end
+end
+
+return UI

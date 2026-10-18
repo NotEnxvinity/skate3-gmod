@@ -1,5 +1,5 @@
-S3GM v2.2.1: Skate 3 in Garry's Mod
-===================================
+S3GM v2.2.2 (UI test): Skate 3 in Garry's Mod
+=============================================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
 grinds, manuals and bails, on any map, with any playermodel.
@@ -53,15 +53,18 @@ from their own disc.
 Controls
 --------
 Skate 3's own: A pushes, Y gets on and off the board, the right stick flicks
-tricks, triggers grab. D-pad down drops a session marker, hold D-pad up to
-go back to it. Switch weapons to leave skate mode.
+tricks, triggers grab. Hold L1 (Shift on keyboard) for the quick menu: D-pad
+down drops a session marker, hold D-pad up to go back to it, left interacts
+with what you're next to, right opens the games list. Switch weapons to
+leave skate mode.
 
 
 Settings
 --------
 Spawn menu > Utilities > Skate 3: stance, camera, sounds (Skate 3's from
 your disc, or Half-Life 2's), bail sounds, footsteps, volume, the trick
-score's look, and a button to reset them all to the defaults.
+score's look (Skate 3's own, minimal, or Half-Life 2's; on screen or in the
+world), and a button to reset them all to the defaults.
 Hall of Meat (Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
 score, in red, with a skeleton showing fractured bones yellow and broken ones
 red. Bail on purpose: hold both triggers and click both sticks.
