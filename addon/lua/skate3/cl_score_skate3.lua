@@ -2,8 +2,9 @@
 -- timer running round it, the score in Futura beside it and the trick's name
 -- above, all from the game's trickdisplay2 movie (art made from the player's
 -- disc by setup). Laid out where the movie puts them, bottom left of a
--- 1280x720 canvas. The movie's own animations (intro, outro, flicker) are
--- not replayed: it fades in and out instead.
+-- 1280x720 canvas. The movie's intro and outro are not replayed (it fades in
+-- and out instead); the rows, boxes, big number and the multiplier's glow and
+-- flash at x2 and x3 use its timings.
 
 local UI = S3GM_UI
 
@@ -28,6 +29,7 @@ local CREAM = Color(243, 237, 210) -- the D-pad menu's text colour
 -- Ring picture, by multiplier: x1, x2, x3.
 local RINGS = { "36", "38", "40" }
 local GLOWS = { nil, "61", "57" }
+local GLOW_SCALE = { nil, 1.2, 0.86 } -- the movie sizes them 1.2x and 0.86x
 local MULTIPLIER_ART = { nil, "72", "68" }
 
 -- The movie's dark track quadrant (top left), mirrored to the other three.
@@ -64,6 +66,25 @@ local function Ease(t)
 end
 
 local function Lerp(k, from, to) return from + (to - from) * k end
+
+-- What happens when the multiplier reaches x2 or x3 (the movie's multiplier
+-- labels, counted in frames since the tier came in): the glow behind the disc
+-- fades in over 19 frames, a white flash goes off (in three or four quick
+-- steps up, then a straight fall), the x2 picture fades in over 4 frames and
+-- the x3 one drops in from 1.5x, faint, over 23. Flashes: size, first
+-- opacity, peak, frames to peak, frames to fall to nothing.
+local GLOW_IN, X2_IN, X3_IN = 19, 4, 23
+local FLASHES = {
+	nil,
+	{ { 7.5, 0.25, 0.6, 2, 14 } },
+	{ { 12.5, 0.5, 1, 2, 20 }, { 10.75, 0, 1, 4, 20 } },
+}
+
+local function Flash(f, first, peak, rise, fall)
+	if f < 0 then return 0 end
+	if f < rise then return Lerp(f / rise, first, peak) end
+	return math.Clamp(peak * (1 - (f - rise) / fall), 0, 1)
+end
 
 -- The distance boxes ("Air Distance 30.2 ft") stacked above the trick stack,
 -- newest at the bottom: dark translucent boxes with a thin light edge.
@@ -104,19 +125,33 @@ function S3.Draw(v)
 	if v.meat then return Meat(v) end
 	local m = v.multiplier
 	local tier = m >= 3 and 3 or m >= 2 and 2 or 1
+	-- At x1 the retail game shows nothing at all: no disc, no ring, no label.
+	if m >= 1.01 then
+		local f = (now - (v.tierAt or -math.huge)) / FRAME -- frames since x2 or x3 came in
 
-	if GLOWS[tier] then UI.Shape(GLOWS[tier], CX, CY, 1, 255, 255, 255, 255 * a * 0.7) end
-	UI.Shape("51", CX, CY, 1, 255, 255, 255, 255 * a)
-	Track(a)
-	if v.live then
-		UI.Sector(RINGS[tier], CX, CY, 0, math.Clamp(v.timer, 0, 1), 255, 255, 255, 255 * a)
-	end
-	-- The multiplier pops when it goes up.
-	local pop = 1 + 0.25 * (1 - Ease((now - (v.multAt or -math.huge)) / POP))
-	if MULTIPLIER_ART[tier] and v.live then
-		UI.Shape(MULTIPLIER_ART[tier], CX, CY, pop, 255, 255, 255, 255 * a)
-	else
-		UI.Futura(Multiplier(m), CX, CY - 14 * pop, 27 * pop, WHITE, a, TEXT_ALIGN_CENTER) -- ID_TRICKDISPLAY_15 is 27 high
+		UI.Shape("51", CX, CY, 1, 255, 255, 255, 255 * a)
+		Track(a)
+		if v.live then
+			UI.Sector(RINGS[tier], CX, CY, 0, math.Clamp(v.timer, 0, 1), 255, 255, 255, 255 * a)
+		end
+		if tier > 1 then
+			local glow = math.Clamp(f / GLOW_IN, 0, 1)
+			UI.Shape(GLOWS[tier], CX, CY, GLOW_SCALE[tier], 255, 255, 255, 255 * a * glow)
+			for _, spec in ipairs(FLASHES[tier]) do
+				UI.Shape("64", CX, CY, spec[1], 255, 255, 255, 255 * a * Flash(f, spec[2], spec[3], spec[4], spec[5]))
+			end
+			if tier == 2 then
+				UI.Shape(MULTIPLIER_ART[2], CX, CY, 1, 255, 255, 255, 255 * a * math.Clamp(f / X2_IN, 0, 1))
+			else
+				local k = math.Clamp(f / X3_IN, 0, 1)
+				local drop = 1 - k * k
+				UI.Shape(MULTIPLIER_ART[3], CX, CY, 1 + 0.5 * drop, 255, 255, 255, 255 * a * Lerp(k * k, 0.4, 1))
+			end
+		else
+			-- x1.5 and the like: the number pops when it goes up.
+			local pop = 1 + 0.25 * (1 - Ease((now - (v.multAt or -math.huge)) / POP))
+			UI.Futura(Multiplier(m), CX, CY - 14 * pop, 27 * pop, WHITE, a, TEXT_ALIGN_CENTER) -- ID_TRICKDISPLAY_15 is 27 high
+		end
 	end
 
 	local color = v.live and WHITE or (v.good and LINE or RED)

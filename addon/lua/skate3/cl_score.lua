@@ -169,6 +169,7 @@ local lastTrick = ""
 local tricks = {} -- this line's trick names, oldest first (the stack above the disc)
 local trickAt = {} -- when each of those was added (the stack animates on it)
 local scoreAt, multAt, lastMult = -math.huge, -math.huge, 1 -- when the big number last changed, when the multiplier last went up
+local tierAt = -math.huge -- when the multiplier last reached x2 or x3
 local lastLabel = ""
 local lastSeq = 0 -- the last trick sequence's score, the big number in Skate 3's look
 local wasLive = false
@@ -286,7 +287,7 @@ local function Update(pose)
 	local live = sc.active or sc.timer > 0
 	Distances(pose, sc, bailing, now)
 	if live then
-		if not wasLive then tricks, trickAt, lastLabel, lastSeq, readouts, lastMult = {}, {}, "", 0, {}, 1 end
+		if not wasLive then tricks, trickAt, lastLabel, lastSeq, readouts, lastMult, tierAt = {}, {}, "", 0, {}, 1, -math.huge end
 		seenAt = now
 		shown = sc.line + (sc.active and sc.sequence or 0)
 		if sc.trick ~= "" then lastTrick = sc.trick end
@@ -295,6 +296,8 @@ local function Update(pose)
 			lastSeq = sc.sequence
 		end
 		if sc.multiplier > lastMult + 0.01 then multAt = now end
+		-- reaching x2 or x3 (not the half steps between) sets off the glow and flash
+		if sc.multiplier >= 2 and math.floor(math.min(sc.multiplier, 3)) > math.floor(math.min(lastMult, 3)) then tierAt = now end
 		lastMult = sc.multiplier
 		if sc.trick ~= "" and sc.trick ~= lastLabel then
 			lastLabel = sc.trick
@@ -333,6 +336,7 @@ local function Update(pose)
 		now = now,
 		scoreAt = scoreAt,
 		multAt = multAt,
+		tierAt = tierAt,
 		sequence = Points(lastSeq > 0 and lastSeq or shown),
 		line = Points(shown),
 		stance = Fakie(pose) and "FAKIE" or nil,
@@ -498,7 +502,7 @@ function Score.Reset()
 	Meat.Reset()
 	last, flash, shown, lastTrick, seenAt, view, worldOffset = nil, nil, 0, "", -math.huge, nil, nil
 	tricks, trickAt, lastLabel, lastSeq, wasLive = {}, {}, "", 0, false
-	scoreAt, multAt, lastMult = -math.huge, -math.huge, 1
+	scoreAt, multAt, lastMult, tierAt = -math.huge, -math.huge, 1, -math.huge
 	readouts, airFrom, manualLast = {}, nil, nil
 end
 
