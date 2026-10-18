@@ -227,6 +227,9 @@ local function Start()
 	end
 	SetActive(true)
 	lastTick = nil
+	-- A fresh ride: no Hall of Meat panel or skeleton from the last bail, and
+	-- no half-finished score.
+	Score.Reset()
 	Skater.ShowModel(ply)
 end
 

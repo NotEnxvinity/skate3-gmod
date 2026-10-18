@@ -70,8 +70,8 @@ def logo_pieces(cache):
         t = prim.get('texture')
         rect = quad([v for tri in prim['triangles'] for v in tri]) if t else None
         number = t['resource_name'].split('\\')[-1].split('.')[0] if t else ''
-        # 1 is the panel's own backdrop (the frosted panel is drawn in code), 10 the shadow, 16/17 the lettering.
-        if rect is not None and number in ('10', '16', '17'):
+        # 1 is the panel's own backdrop (a red-tinted frosted panel), 10 the logo's shadow, 16/17 the lettering.
+        if rect is not None and number in ('1', '10', '16', '17'):
             pieces.append((t, rect, number))
     return pieces
 
@@ -164,7 +164,7 @@ def build(scoring, marker, out, report=print, logo=None):
             for t, rect, number in logo_pieces(logo):
                 name = add_texture('hom' + number, (Path(logo) / t['rgba']).read_bytes(), t['width'], t['height'],
                                    HD_LOGO % number)
-                pieces.append({'tex': name, 'quad': rect, 'shadow': number == '10'})
+                pieces.append({'tex': name, 'quad': rect, 'shadow': number in ('1', '10')})
             if pieces:
                 ui['logo'] = pieces
         except Exception as error:

@@ -171,20 +171,24 @@ function UI.Shape(id, dx, dy, k, r, g, b, a)
 	end
 end
 
--- The Hall of Meat panel's magazine logo (a soft black shadow, then the
--- lettering tinted r, g, b) with its origin at (dx, dy). False if the disc
--- art for it isn't there.
+-- The Hall of Meat panel's backdrop and magazine logo (the panel and a soft
+-- black shadow as they are, then the lettering tinted r, g, b) with their
+-- origin at (dx, dy). False if the disc art for it isn't there; the second
+-- result says whether the backdrop was part of it (setups before test 10 only
+-- exported the logo).
 function UI.Logo(dx, dy, k, r, g, b, a)
 	local pieces = UI.Art() and art.logo
 	if not pieces then return false end
+	local panel = false
 	for _, piece in ipairs(pieces) do
 		if piece.shadow then
 			UI.Quad(piece.tex, piece.quad, dx, dy, k, 255, 255, 255, a)
+			panel = panel or piece.tex == "hom1"
 		else
 			UI.Quad(piece.tex, piece.quad, dx, dy, k, r, g, b, a)
 		end
 	end
-	return true
+	return true, panel
 end
 
 -- A quadrant ring's first `frac` of the way round clockwise from the top
