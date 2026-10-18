@@ -387,15 +387,15 @@ def install(selected, gmod, report, with_addon=True):
                 (ui_folder / 'setup-error.txt').write_text(f'{type(error).__name__}: {error}'[:300], encoding='utf-8')
             except OSError:
                 pass
-        # An upscaled copy of the UI art, if one sits next to the setup.
-        for pack in (HERE / 'Skate3-UI-HD.zip', HERE / 'Skate3-UI-HD'):
-            if pack.exists():
-                try:
-                    ui.install_hd(pack, data / 'ui-hd', report)
-                except Exception as error:
-                    traceback.print_exc()
-                    report(f'Couldn\'t install the HD UI images ({error}); the originals are used.')
-                break
+        # An upscaled copy of the UI art, if one is lying around.
+        pack = ui.find_hd(HERE)
+        if pack is not None:
+            try:
+                report(f'Found the HD UI images in {pack}')
+                ui.install_hd(pack, data / 'ui-hd', report)
+            except Exception as error:
+                traceback.print_exc()
+                report(f'Couldn\'t install the HD UI images ({error}); the originals are used.')
         # The mod plays Half-Life 2 sounds without these, so a problem here
         # doesn't undo the rest.
         try:

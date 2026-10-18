@@ -178,3 +178,19 @@ def install_hd(source, out, report):
         count += 1
     report(f'Installed {count} HD UI images')
     return count
+
+
+def find_hd(*here):
+    """An HD pack (Skate3-UI-HD, a folder or a .zip) next to the setup, one
+    folder up from it, or in the player's Downloads or Desktop. None if none."""
+    places = [Path(h) for h in here] + [Path(h).parent for h in here]
+    places += [Path.home() / 'Downloads', Path.home() / 'Desktop']
+    for place in places:
+        for name in ('Skate3-UI-HD.zip', 'Skate3-UI-HD'):
+            pack = place / name
+            try:
+                if pack.is_file() or (pack.is_dir() and (pack / 'ui').is_dir()):
+                    return pack
+            except OSError:
+                continue
+    return None

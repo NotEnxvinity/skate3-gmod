@@ -336,7 +336,16 @@ local function MenuUp()
 	return S3GM_Menu and S3GM_Menu.Visible()
 end
 
+-- The Half-Life 2 health and ammo boxes sit over the score, so they step
+-- aside while the skater is up (the HL2 look keeps them).
+local drawnAt = 0
+local HL2_HUD = { CHudHealth = true, CHudBattery = true, CHudAmmo = true, CHudSecondaryAmmo = true }
+hook.Add("HUDShouldDraw", "skate3_hide_hl2_hud", function(name)
+	if HL2_HUD[name] and CurTime() - drawnAt < 0.25 and UI.Style() ~= "hl2" then return false end
+end)
+
 function Score.Draw(pose)
+	drawnAt = CurTime()
 	Update(pose)
 	local style = UI.Style()
 	local menu = MenuUp()
