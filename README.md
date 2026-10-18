@@ -81,6 +81,21 @@ your pose and they draw a posed copy of your playermodel with the board
 `skate3_debug_others 1` shows what arrives from each skater). Multiplayer fix
 by undead_corporation.
 
+Other players are solid. Every skater's simulation runs on their own computer,
+so each game checks its skater against the others and bails it when it runs
+into someone hard enough (a head-on meeting at pushing speed does it; side by
+side, or a slow catch-up, doesn't). A walking player can't be bailed: the
+skater who hits them bails, and the server shoves them. On foot with the board
+in hand, B (F on a keyboard) punches and R1 (Ctrl) swings the board; anyone
+hit on a board comes off it, anyone walking is shoved. The server decides:
+`skate3_player_collision 0` turns crashes off, `skate3_player_collision_speed`
+is the closing speed in metres a second that crashes (4), `skate3_player_hits 0`
+turns punches and swings off (as does a server that keeps players from hurting
+each other, such as Sandbox's `sbox_playershurtplayers 0`), and
+`skate3_hit_damage` is the health a punch takes (a swing takes twice; 0, the
+default, hurts nobody). `skate3_melee 0` takes your own punches and swings
+off, and `skate3_debug_players 1` shows who is close and how fast you'd crash.
+
 ## Try the headless runner
 
 ```sh

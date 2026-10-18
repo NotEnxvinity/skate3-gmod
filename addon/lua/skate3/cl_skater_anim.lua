@@ -333,7 +333,7 @@ end
 
 -- Two-bone reach: turn thigh and calf so the ankle lands on `target`,
 -- bending the knee the way it already bends, and keep the foot's own turn.
-local function Reach(world, leg, target, below)
+local function Reach(world, leg, target, below, pole)
 	local h, k, a = world[leg.thigh], world[leg.calf], world[leg.foot]
 	if not (h and k and a) then return end
 	h, k, a = h:GetTranslation(), k:GetTranslation(), a:GetTranslation()
@@ -348,6 +348,12 @@ local function Reach(world, leg, target, below)
 	-- The knee's side: the current knee, square to the hip-ankle line. A
 	-- straight leg has no side yet, so it bends the way the foot points.
 	local bend = (k - h) - dir * (k - h):Dot(dir)
+	-- A pole, where the elbow should point (punching and swinging), is added
+	-- to wherever it is now, so an arm swung through straight doesn't flip.
+	if pole then
+		local side = pole - dir * pole:Dot(dir)
+		if side:Length() > 1e-3 then bend = bend + side:GetNormalized() * (0.35 * l1) end
+	end
 	if bend:Length() < 0.15 * l1 and leg.toe and world[leg.toe] then
 		local ahead = world[leg.toe]:GetTranslation() - a
 		bend = bend + (ahead - dir * ahead:Dot(dir)):GetNormalized() * (0.15 * l1)
@@ -534,12 +540,13 @@ local function Hands(info, world, pose)
 	-- carrying it stays relaxed like the other one: a fist only looks right
 	-- on grab tricks.
 	local onFoot = pose.state and pose.state:find("^Biped") ~= nil
-	for _, hand in pairs(info.hands) do
+	for side, hand in pairs(info.hands) do
 		local hm = hand and world[hand.hand]
 		if hm then
 			local p = hm:GetTranslation()
 			local near = deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE
-			local holding = not onFoot and near
+			-- A fist while punching, a grip while swinging the board.
+			local holding = (not onFoot and near) or info.fist == side
 			-- 0 open (flailing in a bail), 1 relaxed, 2 gripping.
 			hand.wanted = holding and 2 or bailing and 0.3 or 1
 			-- Carrying the board on foot: a flat hand with the thumb over.
@@ -578,11 +585,125 @@ local function Hands(info, world, pose)
 	end
 end
 
+---------------------------------------------------------------------------
+-- Punch and board swing (started from cl_players.lua)
+
+-- Seconds from the start to the moment it lands, and to the arm being back.
+Anim.STRIKES = {
+	[0] = { hit = 0.11, total = 0.42 }, -- punch
+	[1] = { hit = 0.34, total = 0.8 }, -- board swing
+}
+
+-- Where the hand goes, in arm lengths from the shoulder: { time, forward, up,
+-- right, how much of the way it is there instead of where the usual pose has it }.
+local KEYS = {
+	[0] = {
+		{ 0, 0.3, -0.1, 0, 0 },
+		{ 0.05, 0.3, -0.15, 0.05, 1 },
+		{ 0.11, 0.98, 0, 0, 1 },
+		{ 0.18, 0.95, 0, 0, 1 },
+		{ 0.42, 0.5, -0.3, 0, 0 },
+	},
+	[1] = {
+		{ 0, -0.1, -0.3, 0.1, 0 },
+		{ 0.16, -0.3, 0.95, 0.1, 1 },
+		{ 0.27, -0.25, 1, 0.1, 1 },
+		{ 0.34, 0.8, 0.45, 0, 1 },
+		{ 0.46, 0.95, -0.55, 0, 1 },
+		{ 0.58, 0.9, -0.6, 0, 1 },
+		{ 0.8, 0.2, -0.7, 0, 0 },
+	},
+}
+
+local function KeyAt(keys, t)
+	local first = keys[1]
+	if t <= first[1] then return first[2], first[3], first[4], first[5] end
+	for i = 2, #keys do
+		local a, b = keys[i - 1], keys[i]
+		if t <= b[1] then
+			local f = (t - a[1]) / (b[1] - a[1])
+			f = f * f * (3 - 2 * f)
+			return Lerp(f, a[2], b[2]), Lerp(f, a[3], b[3]), Lerp(f, a[4], b[4]), Lerp(f, a[5], b[5])
+		end
+	end
+	local last = keys[#keys]
+	return last[2], last[3], last[4], last[5]
+end
+
+local strike -- { kind, at, holder } while a punch or swing is under way
+local strikeFailed
+
+function Anim.Strike(kind, at)
+	if not Anim.STRIKES[kind] then return end
+	strike = { kind = kind, at = at or RealTime() }
+end
+
+-- The side whose hand has the board.
+local function Holder(info, pose)
+	local deck = info.deck and pose.bones[info.deck.bone]
+	if not deck then return "R" end
+	local m = Mat(deck)
+	local a, b = m * info.deck.a, m * info.deck.b
+	local best, side
+	for s, arm in pairs(info.arms or {}) do
+		local skate = arm and pose.bones[arm.skateHand]
+		if skate then
+			local p = Mat(skate):GetTranslation()
+			local d = p:Distance(Closest(p, a, b))
+			if not best or d < best then best, side = d, s end
+		end
+	end
+	return side or "R"
+end
+
+-- The punching arm is the free one, the swinging arm is the one with the
+-- board, which the board follows.
+local function Strike(info, world, pose)
+	info.fist = nil
+	if not strike then return end
+	local def = Anim.STRIKES[strike.kind]
+	local t = RealTime() - strike.at
+	if t >= def.total or t < 0 then
+		if t >= def.total then strike = nil end
+		return
+	end
+	local forward = pose.forward and Vector(pose.forward[1], pose.forward[2], 0)
+	if not forward or forward:LengthSqr() < 1e-4 then return end
+	forward:Normalize()
+	strike.holder = strike.holder or Holder(info, pose)
+	local side = strike.kind == 1 and strike.holder or (strike.holder == "R" and "L" or "R")
+	local arm = info.arms and info.arms[side]
+	if not (arm and world[arm.thigh] and world[arm.calf] and world[arm.foot]) then return end
+	local shoulder, elbow, hand = world[arm.thigh]:GetTranslation(), world[arm.calf]:GetTranslation(), world[arm.foot]:GetTranslation()
+	local reach = (elbow - shoulder):Length() + (hand - elbow):Length()
+	local right = forward:Cross(Vector(0, 0, 1))
+	local f, u, s, w = KeyAt(KEYS[strike.kind], t)
+	if side == "L" then s = -s end
+	local goal = shoulder + forward * (f * reach) + Vector(0, 0, u * reach) + right * (s * reach)
+	-- The elbow stays low for a punch and swings out and back for the board.
+	local pole = strike.kind == 1 and (right * (side == "L" and -0.5 or 0.5) - forward) or Vector(0, 0, -1)
+	Reach(world, arm, LerpVector(w, hand, goal), info.below, pole)
+	info.fist = w > 0.3 and side or nil
+	if strike.kind == 1 then
+		-- The board stays in the hand that swings it.
+		pose.boardShift = (pose.boardShift or vector_origin) + (world[arm.foot]:GetTranslation() - hand)
+	end
+end
+
 function Anim.PostPose(ent, world, pose)
 	local info = per[ent]
 	if not info or not pose or not pose.bones then return end
 	Feet(info, world, pose)
 	Arms(info, world, pose)
+	-- Never at the cost of the ride: if the swing throws, it's off.
+	if not strikeFailed then
+		local ok, err = pcall(Strike, info, world, pose)
+		if not ok then
+			strikeFailed = true
+			strike, info.fist = nil, nil
+			print("[skate3] punch and swing animation: " .. tostring(err))
+		end
+	end
 	Hands(info, world, pose)
 end
 
