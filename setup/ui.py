@@ -243,3 +243,87 @@ def find_hd(*here):
             except OSError:
                 continue
     return None
+
+
+# A PlayStation 3 copy of Skate 3 (optional) gives the PlayStation button
+# pictures the game itself draws, instead of the mod's own drawn ones.
+PS3_BIG = 'data/big/fedynamic.big'
+PS3_BANK = 'data/fe/source/images/buttons/ps3/buttons.rps3'
+
+
+def ps3_root(folder):
+    """The USRDIR of a decrypted PS3 copy (a JB folder), found from the folder
+    picked, its PS3_GAME/USRDIR or one folder down. None if it isn't one."""
+    folder = Path(folder)
+    for candidate in (folder, folder / 'USRDIR', folder / 'PS3_GAME/USRDIR'):
+        if (candidate / PS3_BIG).is_file():
+            return candidate
+    try:
+        for child in sorted(folder.iterdir()):
+            if child.is_dir() and (child / 'PS3_GAME/USRDIR' / PS3_BIG).is_file():
+                return child / 'PS3_GAME/USRDIR'
+    except OSError:
+        pass
+    return None
+
+
+def find_ps3(*here):
+    """A PS3 copy of the game next to the setup, one folder up from it, or in
+    the player's Downloads or Desktop (a folder, or a folder in one of those)."""
+    places = [Path(h) for h in here] + [Path(h).parent for h in here]
+    places += [Path.home() / 'Downloads', Path.home() / 'Desktop']
+    for place in places:
+        try:
+            for folder in [place] + sorted(p for p in place.iterdir() if p.is_dir()):
+                found = ps3_root(folder)
+                if found is not None:
+                    return found
+        except OSError:
+            continue
+    return None
+
+
+def dxt5_png(raw, width, height, path):
+    """A 64x64-style DXT5 texture (the PS3 stores these as plain blocks) as a PNG."""
+    import io, struct
+    from PIL import Image
+    header = (b'DDS ' + struct.pack('<7I', 124, 0x81007, height, width, len(raw), 0, 1) + b'\0' * 44 +
+              struct.pack('<2I4s5I', 32, 4, b'DXT5', 0, 0, 0, 0, 0) + struct.pack('<5I', 0x1000, 0, 0, 0, 0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.open(io.BytesIO(header + raw)).convert('RGBA').save(path)
+
+
+def export_ps3(engine, usrdir, out, report):
+    """Reads the PS3 copy's button bank into assets/ui/ps_*.png and notes them
+    in ui.json (buttons_ps), next to the Xbox ones. `out` is assets/ui."""
+    engine, usrdir, out = Path(engine).resolve(), Path(usrdir), Path(out)
+    sys.path.insert(0, str(engine / 'tools'))
+    sys.path.insert(0, str(engine))
+    from vendor.skate3_ui.big import BigArchive
+    from vendor.skate3_ui import rw4
+    archive = BigArchive(usrdir / PS3_BIG)
+    entry = next((e for e in archive.entries if e.path == PS3_BANK), None)
+    if entry is None:
+        raise ValueError('this copy has no PlayStation button bank')
+    manifest = out / 'ui.json'
+    ui = json.loads(manifest.read_text(encoding='utf-8'))
+    with tempfile.TemporaryDirectory(prefix='skate3-ps3-') as tmp:
+        bank = Path(tmp) / 'buttons.rps3'
+        bank.write_bytes(archive.read(entry))
+        _, textures = rw4.read_textures(bank)
+    by_name = {t.name: t for t in textures}
+    ui['buttons_ps'] = {}
+    for button in BUTTONS:
+        t = by_name.get(f'button_{button}_hud.Texture')
+        if t is None:
+            continue
+        meta = t.metadata
+        # 0x88 is the PS3's DXT5; anything else isn't read.
+        if meta.get('format') != 136 or meta['width'] * meta['height'] != len(t.data):
+            continue
+        dxt5_png(t.data, meta['width'], meta['height'], out / f'ps_{button}.png')
+        ui['textures'][f'ps_{button}'] = {'w': meta['width'], 'h': meta['height']}
+        ui['buttons_ps'][button] = f'ps_{button}'
+    manifest.write_text(json.dumps(ui, separators=(',', ':')), encoding='utf-8')
+    report(f'PlayStation button art ready: {len(ui["buttons_ps"])} buttons')
+    return len(ui['buttons_ps'])

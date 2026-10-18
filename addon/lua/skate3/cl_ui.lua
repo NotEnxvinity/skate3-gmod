@@ -233,11 +233,18 @@ function UI.Sector(id, dx, dy, from, to, r, g, b, a)
 end
 
 -- A button icon of the game's own bank (A, B, X, Y, L_Bumper, DPad_Up ...),
--- its 64x64 picture with the top left at (x, y).
-function UI.Button(name, x, y, r, g, b, a)
-	local tex = UI.Art() and art.buttons[name]
-	if not tex then return end
+-- its 64x64 picture with the top left at (x, y). `group` is "buttons" (Xbox,
+-- from the Xbox disc) or "buttons_ps" (from a PS3 copy). False if there's
+-- no such picture.
+function UI.ArtButton(group, name, x, y, r, g, b, a)
+	local tex = UI.Art() and art[group] and art[group][name]
+	if not tex then return false end
 	UI.Quad(tex, { { x, y, 0, 0 }, { x + 64, y, 1, 0 }, { x + 64, y + 64, 1, 1 }, { x, y + 64, 0, 1 } }, 0, 0, 1, r, g, b, a)
+	return true
+end
+
+function UI.Button(name, x, y, r, g, b, a)
+	UI.ArtButton("buttons", name, x, y, r, g, b, a)
 end
 
 -- A filled rounded rectangle on the canvas.

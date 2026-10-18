@@ -391,6 +391,15 @@ def install(selected, gmod, report, with_addon=True):
                 (ui_folder / 'setup-error.txt').write_text(f'{type(error).__name__}: {error}'[:300], encoding='utf-8')
             except OSError:
                 pass
+        # The PlayStation button pictures, if a PS3 copy of the game is lying around.
+        ps3 = ui.find_ps3(HERE)
+        if ps3 is not None and (ui_folder / 'ui.json').is_file():
+            try:
+                report(f'Found a PS3 copy of Skate 3 in {ps3}')
+                ui.export_ps3(engine_dir(), ps3, ui_folder, report)
+            except Exception as error:
+                traceback.print_exc()
+                report(f'Couldn\'t read the PS3 copy\'s button art ({error}); the PlayStation buttons will be the mod\'s own drawn ones.')
         # An upscaled copy of the UI art, if one is lying around.
         pack = ui.find_hd(HERE)
         if pack is not None:

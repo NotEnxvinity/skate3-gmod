@@ -182,9 +182,12 @@ end
 
 -- A button of the game's own bank (A, B, X, Y, L_Bumper, DPad_Up ...) with
 -- its 64x64 picture's top left at (x, y), or its PlayStation twin when that's
--- the set in use.
+-- the set in use (the PS3 copy's picture if setup read one, else a drawn one).
 local xboxButton = UI.Button
 function UI.Button(name, x, y, r, g, b, a)
-	if UI.GlyphSet() == "playstation" and UI.PlayStationGlyph(name, x + 24, y + 22, a) then return end
+	if UI.GlyphSet() == "playstation" then
+		-- the PS3 copy's own pictures when setup found one, else ours
+		if UI.ArtButton("buttons_ps", name, x, y, r, g, b, a) or UI.PlayStationGlyph(name, x + 24, y + 22, a) then return end
+	end
 	return xboxButton(name, x, y, r, g, b, a)
 end

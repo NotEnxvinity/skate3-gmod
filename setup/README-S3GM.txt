@@ -70,6 +70,9 @@ world), the button pictures (Xbox or PlayStation; Automatic goes by your
 controller's name, and Steam Input can hide a PlayStation pad behind an Xbox
 name, so pick PlayStation yourself then), and a button to reset them all to the
 defaults.
+PlayStation buttons: drawn by the mod. If setup finds a decrypted PS3 copy of Skate 3
+(the folder with PS3_GAME in it, next to the setup or in Downloads or Desktop)
+it makes the game's own PlayStation button pictures from it instead.
 Hall of Meat (Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
 score, in red, with a skeleton showing fractured bones yellow and broken ones
 red. Bail on purpose: hold both triggers and click both sticks.
