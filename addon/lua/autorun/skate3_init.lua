@@ -28,6 +28,8 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_body.lua")
 	AddCSLuaFile("skate3/cl_others.lua")
 	AddCSLuaFile("skate3/sh_pose.lua")
+	AddCSLuaFile("skate3/sh_interact.lua")
+	AddCSLuaFile("skate3/cl_interact.lua")
 	AddCSLuaFile("skate3/cl_skater_anim.lua")
 	AddCSLuaFile("skate3/cl_sounds.lua")
 	AddCSLuaFile("skate3/cl_score.lua")

@@ -226,59 +226,101 @@ function Props.Solid(model)
 	return Hulls(model), false
 end
 
--- Appends a model's hull triangles, placed by matrix `m`, to the flat list
--- `out` holding `n` numbers. Returns the new count.
-function Props.AppendHulls(out, n, hs, m)
+-- A model's hull triangles as Vectors in threes, each wound counterclockwise
+-- seen from outside its hull: the module only collides with a triangle's
+-- front. Visible shapes come facing out already. Worked out once per shape,
+-- not for every prop that stands on it.
+local ordered = setmetatable({}, { __mode = "k" })
+
+local function Ordered(hs)
+	local out = ordered[hs]
+	if out then return out end
+	out = {}
 	for _, verts in ipairs(hs) do
 		local centre = Vector()
 		for _, v in ipairs(verts) do centre:Add(v) end
 		centre:Div(#verts)
 		for t = 1, #verts - 2, 3 do
 			local a, b, c = verts[t], verts[t + 1], verts[t + 2]
-			-- The module only collides with a triangle's front, so
-			-- each one faces out of its hull, counterclockwise.
-			-- Visible shapes come facing out already.
 			if not verts.facing and (b - a):Cross(c - a):Dot(a - centre) < 0 then b, c = c, b end
-			for _, v in ipairs({ a, b, c }) do
-				local w = m * v
-				out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
-				n = n + 3
-			end
+			out[#out + 1], out[#out + 2], out[#out + 3] = a, b, c
 		end
+	end
+	ordered[hs] = out
+	return out
+end
+
+-- Appends a model's hull triangles, placed by matrix `m`, to the flat list
+-- `out` holding `n` numbers. Returns the new count.
+function Props.AppendHulls(out, n, hs, m)
+	local tris = Ordered(hs)
+	for i = 1, #tris do
+		local w = m * tris[i]
+		out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
+		n = n + 3
 	end
 	return n
 end
 
-local cache = { map = nil, tris = {} }
+local cache = { map = nil, tris = {}, stream = nil }
+
+-- A map with more props than this many triangles can't have them all in the
+-- collision at once (the game stalls building it), so the module is handed
+-- the ones around the skater instead and cl_live_props.lua swaps them as the
+-- skater moves. Before that, the first ones in the map's list were taken and
+-- the rest silently left out: gm_infinity_pools lost every bench, bridge and
+-- half its railings that way.
+Props.Stream = nil
 
 -- Every solid static prop's hull triangles in world space, as the flat
--- {x1, y1, z1, x2, ...} list skate3.LoadMap takes. Built once per map.
+-- {x1, y1, z1, x2, ...} list skate3.LoadMap takes. Built once per map. A map
+-- with too many props to hold at once gets none here and Props.Stream set
+-- to its props instead ({model, pos, ang, hulls, tris} each).
 function Props.Triangles(bsp)
-	if not cv_props:GetBool() then return {} end
-	if cache.map == game.GetMap() then return cache.tris end
-	cache.map, cache.tris = game.GetMap(), {}
+	if not cv_props:GetBool() then
+		Props.Stream = nil
+		return {}
+	end
+	if cache.map == game.GetMap() then
+		Props.Stream = cache.stream
+		return cache.tris
+	end
+	cache.map, cache.tris, cache.stream = game.GetMap(), {}, nil
+	Props.Stream = nil
 	local props, err = Props.Parse(bsp)
 	if not props then
 		print("[skate3] skipping prop collision: " .. err)
 		return cache.tris
 	end
-	local out, n, used, smooth = cache.tris, 0, 0, 0
+	-- Each prop's shape and size first, to see whether they all fit.
+	local list, total, smooth = {}, 0, 0
 	for _, prop in ipairs(props) do
 		local hs, visible = Props.Solid(prop.model)
 		if hs then
-			if visible then smooth = smooth + 1 end
-			local m = Matrix()
-			m:Translate(prop.pos)
-			m:Rotate(prop.ang)
-			n = Props.AppendHulls(out, n, hs, m)
-			used = used + 1
-			if n / 9 >= MAX_TRIANGLES then
-				print(("[skate3] prop collision stopped at %d triangles"):format(MAX_TRIANGLES))
-				break
+			local size = 0
+			for _, verts in ipairs(hs) do size = size + math.floor(#verts / 3) end
+			if size > 0 then
+				if visible then smooth = smooth + 1 end
+				prop.hulls, prop.tris = hs, size
+				list[#list + 1] = prop
+				total = total + size
 			end
 		end
 	end
-	print(("[skate3] %d of %d props solid for skating (%d triangles, %d ramps use their visible shape)"):format(used, #props, n / 9, smooth))
+	if total > MAX_TRIANGLES then
+		cache.stream = list
+		Props.Stream = list
+		print(("[skate3] %d of %d props solid for skating (%d triangles, too many for one go: the ones around you are swapped in as you move)"):format(#list, #props, total))
+		return cache.tris
+	end
+	local out, n = cache.tris, 0
+	for _, prop in ipairs(list) do
+		local m = Matrix()
+		m:Translate(prop.pos)
+		m:Rotate(prop.ang)
+		n = Props.AppendHulls(out, n, prop.hulls, m)
+	end
+	print(("[skate3] %d of %d props solid for skating (%d triangles, %d ramps use their visible shape)"):format(#list, #props, n / 9, smooth))
 	return out
 end
 

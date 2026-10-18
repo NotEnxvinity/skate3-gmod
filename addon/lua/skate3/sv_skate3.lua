@@ -6,8 +6,10 @@ util.AddNetworkString("skate3_injury")
 util.AddNetworkString("skate3_blood")
 util.AddNetworkString("skate3_watched")
 util.AddNetworkString("skate3_hit")
+util.AddNetworkString("skate3_interact")
 
 local Pose = include("skate3/sh_pose.lua")
+local Interact = include("skate3/sh_interact.lua")
 
 local cv_enabled = CreateConVar("skate3_enabled", "1", FCVAR_ARCHIVE + FCVAR_NOTIFY, "Allow players to use Skate 3 mode")
 
@@ -63,6 +65,25 @@ net.Receive("skate3_move", function(_, ply)
 	if pos:DistToSqr(ply:GetPos()) > allowed * allowed then return end
 	ply.skate3MoveAt = CurTime()
 	ply:SetPos(pos)
+end)
+
+-- Using doors and buttons with the board out (sh_interact.lua): the skater's
+-- game says where they stand and which way they face; the server finds what
+-- is there itself and uses it as the use key would.
+net.Receive("skate3_interact", function(_, ply)
+	local origin, dir = net.ReadVector(), net.ReadNormal()
+	if not ply.Skate3 or not ply:Alive() then return end
+	local now = CurTime()
+	if now - (ply.skate3UseAt or -10) < 0.3 then return end
+	ply.skate3UseAt = now
+	-- Chest height above where the server has the skater, within a step.
+	if not (origin.x == origin.x and origin.y == origin.y and origin.z == origin.z) then return end
+	if origin:DistToSqr(ply:GetPos()) > 200 * 200 then return end
+	local ent = Interact.Find(origin, dir, ply)
+	if not IsValid(ent) or ent:NearestPoint(origin):DistToSqr(origin) > (Interact.REACH + 40) ^ 2 then return end
+	-- Other addons' say (prop protection, locked doors).
+	if hook.Run("PlayerUse", ply, ent) == false then return end
+	ent:Use(ply, ply, USE_TOGGLE, 1)
 end)
 
 -- A skater's Garry's Mod body stands still or is moved by the simulation, so
