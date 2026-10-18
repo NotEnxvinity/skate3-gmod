@@ -275,6 +275,8 @@ function Anim.Setup(ent, rest, skater, stand)
 	end
 	local floor = SkateFloor(bind)
 	local info = {
+		rest = rest,
+		pelvisBone = Bone(ent, "Pelvis"),
 		below = Below(ent),
 		hands = {},
 		legs = {},
@@ -633,6 +635,31 @@ end
 local strike -- { kind, at, holder } while a punch or swing is under way
 local strikeFailed
 
+-- Which way the body drawn is facing, flat: the turn the pelvis has been
+-- given since the rest pose (a playermodel at rest faces +X) applied to +X.
+-- The skater's own root heading (pose.forward) isn't the way the body looks
+-- on foot, so a swing and its reach follow this instead.
+local facing, facingAt = nil, -math.huge
+
+local function FacingOf(info, world)
+	local bone = info.pelvisBone
+	local posed, rest = bone and world[bone], bone and info.rest and info.rest[bone]
+	if not (posed and rest) then return nil end
+	local m = posed * rest:GetInverse()
+	local d = m * Vector(1, 0, 0) - m * Vector(0, 0, 0)
+	d.z = 0
+	local len = d:Length()
+	if not (len > 1e-3 and len < 10) then return nil end
+	return d / len
+end
+
+-- The last facing worked out while posing (a vector, flat and unit length),
+-- or nil when none is recent.
+function Anim.Facing()
+	if facing and RealTime() - facingAt < 0.5 then return Vector(facing) end
+	return nil
+end
+
 function Anim.Strike(kind, at)
 	if not Anim.STRIKES[kind] then return end
 	strike = { kind = kind, at = at or RealTime() }
@@ -667,9 +694,12 @@ local function Strike(info, world, pose)
 		if t >= def.total then strike = nil end
 		return
 	end
-	local forward = pose.forward and Vector(pose.forward[1], pose.forward[2], 0)
-	if not forward or forward:LengthSqr() < 1e-4 then return end
-	forward:Normalize()
+	local forward = facing and Vector(facing)
+	if not forward then
+		forward = pose.forward and Vector(pose.forward[1], pose.forward[2], 0)
+		if not forward or forward:LengthSqr() < 1e-4 then return end
+		forward:Normalize()
+	end
 	strike.holder = strike.holder or Holder(info, pose)
 	local side = strike.kind == 1 and strike.holder or (strike.holder == "R" and "L" or "R")
 	local arm = info.arms and info.arms[side]
@@ -682,7 +712,18 @@ local function Strike(info, world, pose)
 	local goal = shoulder + forward * (f * reach) + Vector(0, 0, u * reach) + right * (s * reach)
 	-- The elbow stays low for a punch and swings out and back for the board.
 	local pole = strike.kind == 1 and (right * (side == "L" and -0.5 or 0.5) - forward) or Vector(0, 0, -1)
+	-- A bone matrix with a NaN in it can take the game down, so if the arm
+	-- comes out of the reach with one, it goes back as it was.
+	local before = {}
+	for _, i in ipairs(info.below(arm.thigh)) do before[i] = world[i] end
 	Reach(world, arm, LerpVector(w, hand, goal), info.below, pole)
+	for i, m in pairs(before) do
+		local at = world[i] and world[i]:GetTranslation()
+		if at and not (at.x == at.x and at.y == at.y and at.z == at.z and math.abs(at.x) < 1e7 and math.abs(at.y) < 1e7 and math.abs(at.z) < 1e7) then
+			for j, old in pairs(before) do world[j] = old end
+			error("the arm came out of the reach with a bad bone")
+		end
+	end
 	info.fist = w > 0.3 and side or nil
 	if strike.kind == 1 then
 		-- The board stays in the hand that swings it.
@@ -695,6 +736,8 @@ function Anim.PostPose(ent, world, pose)
 	if not info or not pose or not pose.bones then return end
 	Feet(info, world, pose)
 	Arms(info, world, pose)
+	local face = FacingOf(info, world)
+	if face then facing, facingAt = face, RealTime() end
 	-- Never at the cost of the ride: if the swing throws, it's off.
 	if not strikeFailed then
 		local ok, err = pcall(Strike, info, world, pose)
