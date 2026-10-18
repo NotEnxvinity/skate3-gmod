@@ -23,26 +23,54 @@ local HD = "skate3/ui-hd/"
 -- Which look
 ---------------------------------------------------------------------------
 
-local art, artTried
+local art, artTried, artReason
+
+-- Garry's Mod's util.JSONToTable turns numeric string keys ("36") into
+-- numbers, and the art is looked up by those strings, so put them back.
+local function StringKeys(t)
+	local out = {}
+	for k, v in pairs(t) do out[tostring(k)] = v end
+	return out
+end
 
 -- Skate 3's art, or nil when setup hasn't made it (or the data folder was
 -- moved with skate3_data_path, which Garry's Mod can't load images from).
+-- UI.ArtReason() says why not.
 function UI.Art()
 	if artTried then return art end
 	artTried = true
 	local path = GetConVar("skate3_data_path")
-	if path and path:GetString() ~= "" then return nil end
+	if path and path:GetString() ~= "" then
+		artReason = "skate3_data_path is set (" .. path:GetString() .. "); Garry's Mod can't load images from there. Clear it to use the Skate 3 look"
+		return nil
+	end
 	local json = file.Read(ART .. "ui.json", "DATA")
-	art = json and util.JSONToTable(json) or nil
-	if art and not art.shapes then art = nil end
+	if not json then
+		local failed = file.Read(ART .. "setup-error.txt", "DATA")
+		artReason = failed and ("the S3GM setup couldn't make it: " .. failed)
+			or ("garrysmod/data/" .. ART .. "ui.json isn't there: run the S3GM setup again with your Skate 3 disc")
+		return nil
+	end
+	local parsed = util.JSONToTable(json)
+	if not parsed or not parsed.shapes or not parsed.fonts then
+		artReason = "garrysmod/data/" .. ART .. "ui.json is unreadable: run the S3GM setup again"
+		return nil
+	end
+	parsed.shapes = StringKeys(parsed.shapes)
+	for _, font in pairs(parsed.fonts) do font.chars = StringKeys(font.chars) end
+	parsed.textures = StringKeys(parsed.textures or {})
+	parsed.buttons = StringKeys(parsed.buttons or {})
+	art = parsed
 	return art
 end
 
+function UI.ArtReason() return artReason end
+
 -- Looks for the art again (after running setup with the game open).
 concommand.Add("skate3_ui_reload", function()
-	artTried, art = false, nil
+	artTried, art, artReason = false, nil, nil
 	UI.mats = {}
-	print("[skate3] ui art: " .. (UI.Art() and "found" or "not found (run the S3GM setup again)"))
+	print("[skate3] ui art: " .. (UI.Art() and "found" or ("not available: " .. tostring(artReason))))
 end, nil, "Reload Skate 3's on-screen art")
 
 UI.mats = {}

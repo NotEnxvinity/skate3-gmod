@@ -370,12 +370,23 @@ def install(selected, gmod, report, with_addon=True):
             traceback.print_exc()
             report(f'Couldn\'t read the trick names ({error}); the score widget will spell them out.')
         # Skate 3's own on-screen look; without it the mod shows the minimal one.
+        ui_folder = data / 'assets/ui'
         try:
-            ui.export(engine_dir(), xex.parent, data / 'assets/ui',
+            (ui_folder / 'setup-error.txt').unlink()
+        except OSError:
+            pass
+        try:
+            ui.export(engine_dir(), xex.parent, ui_folder,
                       data / 'assets/private/stock/skater-collections.json', report)
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t make the Skate 3 on-screen look ({error}); the mod will show the minimal look.')
+            # The game's console says why, when it falls back.
+            try:
+                ui_folder.mkdir(parents=True, exist_ok=True)
+                (ui_folder / 'setup-error.txt').write_text(f'{type(error).__name__}: {error}'[:300], encoding='utf-8')
+            except OSError:
+                pass
         # An upscaled copy of the UI art, if one sits next to the setup.
         for pack in (HERE / 'Skate3-UI-HD.zip', HERE / 'Skate3-UI-HD'):
             if pack.exists():
