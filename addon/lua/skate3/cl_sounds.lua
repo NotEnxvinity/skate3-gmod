@@ -1,6 +1,6 @@
 -- Skate sounds, driven by the skater's state each frame: rolling, grinding and
 -- sliding loops that follow speed, one-shots for pops and landings, the
--- wheels spinning down, footsteps, and bails.
+-- wheels spinning down, footsteps, bails, and the score multiplier's chime.
 --
 -- The classic set is Half-Life 2 sounds every Garry's Mod install has. The
 -- disc set is Skate 3's own, which setup decodes from the player's disc into
@@ -28,11 +28,24 @@ local HL2_HITS = {
 		"physics/body/body_medium_impact_hard5.wav", "physics/body/body_medium_impact_hard6.wav" },
 }
 
+-- HL2's bone breaks: a fracture (a dull crack) and a break (a snap, and the
+-- wet one under it).
+local HL2_BONES = {
+	{ "physics/body/body_medium_break3.wav", "physics/body/body_medium_break4.wav" },
+	{ "physics/body/body_medium_break2.wav", "physics/flesh/flesh_bloody_break.wav" },
+}
+-- Gets played when a score multiplier is reached and the disc has nothing for it.
+local HL2_MULTIPLIER = "buttons/button14.wav"
+
 local cv_volume = CreateClientConVar("skate3_volume", "1", true, false, "Skate sound volume, 0 to 1", 0, 1)
 local cv_pack = CreateClientConVar("skate3_sounds", "disc", true, false,
 	"Skate sounds: hl2 (the classic Half-Life 2 ones), disc (Skate 3's own, installed by setup) or off")
 local cv_bails = CreateClientConVar("skate3_bail_sounds", "hl2", true, false,
 	"Bail sounds with the disc set: disc (Skate 3's own body hits and slides) or hl2 (Half-Life 2's)")
+local cv_bones = CreateClientConVar("skate3_bone_sounds", "auto", true, false,
+	"Bone breaks in a bail: auto (the bail sounds' set), disc (Skate 3's Hall of Meat bank), hl2 or off")
+local cv_mult = CreateClientConVar("skate3_multiplier_sounds", "1", true, false,
+	"Play a sound when the score multiplier goes up (x2, x3...)")
 local cv_steps = CreateClientConVar("skate3_footsteps", "hl2", true, false,
 	"Footsteps with the disc set: disc (Skate 3's own) or hl2 (Garry's Mod's own for the ground underfoot)")
 local cv_debug = CreateClientConVar("skate3_debug_sounds", "0", false, false, "Print each footstep, wheel spin and bail hit")
@@ -145,11 +158,15 @@ local function Tuning()
 	return m and m.tuning
 end
 
--- One take of a retail sound id from a bank folder: one of its alternatives,
--- and in it one of the groups (a record's groups are the same hit at rising
--- strength, so `strength`, 0 to 1, picks one). Played at `pos` when given,
--- else on `ent`. False when setup didn't install it.
-local function PlayId(folder, id, ent, strength, volume, pitch, pos)
+-- One take of a retail sound id from a bank folder, played at `pos` when
+-- given, else on `ent`. False when setup didn't install it.
+--
+-- A record is a list of groups and each group plays at once (retail's Splice
+-- player starts one voice per group, a random member of each). Pops, landings
+-- and grind hits predate knowing that and still play only one member of the
+-- group `strength`, 0 to 1, picks; `layered` plays them the way retail does.
+-- `level` is the sound level in dB (0 = heard everywhere, for the interface).
+local function PlayId(folder, id, ent, strength, volume, pitch, pos, layered, level)
 	local m = Manifest()
 	local ids = m and m.ids and m.ids[folder]
 	-- util.JSONToTable turns numeric keys into numbers.
@@ -161,15 +178,20 @@ local function PlayId(folder, id, ent, strength, volume, pitch, pos)
 	end
 	if #groups == 0 then return false end
 	strength = math.Clamp(strength, 0, 1)
-	local group = groups[math.Clamp(math.floor(strength * #groups) + 1, 1, #groups)]
-	local member = group[math.random(#group)]
-	local path = string.format("skate3/%s/%04d.wav", folder, member[1])
-	local level = math.Clamp(member[2], 0, 1) * (volume or (0.3 + 0.5 * strength)) * cv_volume:GetFloat()
-	pitch = math.Clamp(math.floor((pitch or 1) * math.random(97, 103)), 30, 250)
-	if pos then
-		sound.Play(path, pos, 70, pitch, level)
-	else
-		ent:EmitSound(path, 70, pitch, level)
+	if not layered then
+		groups = { groups[math.Clamp(math.floor(strength * #groups) + 1, 1, #groups)] }
+	end
+	level = level or 70
+	for _, group in ipairs(groups) do
+		local member = group[math.random(#group)]
+		local path = string.format("skate3/%s/%04d.wav", folder, member[1])
+		local gain = math.Clamp(member[2], 0, 1) * (volume or (0.3 + 0.5 * strength)) * cv_volume:GetFloat()
+		local rate = math.Clamp(math.floor((pitch or 1) * math.random(97, 103)), 30, 250)
+		if pos then
+			sound.Play(path, pos, level, rate, gain)
+		else
+			ent:EmitSound(path, level, rate, gain)
+		end
 	end
 	return true
 end
@@ -551,40 +573,45 @@ end
 
 ---------------------------------------------------------------------------
 -- Bails (retail Contacts body poster and collision manager: contacts.rs,
--- collision.rs). Each body region that hits something is a collision between
+-- collision.rs). Each body part that hits something is a collision between
 -- its material and the ground's: an impact sets a tier from the material's
 -- bands, a level from its windows, and each side plays the sample its
 -- AudioSurface record names for that tier and the other side's class. The
 -- clothes and pads add their own contacts. While the body slides along the
 -- ground, Bodyslide loops.
+--
+-- The hits themselves come from Hall of Meat's tracking (cl_hall_of_meat.lua,
+-- the "Skate3BodyHit" hook), which watches all 18 body parts on every bail,
+-- Hall of Meat mode or not: a bone that breaks sounds like it scored.
 ---------------------------------------------------------------------------
 
 local NO_MATERIAL = 143
--- Region: bones, then retail's material, cloth contact and pad contact
--- (contacts.rs body_materials); `mass` is the region's share of the body,
--- which scales its impact as retail's part weights do.
-local REGIONS = {
-	{ bone = "HEAD", material = 97, pad = 110, mass = 0.08, reach = 6 },
-	{ bone = "SPINE1", material = 98, cloth = 109, pad = 110, mass = 0.45, reach = 8 },
-	{ bone = "LEFTFOREARM", material = 100, cloth = 107, pad = 111, mass = 0.05, reach = 4 },
-	{ bone = "RIGHTFOREARM", material = 100, cloth = 107, pad = 111, mass = 0.05, reach = 4 },
-	{ bone = "LEFTLEG", material = 99, cloth = 108, pad = 111, mass = 0.12, reach = 4 },
-	{ bone = "RIGHTLEG", material = 99, cloth = 108, pad = 111, mass = 0.12, reach = 4 },
+-- Retail's body materials by part (contacts.rs body_materials): the material,
+-- the cloth contact and the pad contact.
+local HEAD = { material = 97, pad = 110 }
+local TORSO = { material = 98, cloth = 109, pad = 110 }
+local LEGS = { material = 99, cloth = 108, pad = 111 }
+local ARMS = { material = 100, cloth = 107, pad = 111 }
+local REGION_OF = {
+	skull = HEAD,
+	spine = TORSO, ribs = TORSO, pelvis = TORSO, lcollar = TORSO, rcollar = TORSO,
+	larm = ARMS, rarm = ARMS, lforearm = ARMS, rforearm = ARMS, lhand = ARMS, rhand = ARMS,
+	lfemur = LEGS, rfemur = LEGS, lshin = LEGS, rshin = LEGS, lfoot = LEGS, rfoot = LEGS,
 }
+-- Hall of Meat's own materials, kind 2: the body materials' HOM_Set_1 twins,
+-- if retail numbers them in the same order. A guess; skate3_debug_sounds says
+-- what plays so it can be checked by ear.
+local HOM_OF = { [97] = 102, [98] = 103, [99] = 104, [100] = 105 }
+-- How hard Hall of Meat's hits run, m/s of speed lost in a step: from the
+-- weakest that counts to the one that breaks a bone (cl_hall_of_meat.lua).
+local HIT_SOFT, HIT_HARD = 3.5, 10
 -- The pad contacts' thresholds (contacts.rs ContactsTuning defaults): 110 on
 -- the head and torso, 111 on the limbs.
 local PAD_110 = { [97] = { 0.75, 1.25 }, [98] = { 0.7, 1.25 } }
 local PAD_111 = { 0.65, 1.25 }
--- The bridge's speed graph on the impacts: x m/s of the body, y the factor.
-local BODY_SPEED = {
-	{ 0, 0.3664, 0.4479, 0.5212, 0.5928, 0.7410, 0.8632, 0.9463 },
-	{ 1.0, 1.2, 1.4857, 1.9143, 2.4286, 3.6, 4.5714, 5.0 },
-}
--- Frames of retail's per-region cooldown.
-local BODY_COOLDOWN = 15
 -- Collision class (0..2) of materials 95..113; false: AudioSurfaceMap entry 94.
 local CLASS_95 = { 1, 2, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 0, 0, 0, false, false, false, 1 }
-local BANKS = { [0] = "collisions", [1] = "metal" }
+local BANKS = { [0] = "collisions", [1] = "metal", [2] = "hom" }
 -- Retail's collision manager has ten slots; a tumble can't start more than
 -- that many sounds in one tick.
 local VOICES = 10
@@ -648,7 +675,7 @@ end
 
 -- collision.rs sample: plays `m`'s sound against `other` at `tier` and
 -- `level`; true when one played.
-local bail = { regions = {}, voices = 0 }
+local bail = { regions = {}, voices = 0, voicesAt = 0 }
 
 local function Collide(m, other, tier, level, pos)
 	if m < 0 or m >= NO_MATERIAL or tier == 3 or bail.voices >= VOICES then return false end
@@ -659,14 +686,14 @@ local function Collide(m, other, tier, level, pos)
 	if not id or id < 0 then return false end
 	local volume = math.Clamp(level / 32767, 0, 1) * (rec.gain or 32767) / 32767
 	if volume < 0.01 then return false end
-	local played = PlayId(BANKS[rec.kind], id, LocalPlayer(), tier / 2, volume, (rec.pitch or 4096) / 4096, pos)
+	local played = PlayId(BANKS[rec.kind], id, LocalPlayer(), tier / 2, volume, (rec.pitch or 4096) / 4096, pos, true)
 	if played then bail.voices = bail.voices + 1 end
 	return played
 end
 
 -- One region's hit at `impact` against ground material `b`: retail's pair,
 -- the second hit of a hard one, the clothes and the pad.
-local function BodyHit(r, impact, b, pos)
+local function BodyHit(r, impact, b, pos, label)
 	local a = r.material
 	local ta, la_lo, la_hi = Band(a, impact)
 	local tb, lb_lo, lb_hi = Band(b, impact)
@@ -687,81 +714,103 @@ local function BodyHit(r, impact, b, pos)
 	if th and impact > th[1] and impact <= th[2] then
 		Collide(r.pad, NO_MATERIAL, 1, Level(r.pad, b, 1, th[1], th[2], impact), pos)
 	end
-	Debug("bail hit: %s at %.2f, tiers %d/%d against material %d%s", r.bone, impact, ta, tb, b,
+	Debug("bail hit: %s at %.2f, tiers %d/%d against material %d%s", label, impact, ta, tb, b,
 		played and "" or " (no sound)")
 	return played
 end
 
+-- The impact retail would read for a hit of `severity` (Hall of Meat's m/s):
+-- spread over `m`'s own bands, from just above the quietest sound it makes
+-- for the weakest hit that counts, to its hardest tier for one that breaks a
+-- bone. Every hit Hall of Meat counts therefore makes a sound of its strength.
+local function Impact(m, severity)
+	local t = math.Clamp((severity - HIT_SOFT) / (HIT_HARD - HIT_SOFT), 0, 1)
+	local rec = Material(m)
+	local b = rec and rec.bands
+	if not b then return t end
+	local low, mid, top = b[4] * 1.02, b[3], b[2]
+	if t < 0.5 then return low + (mid - low) * t * 2 end
+	return mid + (top - mid) * (t - 0.5) * 2
+end
+
 -- HL2's version of a bail hit: a body impact, harder and louder the harder
--- the region hit, each region on its own cooldown so every bump sounds. Hits
--- closer together than CLASSIC_GAP play as one.
-local CLASSIC_MIN = 0.03
-local CLASSIC_GAP = 0.12
-local function HitClassic(r, impact, pos)
-	if impact < CLASSIC_MIN or CurTime() - (bail.lastClassic or 0) < CLASSIC_GAP then return false end
-	bail.lastClassic = CurTime()
-	local list = impact > 0.25 and HL2_HITS.hard or HL2_HITS.soft
+-- the hit (`t`, 0 to 1).
+local CLASSIC_HARD = 0.35
+local function HitClassic(t, pos, label)
+	local list = t > CLASSIC_HARD and HL2_HITS.hard or HL2_HITS.soft
 	sound.Play(list[math.random(#list)], pos, 75, math.random(95, 105),
-		math.Clamp(0.35 + impact, 0.35, 1) * cv_volume:GetFloat())
-	Debug("bail hit (hl2): %s at %.2f", r.bone, impact)
+		math.Clamp(0.35 + t * 0.65, 0.35, 1) * cv_volume:GetFloat())
+	Debug("bail hit (hl2): %s at %.2f", label, t)
 	return true
+end
+
+-- Whether a bail plays Skate 3's own hits and slides (the setting, and the
+-- tuning to do it with); HL2's otherwise.
+local function DiscBails()
+	return Disc() and cv_bails:GetString() ~= "hl2" and Tuning() ~= nil
 end
 
 local function BailReset()
 	bail.regions = {}
-	bail.comSpeed = 0
+	bail.hips = nil
+	bail.quietUntil = nil
 end
 
--- Each tick of a bail: a region whose velocity into a surface it is touching
--- dropped is a hit, its impact retail's clamp01(dv . n x weight x 10) scaled
--- by the speed graph at the body's speed.
-local function Bail(pose, dt, volume, ent, classic)
-	local t = not classic and Tuning()
-	local cooldown = t and t.body_cooldown or BODY_COOLDOWN
-	local graph = t and t.body_speed or BODY_SPEED
-	local hips = BonePos(pose, "HIPS")
-	local scale = Graph(graph, bail.comSpeed or 0)
-	local hits = 0
-	bail.voices = 0
-	for i, r in ipairs(REGIONS) do
-		local s = bail.regions[i] or {}
-		bail.regions[i] = s
-		local pos = BonePos(pose, r.bone)
-		if pos and s.pos and dt > 0 then
-			local v = (pos - s.pos) / dt / UNITS
-			if s.v and (s.cooldown or 0) <= 0 then
-				-- Touching something in the direction it was moving?
-				local dir = s.v:GetNormalized()
-				local tr = util.TraceLine({ start = s.pos, endpos = pos + dir * r.reach, filter = ent, mask = MASK_SOLID })
-				if tr.Hit then
-					local n = tr.HitNormal
-					local into = math.max(0, -s.v:Dot(n)) - math.max(0, -v:Dot(n))
-					local impact = math.Clamp(into * r.mass * 10, 0, 1) * scale
-					if impact > 0.001 then
-						local played
-						if classic then
-							played = HitClassic(r, impact, tr.HitPos)
-						else
-							-- What it hit, wall or floor, as the disc's material for it.
-							local b = GroundMaterial(ROLL[tr.MatType] or ROLL_DEFAULT) or NO_MATERIAL
-							played = BodyHit(r, impact, b, tr.HitPos)
-						end
-						if played then
-							s.cooldown = cooldown
-							hits = hits + 1
-						end
-					end
-				end
+-- Hall of Meat's bone breaks: Skate 3's own HoM bank when it's there, else
+-- HL2's cracks. `level` 1 is a fracture and 2 a break.
+local function BoneBreak(region, level, pos, label)
+	local mode = cv_bones:GetString()
+	if mode == "off" then return end
+	if mode == "auto" then mode = DiscBails() and "disc" or "hl2" end
+	if mode == "disc" and Disc() then
+		local m = HOM_OF[region.material]
+		local rec = Material(m)
+		local b = rec and rec.kind == 2 and rec.bands
+		if b then
+			local impact = level == 2 and b[2] or (b[3] + b[1]) / 2
+			local tier, low, high = Band(m, impact)
+			if tier ~= 3 and Collide(m, NO_MATERIAL, tier, Level(m, NO_MATERIAL, tier, low, high, impact), pos) then
+				Debug("bone %s: %s, HoM material %d", level == 2 and "break" or "fracture", label, m)
+				return
 			end
-			s.v = v
 		end
-		s.pos = pos
-		if s.cooldown and s.cooldown > 0 then s.cooldown = s.cooldown - 1 end
+		Debug("bone %s: %s, no HoM sound installed, using HL2's", level == 2 and "break" or "fracture", label)
 	end
-	if hips and bail.hips and dt > 0 then
-		bail.comSpeed = (hips - bail.hips):Length() / dt / UNITS
+	local list = HL2_BONES[level] or HL2_BONES[1]
+	sound.Play(list[math.random(#list)], pos, 80, math.random(95, 105), (level == 2 and 1 or 0.7) * cv_volume:GetFloat())
+end
+
+-- A body part hit something (the hook in cl_hall_of_meat.lua).
+local function OnBodyHit(ev)
+	if cv_pack:GetString() == "off" or not ev.pos then return end
+	local region = REGION_OF[ev.part] or TORSO
+	if CurTime() ~= bail.voicesAt then
+		bail.voicesAt, bail.voices = CurTime(), 0
 	end
-	-- The body sliding along the ground.
+	local t = math.Clamp((ev.severity - HIT_SOFT) / (HIT_HARD - HIT_SOFT), 0, 1)
+	-- The bail's opening thump already covers the first instant.
+	local quiet = bail.quietUntil and CurTime() < bail.quietUntil
+	if not quiet then
+		local played
+		if DiscBails() then
+			-- What it hit, wall or floor, as the disc's material for it.
+			local ground = GroundMaterial(ROLL[ev.matType] or ROLL_DEFAULT) or NO_MATERIAL
+			played = BodyHit(region, Impact(region.material, ev.severity), ground, ev.pos, ev.part)
+		end
+		-- Nothing from the disc's side must not mean silence for a hit that scored.
+		if not played and bail.voices < 4 then
+			bail.voices = bail.voices + 1
+			HitClassic(t, ev.pos, ev.part)
+		end
+	end
+	if ev.injury then BoneBreak(region, ev.injury, ev.pos, ev.part) end
+end
+
+hook.Add("Skate3BodyHit", "skate3_sounds", OnBodyHit)
+
+-- Each tick of a bail: the body sliding along the ground.
+local function Bail(pose, dt, volume, ent, classic)
+	local hips = BonePos(pose, "HIPS")
 	local sliding = 0
 	if hips and bail.hips and dt > 0 then
 		local tr = util.TraceLine({ start = hips, endpos = hips - Vector(0, 0, 14), filter = ent, mask = MASK_SOLID })
@@ -771,11 +820,155 @@ local function Bail(pose, dt, volume, ent, classic)
 		end
 	end
 	bail.hips = hips
-	if classic then return hits end
+	if classic then return end
 	if not picks.bodyslide then Pick("bodyslide", "bodyslide") end
 	Hold("bodyslide", ent, sliding > 1, math.Clamp(sliding / 8, 0, 0.7) * volume, math.Clamp(85 + sliding * 3, 85, 120))
-	return hits
 end
+
+---------------------------------------------------------------------------
+-- The score multiplier going up. Retail plays its interface sounds from the
+-- front-end ("fe") records, each naming a sound in the sk8_menu bank; setup
+-- installs the bank as sound/skate3/menu and the records' names, ids and
+-- levels in sounds.json ("frontend": name -> { id, level }).
+--
+-- Which record is the x2 chime and which the x3 isn't written down anywhere
+-- we've found, so MULTIPLIER names them once somebody's heard them
+-- (skate3_menu_names lists the records, skate3_sound_scan menu steps through
+-- the sounds). Until then a record named like a multiplier is taken.
+---------------------------------------------------------------------------
+
+-- [multiplier] = the front-end record that plays when it's reached; a record
+-- for the highest one serves above it.
+local MULTIPLIER = {}
+
+local function Frontend()
+	local m = Manifest()
+	return m and m.frontend
+end
+
+-- Whether the record `name` looks like the chime for multiplier `n`: "mult"
+-- in its name, and n as a number of its own in it.
+local function Looks(name, n)
+	name = name:lower()
+	if not name:find("mult", 1, true) or name:find("player", 1, true) or name:find("online", 1, true) then return false end
+	return (" " .. name:gsub("%D+", " ") .. " "):find(" " .. n .. " ", 1, true) ~= nil
+end
+
+local menuFor = {}
+-- The record (name, id, level) for multiplier `n`; nil when there's none.
+local function MenuRecord(n)
+	local fe = Frontend()
+	if not fe then return end
+	if menuFor[n] == nil then
+		local found = MULTIPLIER[n]
+		if not found then
+			local names = table.GetKeys(fe)
+			table.sort(names)
+			for _, name in ipairs(names) do
+				if Looks(name, n) then
+					found = name
+					break
+				end
+			end
+		end
+		menuFor[n] = found or false
+	end
+	local name = menuFor[n]
+	local record = name and fe[name]
+	if record then return name, record[1], record[2] end
+end
+
+local multiplierSeen = 1
+
+local function MultiplierSound(n)
+	if cv_mult:GetFloat() <= 0 then return end
+	local ent = LocalPlayer()
+	local volume = cv_volume:GetFloat()
+	if Disc() then
+		-- A record for the highest multiplier serves the ones above it.
+		for k = n, 2, -1 do
+			local name, id, level = MenuRecord(k)
+			if name and PlayId("menu", id, ent, 0.5, math.Clamp(level or 1, 0, 1), 1, nil, true, 0) then
+				Debug("multiplier x%d: %s", n, name)
+				return
+			end
+		end
+		Debug("multiplier x%d: no front-end record found, using HL2's", n)
+	end
+	ent:EmitSound(HL2_MULTIPLIER, 0, math.Clamp(100 + (n - 2) * 15, 60, 200), 0.6 * volume)
+end
+
+-- Each frame: a bigger multiplier than the last frame's is a chime. A line
+-- over, or a bail, starts it again from x1.
+local function Multiplier(pose, kind)
+	local sc = pose.score
+	local n = 1
+	if sc and kind ~= "bail" and (sc.active or (sc.timer or 0) > 0) then
+		n = math.floor((sc.multiplier or 1) + 0.001)
+	end
+	if n > multiplierSeen and n >= 2 then MultiplierSound(n) end
+	multiplierSeen = n
+end
+
+---------------------------------------------------------------------------
+-- Finding sounds by ear: the ids setup installed in a folder, for naming the
+-- ones this file doesn't know yet.
+---------------------------------------------------------------------------
+
+local function InstalledIds(folder)
+	local m = Manifest()
+	local ids = m and m.ids and m.ids[folder]
+	local out = {}
+	for id in pairs(ids or {}) do out[#out + 1] = tonumber(id) end
+	table.sort(out)
+	return out
+end
+
+concommand.Add("skate3_sound_play", function(_, _, args)
+	local folder, id = args[1], tonumber(args[2])
+	if not folder or not id then return print("[skate3] skate3_sound_play <folder> <id>, e.g. skate3_sound_play menu 235") end
+	local ent = LocalPlayer()
+	print(PlayId(folder, id, ent, 0.5, 1, 1, nil, true, 0) and ("[skate3] played " .. folder .. " " .. id)
+		or ("[skate3] " .. folder .. " has no sound " .. id))
+end, nil, "Play a sound id installed in sound/skate3/<folder>")
+
+-- Plays every id in a folder, one every two seconds, saying which as it goes.
+concommand.Add("skate3_sound_scan", function(_, _, args)
+	local folder = args[1]
+	local ids = folder and InstalledIds(folder) or {}
+	if #ids == 0 then return print("[skate3] skate3_sound_scan <folder> [from] [to]: nothing installed in " .. tostring(folder)) end
+	local from, to = tonumber(args[2]) or ids[1], tonumber(args[3]) or ids[#ids]
+	local list = {}
+	for _, id in ipairs(ids) do
+		if id >= from and id <= to then list[#list + 1] = id end
+	end
+	print(string.format("[skate3] playing %d sounds from %s, %s to %s", #list, folder, from, to))
+	timer.Remove("skate3_sound_scan")
+	local i = 0
+	timer.Create("skate3_sound_scan", 2, #list, function()
+		i = i + 1
+		print(string.format("[skate3] %s %d", folder, list[i]))
+		PlayId(folder, list[i], LocalPlayer(), 0.5, 1, 1, nil, true, 0)
+	end)
+end, nil, "Play the sound ids of a folder one by one")
+
+concommand.Add("skate3_sound_scan_stop", function() timer.Remove("skate3_sound_scan") end)
+
+concommand.Add("skate3_menu_names", function(_, _, args)
+	local fe = Frontend()
+	if not fe then return print("[skate3] no front-end records installed: run setup again with your disc") end
+	local filter = args[1] and args[1]:lower()
+	local names = table.GetKeys(fe)
+	table.sort(names)
+	local shown = 0
+	for _, name in ipairs(names) do
+		if not filter or name:lower():find(filter, 1, true) then
+			print(string.format("[skate3] %-40s menu id %d  level %.2f", name, fe[name][1], fe[name][2]))
+			shown = shown + 1
+		end
+	end
+	print(string.format("[skate3] %d of %d front-end records", shown, #names))
+end, nil, "List the front-end sound records, optionally only names containing a word")
 
 ---------------------------------------------------------------------------
 
@@ -795,7 +988,7 @@ function Sounds.Update(ent, pose)
 		for _, s in pairs(loops) do s.patch:Stop() end
 		loops, picks = {}, {}
 	end
-	local bails = disc and cv_bails:GetString() ~= "hl2" and Tuning() ~= nil
+	local bails = disc and DiscBails()
 
 	-- Bones move once per simulation tick; frames between ticks repeat them.
 	local tick = pose.tick
@@ -819,11 +1012,11 @@ function Sounds.Update(ent, pose)
 			GrindHit(ent, speed)
 		elseif kind == "bail" then
 			BailReset()
-			-- With HL2's bails, the fall itself thumps; each bump after it
-			-- plays as the body hits things.
+			-- With HL2's bails, the fall itself thumps, and the first hits
+			-- are part of it; each bump after plays as the body hits things.
 			if not bails then
 				Play("bail", ent, 1)
-				bail.lastClassic = CurTime()
+				bail.quietUntil = CurTime() + 0.1
 			end
 		end
 		if kind == "grind" then Pick("grind", "grinds") end
@@ -878,6 +1071,7 @@ function Sounds.Update(ent, pose)
 		end
 	end
 	if kind ~= "bail" or not bails then Hold("bodyslide", ent, false, 0) end
+	Multiplier(pose, kind)
 
 	local grind = Loop("grind", ent)
 	if kind == "grind" then
@@ -908,6 +1102,7 @@ function Sounds.Stop()
 	feet = { {}, {} }
 	body = {}
 	BailReset()
+	multiplierSeen = 1
 	last, lastTick = nil, nil
 end
 

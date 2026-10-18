@@ -28,6 +28,10 @@ BANKS = {
     'flips': ('audiofiles.big', 'Sk8_Air_Flip_Tricks.abk'),
     'scrapes': ('audiofiles.big', 'board_scrapes.abk'),
     'bodyslide': ('audiofiles.big', 'Bodyslide.abk'),
+    # Hall of Meat's own impact sounds, and the front-end (interface) sounds
+    # the score multiplier's chimes are among.
+    'hom': ('audiofiles.big', 'HOM_Set_1.bnk'),
+    'menu': ('audiofiles.big', 'sk8_menu.bnk'),
     'footdrag': ('audiofiles.big', 'FOOT_DRAG.abk'),
     'seams': ('audiofiles.big', 'Seams_Bank.abk'),
     'rattles': ('audiofiles.big', 'Rolling_Rattles.abk'),
@@ -412,6 +416,11 @@ def install(game, out, report=print, collections=None):
         if collections is not None:
             tuning = audio_tuning.install(collections, report)
             if tuning is not None:
+                # The front-end records (name -> sk8_menu id, level) sit
+                # beside the sound ids, not in the collision tuning.
+                frontend = tuning.pop('frontend', None)
+                if frontend:
+                    manifest['frontend'] = frontend
                 manifest['tuning'] = tuning
         (staged / 'sounds.json').write_text(json.dumps(manifest, separators=(',', ':')))
         shutil.rmtree(out, ignore_errors=True)
