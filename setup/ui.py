@@ -327,3 +327,83 @@ def export_ps3(engine, usrdir, out, report):
     manifest.write_text(json.dumps(ui, separators=(',', ':')), encoding='utf-8')
     report(f'PlayStation button art ready: {len(ui["buttons_ps"])} buttons')
     return len(ui['buttons_ps'])
+
+
+# The Futura the game's own web pages use: real TrueType files on the disc.
+# Garry's Mod can draw text with them at any size (the bitmap atlases above are
+# soft above 720p). They're renamed so they can't clash with a Futura the
+# player has installed, and so the mod can find them by one name.
+FONT_DISC = 'data/webkit/FuturaStd-Heavy.ttf'
+FONT_FAMILY = 'S3GM Futura'
+FONT_FILE = 's3gm_futura.ttf'
+
+
+def rename_ttf(data, family):
+    """A TrueType file's bytes with its name table replaced so the family is
+    `family` (style Bold, as the original). Fixes the checksums."""
+    import struct
+    count = struct.unpack('>H', data[4:6])[0]
+    tables = []
+    for i in range(count):
+        tag, _, offset, length = struct.unpack('>4sIII', data[12 + i * 16:28 + i * 16])
+        tables.append((tag, bytearray(data[offset:offset + length])))
+    names = {1: family, 2: 'Bold', 3: family + ' Bold', 4: family + ' Bold', 6: family.replace(' ', '') + '-Bold'}
+    records, strings = [], b''
+    # Windows (UTF-16BE) and Mac (Roman) copies of each, sorted as the format wants.
+    for platform, encoding, language, codec in ((1, 0, 0, 'mac_roman'), (3, 1, 0x409, 'utf-16-be')):
+        for name_id, text in sorted(names.items()):
+            raw = text.encode(codec)
+            records.append((platform, encoding, language, name_id, len(raw), len(strings)))
+            strings += raw
+    table = struct.pack('>HHH', 0, len(records), 6 + 12 * len(records))
+    table += b''.join(struct.pack('>6H', *r) for r in records) + strings
+    tables = [(t, bytearray(table) if t == b'name' else b) for t, b in tables]
+    if not any(t == b'name' for t, _ in tables):
+        raise ValueError('not a font with a name table')
+    # One ascent and descent everywhere (they add up to the em), so a font of
+    # size N is N pixels tall with its baseline at 0.825 N on every platform,
+    # whichever of the font's three metric sets the system reads.
+    for t, b in tables:
+        if t == b'head':
+            b[8:12] = b'\0\0\0\0'  # checkSumAdjustment, set below
+        elif t == b'hhea':
+            b[4:10] = struct.pack('>hhh', 825, -175, 0)
+        elif t == b'OS/2' and len(b) >= 78:
+            b[68:74] = struct.pack('>hhh', 825, -175, 0)
+            b[74:78] = struct.pack('>HH', 825, 175)
+            b[62:64] = struct.pack('>H', struct.unpack('>H', b[62:64])[0] | 0x80)  # use the typo metrics
+    def checksum(blob):
+        blob = bytes(blob) + b'\0' * (-len(blob) % 4)
+        return sum(struct.unpack('>%dI' % (len(blob) // 4), blob)) & 0xFFFFFFFF
+    # Device metrics tables that would override the metrics above at some sizes.
+    tables = [(t, b) for t, b in tables if t not in (b'VDMX', b'hdmx', b'LTSH')]
+    n = len(tables)
+    power = 1 << (n.bit_length() - 1)
+    header = data[:4] + struct.pack('>HHHH', n, power * 16, power.bit_length() - 1, n * 16 - power * 16)
+    directory_size = 12 + 16 * len(tables)
+    out, entries, offset = bytearray(), [], directory_size
+    for tag, blob in sorted(tables, key=lambda x: x[0]):
+        entries.append(struct.pack('>4sIII', tag, checksum(blob), offset, len(blob)))
+        padded = bytes(blob) + b'\0' * (-len(blob) % 4)
+        out += padded
+        offset += len(padded)
+    font = bytearray(header + b''.join(entries) + out)
+    adjust = (0xB1B0AFBA - checksum(font)) & 0xFFFFFFFF
+    for i in range(len(tables)):
+        tag, _, off, _ = struct.unpack('>4sIII', font[12 + i * 16:28 + i * 16])
+        if tag == b'head':
+            font[off + 8:off + 12] = struct.pack('>I', adjust)
+    return bytes(font)
+
+
+def export_fonts(game, folder, report):
+    """The disc's Futura as TrueType into folder (garrysmod/resource/fonts)."""
+    from vendor.skate3_ui.big import BigArchive
+    archive = BigArchive(Path(game) / 'data/big/miscboot.big')
+    entry = next((e for e in archive.entries if e.path == FONT_DISC), None)
+    if entry is None:
+        raise ValueError('the disc has no Futura TrueType file')
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / FONT_FILE).write_bytes(rename_ttf(archive.read(entry), FONT_FAMILY))
+    report(f'Futura for the Skate 3 look installed in {folder / FONT_FILE}')

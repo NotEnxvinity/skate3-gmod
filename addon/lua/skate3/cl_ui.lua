@@ -14,6 +14,9 @@ local cv_style = CreateClientConVar("skate3_ui_style", "skate3", true, false,
 local cv_world = CreateClientConVar("skate3_ui_world", "0", true, false,
 	"Draw the trick score beside the skater in the world instead of on screen (1 on, 0 off)")
 
+local cv_crisp = CreateClientConVar("skate3_ui_crisp", "1", true, false,
+	"Draw the Skate 3 look's text with the disc's Futura font where setup installed it (sharp at any resolution), not its bitmaps (1 on, 0 off)")
+
 local ART = "skate3/assets/ui/"
 -- Replacements for the disc's images with the same names (an upscaled set),
 -- looked for first. Setup never touches this folder.
@@ -102,11 +105,12 @@ end
 -- Drawing on the canvas
 ---------------------------------------------------------------------------
 
-local T = { ox = 0, oy = 0, s = 1 }
+local T = { ox = 0, oy = 0, s = 1, world = false }
 
--- Canvas point (x, y) lands on the screen at ox + x * s, oy + y * s.
-function UI.Begin(ox, oy, s)
-	T.ox, T.oy, T.s = ox, oy, s
+-- Canvas point (x, y) lands on the screen at ox + x * s, oy + y * s. `world`
+-- when it's a 3D2D plane in the world, where text stays bitmap.
+function UI.Begin(ox, oy, s, world)
+	T.ox, T.oy, T.s, T.world = ox, oy, s, world or false
 end
 
 function UI.Scale() return T.s end
@@ -325,6 +329,65 @@ local function Run(font, text, x, y, h, r, g, b, a)
 	end
 end
 
+-- The disc's own Futura as a real font (setup puts it in resource/fonts as
+-- "S3GM Futura"), so text is sharp at any size. Whether it's installed is
+-- found out once by measuring text in it against a font that doesn't exist.
+local PROBE = "Wmiqjg0123 Skate"
+local FAMILY = "S3GM Futura"
+local CAP, ASCENT = 0.754, 0.825 -- the font's capital height and baseline, in ems
+local crisp
+
+local function CrispAvailable()
+	if not cv_crisp:GetBool() then return false end
+	if crisp == nil then
+		surface.CreateFont("s3gm_futura_none", { font = "S3GM no such font", size = 40, weight = 700 })
+		surface.SetFont("s3gm_futura_none")
+		local none = surface.GetTextSize(PROBE)
+		surface.CreateFont("s3gm_futura_probe", { font = FAMILY, size = 40, weight = 700 })
+		surface.SetFont("s3gm_futura_probe")
+		crisp = surface.GetTextSize(PROBE) ~= none
+		print("[skate3] ui font: " .. (crisp and "the disc's Futura (sharp)" or "bitmap Futura (the disc's font isn't installed: run the S3GM setup again, then restart the game)"))
+	end
+	return crisp
+end
+
+local crispFonts = {}
+local function CrispFont(px)
+	px = math.max(8, math.Round(px))
+	local name = "s3gm_futura_" .. px
+	if not crispFonts[name] then
+		crispFonts[name] = true
+		surface.CreateFont(name, { font = FAMILY, size = px, weight = 700, extended = true, antialias = true })
+	end
+	return name, px
+end
+
+-- Text drawn glyph by glyph in the real font, on the bitmap font's pen
+-- positions and baseline, so it sits exactly where the bitmap text would.
+local function RunCrisp(font, text, x, y, h, r, g, b, a)
+	local H = font.chars["72"]
+	if not H then return false end
+	local scale = h / font.ascent
+	local cap = H[6] * scale
+	local baseline = y + h - H[8] * scale + cap
+	local name, px = CrispFont(cap * UI.Scale() / CAP)
+	local _, top = UI.P(0, baseline)
+	top = top - ASCENT * px
+	local color = Color(r, g, b, a)
+	local pen = 0
+	for _, cp in utf8.codes(text) do
+		local c = font.chars[tostring(cp)]
+		if c then
+			if c[5] > 0 and c[6] > 0 then
+				local X = UI.P(x + pen, 0)
+				draw.SimpleText(utf8.char(cp), name, X, top, color, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP)
+			end
+			pen = pen + c[9] * scale
+		end
+	end
+	return true
+end
+
 function UI.Futura(text, x, y, h, color, alpha, align)
 	local heavy, shadow = Chars("heavy"), Chars("shadow")
 	if not heavy then return end
@@ -334,6 +397,11 @@ function UI.Futura(text, x, y, h, color, alpha, align)
 		x = x - UI.FuturaWidth(text, h)
 	end
 	if shadow then Run(shadow, text, x, y, h, 0, 0, 0, 255 * alpha) end
+	-- Turned text and the in-world plane stay bitmap.
+	if not rot and not T.world and CrispAvailable() and
+		RunCrisp(heavy, text, x + 1, y, h, color.r, color.g, color.b, (color.a or 255) * alpha) then
+		return
+	end
 	Run(heavy, text, x + 1, y, h, color.r, color.g, color.b, (color.a or 255) * alpha)
 end
 
@@ -346,7 +414,6 @@ end
 -- free Inter Bold that ships with the addon (resource/fonts), then Arial and
 -- Garry's Mod's own Roboto, whichever is first found installed.
 local FACES = { "Helvetica Neue", "S3GM Sans Bold", "Arial", "Roboto" }
-local PROBE = "Wmiqjg0123 Skate"
 local face
 
 function UI.Face()

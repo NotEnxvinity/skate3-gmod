@@ -462,7 +462,7 @@ function Score.DrawWorld(pos)
 	if UI.Style() == "skate3" then
 		-- The disc's centre at the plane's origin.
 		cam.Start3D2D(pos + worldOffset, Angle(0, yaw - 90, 90), 0.1)
-		UI.Begin(-164, -604, 1)
+		UI.Begin(-164, -604, 1, true)
 		Skate3.Draw(view)
 	else
 		local s = ScrH() / 1080
