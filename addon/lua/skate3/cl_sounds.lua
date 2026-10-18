@@ -1106,6 +1106,14 @@ function Sounds.Stop()
 	last, lastTick = nil, nil
 end
 
+-- sounds.json is big (every sound id of the banks), and reading it was done in
+-- the first frame of riding, a visible hitch the first time the board came
+-- out. Read it a few seconds after the map is up instead, while nobody's
+-- riding yet.
+timer.Simple(8, function()
+	if cv_pack:GetString() ~= "off" and Sounds.HasDisc() then Manifest() end
+end)
+
 -- Garry's Mod's own footsteps for a skater: the simulation moves them, so
 -- the walk animation other players see would step in place. Ours play
 -- instead (the server's copy of this hook is in sv_skate3.lua).
