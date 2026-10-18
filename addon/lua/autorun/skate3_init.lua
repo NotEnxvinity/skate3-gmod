@@ -14,6 +14,8 @@ CreateConVar("skate3_player_collision", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + 
 	"Skaters crash into other players: a hard enough hit bails them (1 on, 0 off)")
 CreateConVar("skate3_player_collision_speed", "4", FCVAR_ARCHIVE + FCVAR_REPLICATED,
 	"How fast two players must close in on each other to crash, in metres a second (about 3.6 km/h each)", 0.5, 50)
+CreateConVar("skate3_player_collision_exempt_speed", "30", FCVAR_ARCHIVE + FCVAR_REPLICATED,
+	"Riders going this fast or faster (metres a second, so mach 1 and its like) don't crash into anyone and nobody crashes into them (0 = nobody is exempt)", 0, 400)
 CreateConVar("skate3_player_hits", "1", FCVAR_ARCHIVE + FCVAR_REPLICATED + FCVAR_NOTIFY,
 	"Players on foot with the board can punch and swing it at other players (1 on, 0 off)")
 CreateConVar("skate3_hit_damage", "0", FCVAR_ARCHIVE + FCVAR_REPLICATED,

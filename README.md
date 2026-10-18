@@ -89,7 +89,9 @@ skater who hits them bails, and the server shoves them. On foot with the board
 in hand, B (F on a keyboard) punches and R1 (Ctrl) swings the board; anyone
 hit on a board comes off it, anyone walking is shoved. The server decides:
 `skate3_player_collision 0` turns crashes off, `skate3_player_collision_speed`
-is the closing speed in metres a second that crashes (4), `skate3_player_hits 0`
+is the closing speed in metres a second that crashes (4), riders going
+`skate3_player_collision_exempt_speed` (30 m/s, so mach 1) or faster pass through everyone
+(0 exempts nobody), `skate3_player_hits 0`
 turns punches and swings off (as does a server that keeps players from hurting
 each other, such as Sandbox's `sbox_playershurtplayers 0`), and
 `skate3_hit_damage` is the health a punch takes (a swing takes twice; 0, the

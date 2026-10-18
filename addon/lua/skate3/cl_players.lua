@@ -20,7 +20,8 @@
 -- simulation for (WipeOutRequest), pressed for the skater.
 --
 -- Server settings (sv_skate3.lua): skate3_player_collision,
--- skate3_player_collision_speed, skate3_player_hits, skate3_hit_damage.
+-- skate3_player_collision_speed, skate3_player_collision_exempt_speed,
+-- skate3_player_hits, skate3_hit_damage.
 
 local cv_melee = CreateClientConVar("skate3_melee", "1", true, false,
 	"Punch (B, F on a keyboard) and swing the board (R1, Ctrl) at other players while on foot with the board")
@@ -111,6 +112,10 @@ return function(Skater, Others, Score)
 	local function Crash(now, pose)
 		if now < nextCrash or Server("skate3_player_collision", 1) == 0 then return end
 		if not Riding(pose.state) then return end
+		-- Mach 1 and the other speed glitches are meant to be had, so riders
+		-- that fast (this one, or the one met) pass through everyone.
+		local exempt = Server("skate3_player_collision_exempt_speed", 30)
+		if exempt > 0 and (pose.speed or 0) >= exempt then return end
 		local me, vel = V(pose.pos), V(pose.velocity or { 0, 0, 0 })
 		local need = Server("skate3_player_collision_speed", 4)
 		local worst
@@ -121,7 +126,7 @@ return function(Skater, Others, Score)
 				local up = away.z
 				away.z = 0
 				local near = away:Length()
-				if near < CRASH_REACH and math.abs(up) < CRASH_HEIGHT then
+				if near < CRASH_REACH and math.abs(up) < CRASH_HEIGHT and not (exempt > 0 and other:Length() / UNITS >= exempt) then
 					-- How fast the two close in on each other, along the line
 					-- between them. Side by side at the same speed is nothing.
 					local toward = near > 1 and away / near or (vel - other):GetNormalized()
