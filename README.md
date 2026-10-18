@@ -26,6 +26,8 @@ The Skate 3 host is a git dependency on
 
 ## Install (Windows, Linux or SteamOS)
 
+Prefer to watch it? There's a video walkthrough of the install: https://youtu.be/oGdIwMNwp14
+
 1. Subscribe to [**Skate 3 in Gmod**](https://steamcommunity.com/sharedfiles/filedetails/?id=3814357793)
    on the Steam Workshop. That's the Lua
    addon; the Workshop can't carry the native skate engine, so that comes from

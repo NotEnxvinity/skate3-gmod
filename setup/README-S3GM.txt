@@ -24,6 +24,8 @@ What you need
 
 Install
 -------
+Video walkthrough of this whole install: https://youtu.be/oGdIwMNwp14
+
 1. Extract this zip anywhere. You get one folder, S3GM-setup.
 2. Open S3GM-setup and double-click the setup for your computer:
      Windows:          S3GM-setup-Windows.bat
