@@ -27,6 +27,7 @@ HD_SCORE = 'ui/screens/hud2/trickdisplay2/%s.png'
 HD_PANEL = 'ui/screens/hud2/hudphonelist/%s.png'
 HD_BUTTON = 'ui/images/buttons/xbox360/buttons/button_%s_hud.png'
 # The Futura atlases, by font key (heavy is the text colour pass, shadow the black one).
+HD_LOGO = 'ui/screens/hud2/homscoring/%s.png'
 HD_FONT = {'heavy': 'fonts/atlas-png/futuraheavy.png', 'shadow': 'fonts/atlas-png/futurashadow.png'}
 PANEL = (91.0, 48.0)  # where the quick menu's panel sits on the canvas
 # The front-end archives the extractors read (miscboot.big is names.py's too).
@@ -54,8 +55,30 @@ def quad(vertices):
     return [[x, y, *unique[(x, y)]] for x, y in ((xs[0], ys[0]), (xs[1], ys[0]), (xs[1], ys[1]), (xs[0], ys[1]))]
 
 
-def build(scoring, marker, out, report=print):
-    """scoring: prepare_hud's output folder; marker: extract_session_marker's."""
+# The Hall of Meat panel's magazine logo: the sprite of the homscoring movie that holds it.
+LOGO_BUNDLE = 'data/fe/source/screens/hud2/homscoring'
+LOGO_SPRITE = 20
+
+
+def logo_pieces(cache):
+    """The logo's pieces (a soft shadow, then the lettering in two halves) from
+    the homscoring movie: [(texture dict, rectangle, number)] in draw order."""
+    from vendor.skate3_ui.scene_graph import AssetCache, SceneFlattener
+    flat = SceneFlattener(AssetCache(cache), lambda path, owner, character: {'frame': 0}).flatten(LOGO_BUNDLE, LOGO_SPRITE)
+    pieces = []
+    for prim in flat['primitives']:
+        t = prim.get('texture')
+        rect = quad([v for tri in prim['triangles'] for v in tri]) if t else None
+        number = t['resource_name'].split('\\')[-1].split('.')[0] if t else ''
+        # 1 is the panel's own backdrop (the frosted panel is drawn in code), 10 the shadow, 16/17 the lettering.
+        if rect is not None and number in ('10', '16', '17'):
+            pieces.append((t, rect, number))
+    return pieces
+
+
+def build(scoring, marker, out, report=print, logo=None):
+    """scoring: prepare_hud's output folder; marker: extract_session_marker's;
+    logo: the extracted homscoring folder (optional, the Hall of Meat logo)."""
     scoring, marker, out = Path(scoring), Path(marker), Path(out)
     hud = json.loads((scoring / 'runtime/trickdisplay.json').read_text(encoding='utf-8'))
     menu = json.loads((marker / 'hud.json').read_text(encoding='utf-8'))
@@ -134,6 +157,19 @@ def build(scoring, marker, out, report=print):
         ui['buttons'][button] = add_texture('btn_' + button, (bank / item['rgba_file']).read_bytes(), item['width'], item['height'],
                                           HD_BUTTON % button)
 
+    # The Hall of Meat panel's logo, if it could be read.
+    if logo is not None:
+        try:
+            pieces = []
+            for t, rect, number in logo_pieces(logo):
+                name = add_texture('hom' + number, (Path(logo) / t['rgba']).read_bytes(), t['width'], t['height'],
+                                   HD_LOGO % number)
+                pieces.append({'tex': name, 'quad': rect, 'shadow': number == '10'})
+            if pieces:
+                ui['logo'] = pieces
+        except Exception as error:
+            report(f'Hall of Meat logo skipped: {error}')
+
     (out / 'ui.json').write_text(json.dumps(ui, separators=(',', ':')), encoding='utf-8')
     report(f'Skate 3 UI art ready: {len(ui["textures"])} images, {len(ui["fonts"])} fonts')
     return ui
@@ -150,7 +186,14 @@ def export(engine, game, out, collections, report):
         tmp = Path(tmp)
         prepare_hud.prepare(Path(game).resolve(), tmp / 'scoring', Path(collections).resolve())
         extract_session_marker.prepare(Path(game).resolve(), tmp / 'marker')
-        return build(tmp / 'scoring', tmp / 'marker', out, report)
+        logo = None
+        try:
+            from vendor.skate3_ui.project import extract_project
+            extract_project(Path(game).resolve(), tmp / 'logo', include_dynamic=True, prefixes=(LOGO_BUNDLE,), update=True)
+            logo = tmp / 'logo'
+        except Exception as error:
+            report(f'Hall of Meat logo skipped: {error}')
+        return build(tmp / 'scoring', tmp / 'marker', out, report, logo)
 
 
 def install_hd(source, out, report):

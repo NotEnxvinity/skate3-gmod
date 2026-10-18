@@ -167,6 +167,22 @@ function UI.Shape(id, dx, dy, k, r, g, b, a)
 	end
 end
 
+-- The Hall of Meat panel's magazine logo (a soft black shadow, then the
+-- lettering tinted r, g, b) with its origin at (dx, dy). False if the disc
+-- art for it isn't there.
+function UI.Logo(dx, dy, k, r, g, b, a)
+	local pieces = UI.Art() and art.logo
+	if not pieces then return false end
+	for _, piece in ipairs(pieces) do
+		if piece.shadow then
+			UI.Quad(piece.tex, piece.quad, dx, dy, k, 255, 255, 255, a)
+		else
+			UI.Quad(piece.tex, piece.quad, dx, dy, k, r, g, b, a)
+		end
+	end
+	return true
+end
+
 -- A quadrant ring's first `frac` of the way round clockwise from the top
 -- (frac 0..1), with the shape's origin at (dx, dy). The pieces are quadrants
 -- of a ring (mirrored copies of one picture), so each is cut to the wedge it

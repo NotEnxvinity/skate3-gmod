@@ -65,12 +65,15 @@ local function Readouts(rows, a)
 end
 
 -- Hall of Meat's score, as the retail game draws it: a frosted panel bottom
--- left with the "Hall of Meat" caption over the bail's score in cream. (The
--- magazine logo above the caption comes from the disc and isn't drawn yet.)
+-- left with the magazine's logo (from the disc) and the "Hall of Meat" caption
+-- over the bail's score in cream.
+local LOGO = { 78, 545 } -- the logo sprite's origin, so its lettering spans x 126..286
+local LOGO_TINT = Color(180, 235, 250)
 local function Meat(v)
 	local a = v.alpha
+	UI.Logo(LOGO[1], LOGO[2], 1, LOGO_TINT.r, LOGO_TINT.g, LOGO_TINT.b, 255 * a)
 	UI.Rounded(6, 104, 604, 203, 62, Color(235, 240, 255, 38 * a))
-	UI.Futura("Hall of Meat", 208, 578, 17, CREAM, a, TEXT_ALIGN_CENTER)
+	UI.Futura("Hall of Meat", 208, 582, 17, CREAM, a, TEXT_ALIGN_CENTER)
 	UI.Futura(v.points, 208, 604, 40, CREAM, a, TEXT_ALIGN_CENTER)
 end
 
