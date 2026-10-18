@@ -167,6 +167,8 @@ local flash -- { text, color, at }
 local shown = 0 -- what the widget showed last, kept while it fades
 local lastTrick = ""
 local tricks = {} -- this line's trick names, oldest first (the stack above the disc)
+local trickAt = {} -- when each of those was added (the stack animates on it)
+local scoreAt, multAt, lastMult = -math.huge, -math.huge, 1 -- when the big number last changed, when the multiplier last went up
 local lastLabel = ""
 local lastSeq = 0 -- the last trick sequence's score, the big number in Skate 3's look
 local wasLive = false
@@ -224,7 +226,7 @@ local function Distances(pose, sc, bailing, now)
 	elseif not air and airFrom then
 		local feet = Flat(pos, airFrom)
 		airFrom = nil
-		if not bailing and feet >= cv_air_min:GetFloat() then readouts.air = { feet = feet, at = now } end
+		if not bailing and feet >= cv_air_min:GetFloat() then readouts.air = { feet = feet, at = now, since = now } end
 	end
 
 	local manual = sc.active and not air and (sc.trick or ""):upper():find("MANUAL") ~= nil
@@ -232,7 +234,9 @@ local function Distances(pose, sc, bailing, now)
 		if not manualLast then manualLast, manualFeet = { pos[1], pos[2], pos[3] }, 0 end
 		manualFeet = manualFeet + Flat(pos, manualLast)
 		manualLast = { pos[1], pos[2], pos[3] }
-		if manualFeet >= cv_manual_min:GetFloat() then readouts.manual = { feet = manualFeet, at = now } end
+		if manualFeet >= cv_manual_min:GetFloat() then
+			readouts.manual = { feet = manualFeet, at = now, since = readouts.manual and readouts.manual.since or now }
+		end
 	elseif manualLast then
 		manualLast = nil
 	end
@@ -242,12 +246,10 @@ local function ReadoutRows()
 	local rows = {}
 	for label, key in pairs({ ["Air Distance"] = "air", ["Manual Distance"] = "manual" }) do
 		local r = readouts[key]
-		if r then rows[#rows + 1] = { at = r.at, text = ("%s %.1f ft"):format(label, r.feet) } end
+		if r then rows[#rows + 1] = { since = r.since, text = ("%s %.1f ft"):format(label, r.feet) } end
 	end
-	table.sort(rows, function(a, b) return a.at < b.at end)
-	local out = {}
-	for i, r in ipairs(rows) do out[i] = r.text end
-	return out
+	table.sort(rows, function(a, b) return a.since < b.since end)
+	return rows
 end
 
 -- Works out this frame's view from the engine's score.
@@ -284,15 +286,24 @@ local function Update(pose)
 	local live = sc.active or sc.timer > 0
 	Distances(pose, sc, bailing, now)
 	if live then
-		if not wasLive then tricks, lastLabel, lastSeq, readouts = {}, "", 0, {} end
+		if not wasLive then tricks, trickAt, lastLabel, lastSeq, readouts, lastMult = {}, {}, "", 0, {}, 1 end
 		seenAt = now
 		shown = sc.line + (sc.active and sc.sequence or 0)
 		if sc.trick ~= "" then lastTrick = sc.trick end
-		if sc.active and sc.sequence > 0 then lastSeq = sc.sequence end
+		if sc.active and sc.sequence > 0 then
+			if sc.sequence ~= lastSeq then scoreAt = now end
+			lastSeq = sc.sequence
+		end
+		if sc.multiplier > lastMult + 0.01 then multAt = now end
+		lastMult = sc.multiplier
 		if sc.trick ~= "" and sc.trick ~= lastLabel then
 			lastLabel = sc.trick
 			tricks[#tricks + 1] = TrickName(sc.trick)
-			if #tricks > 3 then table.remove(tricks, 1) end
+			trickAt[#tricks] = now
+			if #tricks > 3 then
+				table.remove(tricks, 1)
+				table.remove(trickAt, 1)
+			end
 		end
 	end
 	wasLive = live
@@ -318,6 +329,10 @@ local function Update(pose)
 		-- Skate 3's look: the stack of this line's tricks, the last trick
 		-- sequence's score and the line's total, and "FAKIE" when rolling backwards.
 		tricks = tricks,
+		trickAt = trickAt,
+		now = now,
+		scoreAt = scoreAt,
+		multAt = multAt,
 		sequence = Points(lastSeq > 0 and lastSeq or shown),
 		line = Points(shown),
 		stance = Fakie(pose) and "FAKIE" or nil,
@@ -482,7 +497,8 @@ end
 function Score.Reset()
 	Meat.Reset()
 	last, flash, shown, lastTrick, seenAt, view, worldOffset = nil, nil, 0, "", -math.huge, nil, nil
-	tricks, lastLabel, lastSeq, wasLive = {}, "", 0, false
+	tricks, trickAt, lastLabel, lastSeq, wasLive = {}, {}, "", 0, false
+	scoreAt, multAt, lastMult = -math.huge, -math.huge, 1
 	readouts, airFrom, manualLast = {}, nil, nil
 end
 

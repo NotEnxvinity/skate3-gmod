@@ -51,12 +51,31 @@ local function Multiplier(m)
 	return (m == math.floor(m) and "x%d" or "x%.1f"):format(m)
 end
 
+-- The movie's own timings, in frames of 16 ms (read off the disc's trickdisplay2):
+-- a trick name shifts to the next row over 9 frames, a distance box fades in
+-- over 16 frames (from 40%) and the boxes above it move up over 5, the big
+-- number fades in over 10 (from 80%). The ease is a quick start, slow finish.
+local FRAME = 0.016
+local SHIFT, BOX_IN, BOX_MOVE, SCORE_IN, POP = 9 * FRAME, 16 * FRAME, 5 * FRAME, 10 * FRAME, 10 * FRAME
+
+local function Ease(t)
+	t = math.Clamp(t, 0, 1)
+	return 1 - (1 - t) * (1 - t)
+end
+
+local function Lerp(k, from, to) return from + (to - from) * k end
+
 -- The distance boxes ("Air Distance 30.2 ft") stacked above the trick stack,
 -- newest at the bottom: dark translucent boxes with a thin light edge.
 local BOX_X, BOX_BOTTOM, BOX_STEP, BOX_H, BOX_TEXT = 120, 420, 32, 25, 19
-local function Readouts(rows, a)
-	for i, text in ipairs(rows) do
+local function Readouts(rows, a, now)
+	for i, row in ipairs(rows) do
+		local text = row.text
 		local y = BOX_BOTTOM - (#rows - i) * BOX_STEP - BOX_H / 2
+		-- A new box fades in; the ones above it were a row lower a moment ago.
+		local newer = rows[i + 1]
+		if newer then y = y + (1 - Ease((now - newer.since) / BOX_MOVE)) * BOX_STEP end
+		local a = a * Lerp(Ease((now - row.since) / BOX_IN), 0.4, 1)
 		local w = UI.FuturaWidth(text, BOX_TEXT) + 22
 		UI.Rounded(4, BOX_X, y, w, BOX_H, Color(120, 140, 175, 150 * a))
 		UI.Rounded(3, BOX_X + 1, y + 1, w - 2, BOX_H - 2, Color(18, 28, 52, 205 * a))
@@ -80,6 +99,7 @@ end
 -- One frame of the widget. `v` is the score's view (cl_score.lua's Update).
 function S3.Draw(v)
 	local a = v.alpha
+	local now = v.now or RealTime()
 	if a <= 0 then return end
 	if v.meat then return Meat(v) end
 	local m = v.multiplier
@@ -91,26 +111,41 @@ function S3.Draw(v)
 	if v.live then
 		UI.Sector(RINGS[tier], CX, CY, 0, math.Clamp(v.timer, 0, 1), 255, 255, 255, 255 * a)
 	end
+	-- The multiplier pops when it goes up.
+	local pop = 1 + 0.25 * (1 - Ease((now - (v.multAt or -math.huge)) / POP))
 	if MULTIPLIER_ART[tier] and v.live then
-		UI.Shape(MULTIPLIER_ART[tier], CX, CY, 1, 255, 255, 255, 255 * a)
+		UI.Shape(MULTIPLIER_ART[tier], CX, CY, pop, 255, 255, 255, 255 * a)
 	else
-		UI.Futura(Multiplier(m), CX, CY - 14, 27, WHITE, a, TEXT_ALIGN_CENTER) -- ID_TRICKDISPLAY_15 is 27 high
+		UI.Futura(Multiplier(m), CX, CY - 14 * pop, 27 * pop, WHITE, a, TEXT_ALIGN_CENTER) -- ID_TRICKDISPLAY_15 is 27 high
 	end
 
 	local color = v.live and WHITE or (v.good and LINE or RED)
 	local big = v.live and v.sequence or v.banked or v.points
-	UI.Futura(big or v.points, SCORE_X, SCORE_Y, SCORE_H, color, a, TEXT_ALIGN_LEFT)
+	local setAlpha = v.live and Lerp(Ease((now - (v.scoreAt or -math.huge)) / SCORE_IN), 0.8, 1) or 1
+	UI.Futura(big or v.points, SCORE_X, SCORE_Y, SCORE_H, color, a * setAlpha, TEXT_ALIGN_LEFT)
 	if v.live and v.line then
 		UI.Futura("LINE: " .. v.line, LINE_X, LINE_Y, LINE_H, LINE, a * 0.9, TEXT_ALIGN_LEFT)
 	end
 
-	if v.readouts and #v.readouts > 0 then Readouts(v.readouts, a) end
+	if v.readouts and #v.readouts > 0 then Readouts(v.readouts, a, now) end
 
 	local stack = v.tricks
 	if stack and #stack > 0 then
 		for row = 1, math.min(#stack, #STACK) do
 			local spec = STACK[row]
-			UI.Futura(stack[#stack - row + 1], TRICK_X, spec[1], spec[2], row == 1 and TRICK or OLDER, a * spec[3], TEXT_ALIGN_LEFT)
+			local idx = #stack - row + 1
+			local y, size, alpha = spec[1], spec[2], spec[3]
+			local newer = v.trickAt and v.trickAt[idx + 1]
+			if newer and STACK[row - 1] then
+				-- It was a row nearer the disc until the next trick came in.
+				local k, from = Ease((now - newer) / SHIFT), STACK[row - 1]
+				y, size, alpha = Lerp(k, from[1], y), Lerp(k, from[2], size), Lerp(k, from[3], alpha)
+			elseif row == 1 and v.trickAt and v.trickAt[idx] then
+				-- The newest comes in a little bigger and fainter.
+				local k = Ease((now - v.trickAt[idx]) / SHIFT)
+				size, alpha = Lerp(k, size * 1.25, size), Lerp(k, alpha * 0.5, alpha)
+			end
+			UI.Futura(stack[idx], TRICK_X, y, size, row == 1 and TRICK or OLDER, a * alpha, TEXT_ALIGN_LEFT)
 		end
 	elseif v.trick and v.trick ~= "" then
 		UI.Futura(v.trick, TRICK_X, TRICK_Y, TRICK_H, TRICK, a * 0.8, TEXT_ALIGN_LEFT)
