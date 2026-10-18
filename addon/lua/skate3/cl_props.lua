@@ -226,25 +226,38 @@ function Props.Solid(model)
 	return Hulls(model), false
 end
 
--- Appends a model's hull triangles, placed by matrix `m`, to the flat list
--- `out` holding `n` numbers. Returns the new count.
-function Props.AppendHulls(out, n, hs, m)
+-- A model's hull triangles as Vectors in threes, each wound counterclockwise
+-- seen from outside its hull: the module only collides with a triangle's
+-- front. Visible shapes come facing out already. Worked out once per shape,
+-- not for every prop that stands on it.
+local ordered = setmetatable({}, { __mode = "k" })
+
+local function Ordered(hs)
+	local out = ordered[hs]
+	if out then return out end
+	out = {}
 	for _, verts in ipairs(hs) do
 		local centre = Vector()
 		for _, v in ipairs(verts) do centre:Add(v) end
 		centre:Div(#verts)
 		for t = 1, #verts - 2, 3 do
 			local a, b, c = verts[t], verts[t + 1], verts[t + 2]
-			-- The module only collides with a triangle's front, so
-			-- each one faces out of its hull, counterclockwise.
-			-- Visible shapes come facing out already.
 			if not verts.facing and (b - a):Cross(c - a):Dot(a - centre) < 0 then b, c = c, b end
-			local wa, wb, wc = m * a, m * b, m * c
-			out[n + 1], out[n + 2], out[n + 3] = wa.x, wa.y, wa.z
-			out[n + 4], out[n + 5], out[n + 6] = wb.x, wb.y, wb.z
-			out[n + 7], out[n + 8], out[n + 9] = wc.x, wc.y, wc.z
-			n = n + 9
+			out[#out + 1], out[#out + 2], out[#out + 3] = a, b, c
 		end
+	end
+	ordered[hs] = out
+	return out
+end
+
+-- Appends a model's hull triangles, placed by matrix `m`, to the flat list
+-- `out` holding `n` numbers. Returns the new count.
+function Props.AppendHulls(out, n, hs, m)
+	local tris = Ordered(hs)
+	for i = 1, #tris do
+		local w = m * tris[i]
+		out[n + 1], out[n + 2], out[n + 3] = w.x, w.y, w.z
+		n = n + 3
 	end
 	return n
 end
