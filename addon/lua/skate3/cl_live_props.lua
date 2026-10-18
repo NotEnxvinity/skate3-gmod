@@ -122,6 +122,7 @@ local built = {} -- key -> { place, tris (flat), count }
 local brushSeen = {} -- ent -> { place, since }
 local brushWanted, brushCurrent = {}, {} -- ent -> place
 local brushDirty = false
+local sentCount, reportAt = 0, nil
 -- The module only moves entities it was told were live at load.
 local brushesSent = false
 
@@ -422,10 +423,34 @@ function Live.Think(now, state)
 		local list = BrushList()
 		skate3.SetBrushes(list)
 		brushCurrent, brushDirty, brushesSent = brushWanted, false, true
-		print(("[skate3] moving map pieces solid for skating: %d"):format(#list / 8))
+		sentCount, reportAt = #list / 8, now + 1
+	end
+	-- A moment after a send, what the module made of it.
+	if reportAt and now >= reportAt then
+		reportAt = nil
+		local st = skate3.Status()
+		print(("[skate3] moving map pieces solid for skating: %d sent, the module has %d in this map and placed %d of its brushes"):format(
+			sentCount, st.movers or -1, st.doors or -1))
 	end
 	lastSwap = now
 end
+
+-- skate3_door_report: every moving brush entity the game has, and how the
+-- skate collision treats it.
+concommand.Add("skate3_door_report", function()
+	local st = skate3 and skate3.Status and skate3.Status() or {}
+	print(("[skate3] module: %s moving brush entities in this map, %s of their brushes placed in the collision"):format(
+		tostring(st.movers), tostring(st.doors)))
+	for _, ent in ipairs(ents.GetAll()) do
+		if MOVERS[ent:GetClass()] then
+			local p, a = ent:GetPos(), ent:GetAngles()
+			print(("  %s %s at %.0f %.0f %.0f, angles %.0f %.0f %.0f, %s, %s%s"):format(ent:GetClass(), tostring(ent:GetModel()),
+				p.x, p.y, p.z, a.p, a.y, a.r, ent:IsSolid() and "solid" or "not solid",
+				brushCurrent[ent] and "in the collision" or "not in the collision",
+				ent:IsDormant() and ", out of sight" or ""))
+		end
+	end
+end)
 
 return function(props, perf)
 	Props, Perf = props, perf

@@ -213,11 +213,17 @@ lua_fn!(status, |lua| {
                     s.error.clone(),
                     s.revision,
                     s.props,
+                    s.movers,
+                    s.doors,
                 )
             })
             .map_err(|_| ())
     }) {
-        let (state, triangles, rails, active, ride_error, revision, props) = s;
+        let (state, triangles, rails, active, ride_error, revision, props, movers, doors) = s;
+        lua.push_number(movers as f64);
+        lua.set_field(-2, c"movers");
+        lua.push_number(doors as f64);
+        lua.set_field(-2, c"doors");
         lua.push_number(revision as f64);
         lua.set_field(-2, c"revision");
         lua.push_number(props as f64);
