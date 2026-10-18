@@ -5,6 +5,7 @@ local Skater = {}
 local Body = include("skate3/cl_body.lua")
 Skater.Body = Body
 local Anim = include("skate3/cl_skater_anim.lua")
+Skater.Anim = Anim
 local Boards = include("skate3/cl_boards.lua")
 
 -- For hunting a leak: parts of the per-frame work to switch off while riding,

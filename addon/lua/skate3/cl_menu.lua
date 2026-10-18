@@ -18,7 +18,7 @@ local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
-	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_hud" }
+	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_hud", "skate3_melee" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
@@ -141,6 +141,17 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:CheckBox("Show the status line", "skate3_hud")
 		panel:CheckBox("Hall of Meat", "skate3_hall_of_meat")
 		panel:ControlHelp("Bails score points and break bones, shown in red, with the skeleton showing through your skater. Bail on purpose: hold both triggers and click both sticks.")
+
+		panel:CheckBox("Punch and swing the board at other players", "skate3_melee")
+		panel:ControlHelp("On foot with the board: B (F) punches, R1 (Ctrl) swings the board. Skaters who run into each other bail.")
+		-- Server settings: the host's to change (a dedicated server sets them in its config).
+		if game.SinglePlayer() or LocalPlayer():IsListenServerHost() then
+			panel:CheckBox("Server: skaters crash into other players", "skate3_player_collision")
+			panel:NumSlider("Server: crash speed (m/s)", "skate3_player_collision_speed", 0.5, 20, 1)
+			panel:CheckBox("Server: punches and board swings", "skate3_player_hits")
+			panel:NumSlider("Server: health a punch takes", "skate3_hit_damage", 0, 50, 0)
+			panel:ControlHelp("0 health means hits don't hurt, they just knock people over.")
+		end
 
 		BoardChoices(panel)
 		KeyboardChoices(panel)

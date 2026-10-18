@@ -10,7 +10,8 @@ local Props = include("skate3/cl_props.lua")
 local Perf = include("skate3/cl_perf.lua")
 local LiveProps = include("skate3/cl_live_props.lua")(Props, Perf)
 local Pose = include("skate3/sh_pose.lua")
-include("skate3/cl_others.lua")(Skater, Perf)
+local Others = include("skate3/cl_others.lua")(Skater, Perf)
+local Players = include("skate3/cl_players.lua")(Skater, Others, Score)
 include("skate3/cl_collision_report.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OSX" and "gmcl_skate3_osx64.dll" or "gmcl_skate3_linux64.dll")
@@ -55,6 +56,7 @@ local nextPoseSend = 0
 -- (the skate thread falling behind) from a slow frame.
 local lastTick, tickAt = nil, 0
 local stalls, longestStall = 0, 0
+local playersFailed -- cl_players.lua threw: said once, then carried on
 
 local function Say(...)
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white, ...)
@@ -183,6 +185,7 @@ local function Stop()
 	Skater.HideModel()
 	Sounds.Stop()
 	Score.Reset()
+	Players.Reset()
 end
 
 local function Start()
@@ -250,6 +253,7 @@ net.Receive("skate3_state", function()
 		pose = nil
 		Skater.HideModel()
 		Sounds.Stop()
+		Players.Reset()
 	end
 end)
 
@@ -440,6 +444,20 @@ hook.Add("Think", "skate3_step", function()
 	end
 	local skip = Skater.Skip
 	local keys, analog = Keyboard.Read(FrameTime())
+	-- Crashes, punches and board swings (and the bails they ask for), which
+	-- press buttons for the skater too.
+	local held = skate3.GetInput and skate3.GetInput()
+	local ok, more, moreAnalog = pcall(Players.Think, now, pose, bit.bor(held and held.buttons or 0, keys))
+	if not ok then
+		-- Never at the cost of the ride itself.
+		if not playersFailed then print("[skate3] other players: " .. tostring(more)) end
+		playersFailed, more, moreAnalog = true, 0, nil
+	end
+	if more ~= 0 then keys = bit.bor(keys, more) end
+	if moreAnalog then
+		analog = analog or { 0, 0, 0, 0, 0, 0 }
+		for i = 1, 6 do analog[i] = math.max(analog[i] or 0, moreAnalog[i]) end
+	end
 	if not skip.step then Perf.Time("step", skate3.Step, FrameTime(), ScrW() / ScrH(), bit.bor(press, keys), analog) end
 	if SessionMarker(now) then return end
 	if not skip.pose or not pose then pose = Perf.Time("get pose", skate3.GetPose) or pose end

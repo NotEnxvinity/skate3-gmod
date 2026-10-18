@@ -28,6 +28,24 @@ return function(Skater, Perf)
 
 	local others = {} -- ply -> { frames = { { t, f } }, copy, ... }
 	local arrived = {} -- ply -> { count, at }, for the debug overlay
+	local Others = {}
+
+	-- Where a rider is right now, how they're moving and what they're doing,
+	-- from the frames that arrived (cl_players.lua runs into them). Nil when
+	-- nothing recent has come from them. The speed is worked out across all
+	-- the frames kept, as arrival times are lumpy.
+	function Others.Info(ply)
+		local o = others[ply]
+		local frames = o and o.frames
+		local last = frames and frames[#frames]
+		if not last then return nil end
+		local age = RealTime() - last.t
+		if age > STALE then return nil end
+		local first = frames[1]
+		local span = last.t - first.t
+		local vel = span > 0.03 and (last.f.origin - first.f.origin) / span or vector_origin
+		return { pos = last.f.origin + vel * math.min(age, 0.25), vel = vel, state = last.f.state }
+	end
 
 	net.Receive("skate3_pose", function(len)
 		Perf.Got(len / 8)
@@ -300,4 +318,6 @@ return function(Skater, Perf)
 			end
 		end
 	end)
+
+	return Others
 end

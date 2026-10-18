@@ -5,6 +5,7 @@ util.AddNetworkString("skate3_bail")
 util.AddNetworkString("skate3_injury")
 util.AddNetworkString("skate3_blood")
 util.AddNetworkString("skate3_watched")
+util.AddNetworkString("skate3_hit")
 
 local Pose = include("skate3/sh_pose.lua")
 
@@ -182,6 +183,91 @@ net.Receive("skate3_blood", function(_, ply)
 	fx:SetOrigin(pos)
 	fx:SetNormal(normal)
 	util.Effect("BloodImpact", fx, true, true)
+end)
+
+-- Hits between players (cl_players.lua). Punches and board swings come from
+-- the game of whoever threw them, which finds who they reached; crashes into
+-- a walking player come from the skater's game. The server checks the two
+-- were close enough, then a skater's game bails them and a walking player is
+-- shoved here. Skaters who crash into each other bail themselves, so those
+-- never come this way.
+local cv_collision = GetConVar("skate3_player_collision")
+local cv_collisionSpeed = GetConVar("skate3_player_collision_speed")
+local cv_hits = GetConVar("skate3_player_hits")
+local cv_hitDamage = GetConVar("skate3_hit_damage")
+
+-- kind 0 punch, 1 board swing, 2 crash. reach: how far apart the two may be
+-- (units); gap: the least time between two from one player; push and lift:
+-- how hard a walking player is thrown (a crash adds speed to the push).
+local HITS = {
+	[0] = { reach = 64, gap = 0.3, push = 260, lift = 140, damage = 1 },
+	[1] = { reach = 96, gap = 0.6, push = 420, lift = 180, damage = 2 },
+	[2] = { reach = 80, gap = 0.5, push = 220, lift = 120, damage = 1 },
+}
+-- Positions are a moment old by the time they arrive: this much more than
+-- the reach still counts.
+local HIT_SLACK = 96
+local HIT_SOUNDS = {
+	[0] = { "physics/body/body_medium_impact_hard1.wav", "physics/body/body_medium_impact_hard2.wav",
+		"physics/body/body_medium_impact_hard3.wav" },
+	[1] = { "physics/wood/wood_plank_impact_hard1.wav", "physics/wood/wood_plank_impact_hard2.wav",
+		"physics/wood/wood_plank_impact_hard3.wav" },
+	[2] = { "physics/body/body_medium_impact_hard4.wav", "physics/body/body_medium_impact_hard5.wav" },
+}
+
+net.Receive("skate3_hit", function(_, attacker)
+	local kind, victim, closing = net.ReadUInt(2), net.ReadEntity(), net.ReadFloat()
+	local def = HITS[kind]
+	if not def or not attacker.Skate3 or not attacker:Alive() then return end
+	if not IsValid(victim) or not victim:IsPlayer() or victim == attacker or not victim:Alive() then return end
+	if not (closing == closing) then return end
+	if not (kind == 2 and cv_collision:GetBool() or kind ~= 2 and cv_hits:GetBool()) then return end
+	-- A crash with another skater is theirs to bail from, nothing to add.
+	if kind == 2 and victim.Skate3 then return end
+	local now = CurTime()
+	attacker.skate3HitAt = attacker.skate3HitAt or {}
+	if now - (attacker.skate3HitAt[kind] or -10) < def.gap then return end
+	if attacker:GetPos():Distance(victim:GetPos()) > def.reach + HIT_SLACK then return end
+	attacker.skate3HitAt[kind] = now
+	-- Servers that keep players from hurting each other (Sandbox's
+	-- sbox_playershurtplayers 0) keep punches, swings and shoves off them too.
+	if victim:HasGodMode() or hook.Run("PlayerShouldTakeDamage", victim, attacker) == false then return end
+
+	local away = victim:GetPos() - attacker:GetPos()
+	away.z = 0
+	if away:LengthSqr() < 1 then away = attacker:GetForward() end
+	away.z = 0
+	away:Normalize()
+	closing = math.Clamp(closing, 0, 60)
+	local sounds = HIT_SOUNDS[kind]
+	victim:EmitSound(sounds[math.random(#sounds)], 75, math.random(94, 106))
+
+	local damage = cv_hitDamage:GetFloat() * def.damage
+	if kind == 2 then damage = damage * math.Clamp(closing / math.max(cv_collisionSpeed:GetFloat(), 0.5), 1, 3) end
+	if damage > 0 then
+		local dmg = DamageInfo()
+		dmg:SetDamage(math.ceil(damage))
+		dmg:SetDamageType(DMG_CLUB)
+		dmg:SetAttacker(attacker)
+		local weapon = attacker:GetActiveWeapon()
+		dmg:SetInflictor(IsValid(weapon) and weapon or attacker)
+		dmg:SetDamageForce(away * 1000)
+		dmg:SetDamagePosition(victim:GetPos())
+		victim:TakeDamageInfo(dmg)
+		if not victim:Alive() then return end
+	end
+
+	if victim.Skate3 then
+		-- Their game takes them off the board.
+		net.Start("skate3_hit")
+		net.WriteEntity(attacker)
+		net.WriteUInt(kind, 2)
+		net.Send(victim)
+	else
+		local push = def.push + (kind == 2 and closing * 20 or 0)
+		victim:SetGroundEntity(NULL)
+		victim:SetVelocity(away * push + Vector(0, 0, def.lift))
+	end
 end)
 
 hook.Add("PlayerDeath", "skate3_stop", ForceStop)
