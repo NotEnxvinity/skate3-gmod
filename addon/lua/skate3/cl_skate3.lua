@@ -1,5 +1,6 @@
 -- The on-screen UI first: the score, the menu and the marker all use it.
 include("skate3/cl_ui.lua")
+include("skate3/cl_glyphs.lua")
 local Marker = include("skate3/cl_marker.lua")
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
@@ -346,6 +347,7 @@ hook.Add("Think", "skate3_step", function()
 	if now >= nextStatus then
 		nextStatus = now + 0.25
 		status = Perf.Time("status", skate3.Status)
+		S3GM_UI.SetPad(status.pad)
 		if status.stage ~= loadStage then
 			-- Each step goes to the console as it starts, so if the game dies
 			-- mid-load the log shows which one it was.

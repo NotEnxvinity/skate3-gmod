@@ -66,7 +66,10 @@ Settings
 Spawn menu > Utilities > Skate 3: stance, camera, sounds (Skate 3's from
 your disc, or Half-Life 2's), bail sounds, footsteps, volume, the trick
 score's look (Skate 3's own, minimal, or Half-Life 2's; on screen or in the
-world), and a button to reset them all to the defaults.
+world), the button pictures (Xbox or PlayStation; Automatic goes by your
+controller's name, and Steam Input can hide a PlayStation pad behind an Xbox
+name, so pick PlayStation yourself then), and a button to reset them all to the
+defaults.
 Hall of Meat (Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
 score, in red, with a skeleton showing fractured bones yellow and broken ones
 red. Bail on purpose: hold both triggers and click both sticks.

@@ -18,7 +18,7 @@ local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
-	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee" }
+	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
@@ -139,6 +139,12 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Half-Life 2", "hl2" },
 		})
 		panel:ControlHelp("Skate 3's own look comes from your disc: run the S3GM setup again after updating if it isn't there yet (until then you get Minimal).")
+		Choices(panel, "Button pictures", "skate3_ui_glyphs", {
+			{ "Automatic (by your controller)", "auto" },
+			{ "Xbox", "xbox" },
+			{ "PlayStation", "playstation" },
+		})
+		panel:ControlHelp("Automatic goes by your controller's name. Steam Input can make a PlayStation pad look like an Xbox one, so pick PlayStation here if it guesses wrong.")
 		panel:CheckBox("Trick score beside the skater, not on screen", "skate3_ui_world")
 		panel:CheckBox("Contextual menu (hold L1 or Shift)", "skate3_menu")
 		panel:ControlHelp("Hold L1 for the menu: D-pad down places your marker, hold up goes back to it, left interacts, hold right opens the games list.")
