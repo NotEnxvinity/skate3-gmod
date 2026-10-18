@@ -166,6 +166,10 @@ local last -- the score last frame
 local flash -- { text, color, at }
 local shown = 0 -- what the widget showed last, kept while it fades
 local lastTrick = ""
+local tricks = {} -- this line's trick names, oldest first (the stack above the disc)
+local lastLabel = ""
+local lastSeq = 0 -- the last trick sequence's score, the big number in Skate 3's look
+local wasLive = false
 local seenAt = -math.huge -- when the widget last had something live to show
 local view -- what to draw this frame, or nil
 
@@ -184,6 +188,16 @@ local function MeatView(now)
 		points = Points(points), value = points, good = false,
 		trick = "Bailed", meat = b.parts,
 	}
+end
+
+-- Rolling backwards along the board on the ground (Skate 3 calls it FAKIE).
+-- The engine doesn't say which stance the skater is in, so SWITCH isn't shown.
+local function Fakie(pose)
+	local v, f = pose.velocity, pose.forward
+	if not v or not f or not pose.state or not pose.state:find("^Physics") or pose.state:find("Air") then return false end
+	local horizontal = math.sqrt(v[1] * v[1] + v[2] * v[2])
+	if horizontal < 40 then return false end
+	return (v[1] * f[1] + v[2] * f[2]) < -0.6 * horizontal
 end
 
 -- Works out this frame's view from the engine's score.
@@ -219,10 +233,18 @@ local function Update(pose)
 
 	local live = sc.active or sc.timer > 0
 	if live then
+		if not wasLive then tricks, lastLabel, lastSeq = {}, "", 0 end
 		seenAt = now
 		shown = sc.line + (sc.active and sc.sequence or 0)
 		if sc.trick ~= "" then lastTrick = sc.trick end
+		if sc.active and sc.sequence > 0 then lastSeq = sc.sequence end
+		if sc.trick ~= "" and sc.trick ~= lastLabel then
+			lastLabel = sc.trick
+			tricks[#tricks + 1] = TrickName(sc.trick)
+			if #tricks > 3 then table.remove(tricks, 1) end
+		end
 	end
+	wasLive = live
 	local age = now - math.max(seenAt, flash and flash.at or -math.huge)
 	local alpha = math.Clamp((HOLD + FADE - age) / FADE, 0, 1)
 	if alpha <= 0 then
@@ -240,6 +262,12 @@ local function Update(pose)
 		value = math.floor((showFlash and flash.value or shown) + 0.5),
 		good = not showFlash or flash.good,
 		trick = TrickName(lastTrick),
+		-- Skate 3's look: the stack of this line's tricks, the last trick
+		-- sequence's score and the line's total, and "FAKIE" when rolling backwards.
+		tricks = tricks,
+		sequence = Points(lastSeq > 0 and lastSeq or shown),
+		line = Points(shown),
+		stance = Fakie(pose) and "FAKIE" or nil,
 	}
 end
 
@@ -397,6 +425,7 @@ end
 function Score.Reset()
 	Meat.Reset()
 	last, flash, shown, lastTrick, seenAt, view, worldOffset = nil, nil, 0, "", -math.huge, nil, nil
+	tricks, lastLabel, lastSeq, wasLive = {}, "", 0, false
 end
 
 return Score

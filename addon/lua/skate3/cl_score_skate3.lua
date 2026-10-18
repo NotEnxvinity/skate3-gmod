@@ -16,6 +16,11 @@ local TRICK_X, TRICK_Y, TRICK_H = 100, 517, 26.4
 
 local WHITE = Color(255, 255, 255)
 local LINE = Color(145, 199, 219) -- the movie's line-score blue
+local OLDER = Color(205, 205, 200) -- earlier tricks of the line, greyer and smaller
+-- The trick stack, newest at the bottom: top, height and opacity of each row
+-- (measured off the retail game's 720p layout).
+local STACK = { { 517, 26.4, 0.9 }, { 492, 21, 0.62 }, { 470, 18, 0.4 } }
+local LINE_X, LINE_Y, LINE_H = 233, 617, 19
 local TRICK = Color(255, 254, 236)
 local RED = Color(255, 90, 80)
 local CREAM = Color(243, 237, 210) -- the D-pad menu's text colour
@@ -46,10 +51,21 @@ local function Multiplier(m)
 	return (m == math.floor(m) and "x%d" or "x%.1f"):format(m)
 end
 
+-- Hall of Meat's score, as the retail game draws it: a frosted panel bottom
+-- left with the "Hall of Meat" caption over the bail's score in cream. (The
+-- magazine logo above the caption comes from the disc and isn't drawn yet.)
+local function Meat(v)
+	local a = v.alpha
+	UI.Rounded(6, 104, 604, 203, 62, Color(235, 240, 255, 38 * a))
+	UI.Futura("Hall of Meat", 208, 578, 17, CREAM, a, TEXT_ALIGN_CENTER)
+	UI.Futura(v.points, 208, 604, 40, CREAM, a, TEXT_ALIGN_CENTER)
+end
+
 -- One frame of the widget. `v` is the score's view (cl_score.lua's Update).
 function S3.Draw(v)
 	local a = v.alpha
 	if a <= 0 then return end
+	if v.meat then return Meat(v) end
 	local m = v.multiplier
 	local tier = m >= 3 and 3 or m >= 2 and 2 or 1
 
@@ -66,9 +82,27 @@ function S3.Draw(v)
 	end
 
 	local color = v.live and WHITE or (v.good and LINE or RED)
-	UI.Futura(v.points, SCORE_X, SCORE_Y, SCORE_H, color, a, TEXT_ALIGN_LEFT)
-	if v.trick and v.trick ~= "" then
+	local big = v.live and v.sequence or v.points
+	UI.Futura(big or v.points, SCORE_X, SCORE_Y, SCORE_H, color, a, TEXT_ALIGN_LEFT)
+	if v.live and v.line then
+		UI.Futura("LINE: " .. v.line, LINE_X, LINE_Y, LINE_H, LINE, a * 0.9, TEXT_ALIGN_LEFT)
+	end
+
+	local stack = v.tricks
+	if stack and #stack > 0 then
+		for row = 1, math.min(#stack, #STACK) do
+			local spec = STACK[row]
+			UI.Futura(stack[#stack - row + 1], TRICK_X, spec[1], spec[2], row == 1 and TRICK or OLDER, a * spec[3], TEXT_ALIGN_LEFT)
+		end
+	elseif v.trick and v.trick ~= "" then
 		UI.Futura(v.trick, TRICK_X, TRICK_Y, TRICK_H, TRICK, a * 0.8, TEXT_ALIGN_LEFT)
+	end
+
+	-- FAKIE reads bottom to top beside the disc.
+	if v.stance then
+		UI.Rotate(106, CY, -90)
+		UI.Futura(v.stance, 106, CY - 9, 17, OLDER, a * 0.8, TEXT_ALIGN_CENTER)
+		UI.Rotate()
 	end
 end
 

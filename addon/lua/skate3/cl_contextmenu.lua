@@ -369,20 +369,6 @@ function Looks.hl2.Box(x, y, w, h)
 	UI.Rounded(8, x, y, w, h, Color(0, 0, 0, 76))
 end
 
--- A filled rounded rectangle on the canvas.
-function UI.Rounded(radius, x, y, w, h, color)
-	local s = UI.Scale()
-	local X, Y = UI.P(x, y)
-	draw.RoundedBox(radius * s, X, Y, w * s, h * s, color)
-end
-
-function UI.Rect(x, y, w, h, color, alpha)
-	local X, Y = UI.P(x, y)
-	local s = UI.Scale()
-	surface.SetDrawColor(color.r, color.g, color.b, (color.a or 255) * alpha)
-	surface.DrawRect(X, Y, w * s, h * s)
-end
-
 local function Rows(pose)
 	local act = Interaction(pose)
 	return {

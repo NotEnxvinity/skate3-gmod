@@ -224,6 +224,20 @@ function UI.Button(name, x, y, r, g, b, a)
 	UI.Quad(tex, { { x, y, 0, 0 }, { x + 64, y, 1, 0 }, { x + 64, y + 64, 1, 1 }, { x, y + 64, 0, 1 } }, 0, 0, 1, r, g, b, a)
 end
 
+-- A filled rounded rectangle on the canvas.
+function UI.Rounded(radius, x, y, w, h, color)
+	local s = UI.Scale()
+	local X, Y = UI.P(x, y)
+	draw.RoundedBox(radius * s, X, Y, w * s, h * s, color)
+end
+
+function UI.Rect(x, y, w, h, color, alpha)
+	local X, Y = UI.P(x, y)
+	local s = UI.Scale()
+	surface.SetDrawColor(color.r, color.g, color.b, (color.a or 255) * alpha)
+	surface.DrawRect(X, Y, w * s, h * s)
+end
+
 ---------------------------------------------------------------------------
 -- Skate 3's Futura bitmap text
 ---------------------------------------------------------------------------
@@ -245,6 +259,23 @@ function UI.FuturaWidth(text, h, key)
 	return pen
 end
 
+-- Text can be turned about a canvas point (the SWITCH/FAKIE label reads
+-- bottom to top): UI.Rotate(cx, cy, degrees) until UI.Rotate().
+local rot
+function UI.Rotate(cx, cy, degrees)
+	if not cx then rot = nil return end
+	local a = math.rad(degrees)
+	rot = { cx = cx, cy = cy, c = math.cos(a), s = math.sin(a) }
+end
+
+local function Corner(px, py)
+	if rot then
+		local dx, dy = px - rot.cx, py - rot.cy
+		px, py = rot.cx + dx * rot.c - dy * rot.s, rot.cy + dx * rot.s + dy * rot.c
+	end
+	return UI.P(px, py)
+end
+
 local function Run(font, text, x, y, h, r, g, b, a)
 	local scale = h / font.ascent
 	local pen = 0
@@ -257,13 +288,13 @@ local function Run(font, text, x, y, h, r, g, b, a)
 				local gx = x + pen + c[7] * scale
 				local gy = y + h - c[8] * scale
 				local w, hh = c[5] * scale, c[6] * scale
-				local x0, y0 = UI.P(gx, gy)
-				local x1, y1 = UI.P(gx + w, gy + hh)
 				local v = verts
-				v[1].x, v[1].y, v[1].u, v[1].v = x0, y0, c[1], c[2]
-				v[2].x, v[2].y, v[2].u, v[2].v = x1, y0, c[3], c[2]
-				v[3].x, v[3].y, v[3].u, v[3].v = x1, y1, c[3], c[4]
-				v[4].x, v[4].y, v[4].u, v[4].v = x0, y1, c[1], c[4]
+				v[1].x, v[1].y = Corner(gx, gy)
+				v[2].x, v[2].y = Corner(gx + w, gy)
+				v[3].x, v[3].y = Corner(gx + w, gy + hh)
+				v[4].x, v[4].y = Corner(gx, gy + hh)
+				v[1].u, v[1].v, v[2].u, v[2].v = c[1], c[2], c[3], c[2]
+				v[3].u, v[3].v, v[4].u, v[4].v = c[3], c[4], c[1], c[4]
 				surface.DrawPoly(v)
 			end
 			pen = pen + c[9] * scale
@@ -271,8 +302,6 @@ local function Run(font, text, x, y, h, r, g, b, a)
 	end
 end
 
--- Text the way the game draws it: a black shadow atlas under the heavy one,
--- shifted a pixel. (x, y) is the left (or centre, or right) of the line's top.
 function UI.Futura(text, x, y, h, color, alpha, align)
 	local heavy, shadow = Chars("heavy"), Chars("shadow")
 	if not heavy then return end
