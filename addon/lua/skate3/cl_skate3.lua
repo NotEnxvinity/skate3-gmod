@@ -62,7 +62,9 @@ local function Say(...)
 end
 
 -- Doors and buttons while skating (S3GM_Interact.Use / .Target).
-include("skate3/cl_interact.lua")(function() return active and pose end)
+include("skate3/cl_interact.lua")(function() return active and pose end, function()
+	return Skater.Facing and Skater.Facing() or nil
+end)
 
 local function V(t)
 	return Vector(t[1], t[2], t[3])

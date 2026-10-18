@@ -10,20 +10,26 @@ S3GM_Interact = S3GM_Interact or {}
 -- Chest height above the skater's position.
 local CHEST = Vector(0, 0, 36)
 
-local getPose
+local getPose, getFacing
 
 local function V(t)
 	return Vector(t[1], t[2], t[3])
 end
 
--- Where the search starts and which way it looks: the way the skater faces.
+-- Where the search starts and which way it looks: the way the drawn body
+-- faces. The skater's own heading (pose.forward) isn't that on foot, it can be
+-- the opposite way, which found the door behind the playermodel; it is only
+-- the fallback for when no body has been drawn yet.
 local function Aim()
 	local pose = getPose and getPose()
 	if not pose then return end
-	local dir = V(pose.forward)
-	dir.z = 0
-	if dir:LengthSqr() < 1e-4 then return end
-	dir:Normalize()
+	local dir = getFacing and getFacing()
+	if not dir then
+		dir = V(pose.forward)
+		dir.z = 0
+		if dir:LengthSqr() < 1e-4 then return end
+		dir:Normalize()
+	end
 	return V(pose.pos) + CHEST, dir
 end
 
@@ -52,8 +58,9 @@ concommand.Add("skate3_interact", function()
 	S3GM_Interact.Use()
 end)
 
--- cl_skate3.lua says where to find the skater's pose.
-return function(poseGetter)
-	getPose = poseGetter
+-- cl_skate3.lua says where to find the skater's pose and the way the body
+-- drawn faces (a flat unit vector, or nil).
+return function(poseGetter, facingGetter)
+	getPose, getFacing = poseGetter, facingGetter
 	return S3GM_Interact
 end
