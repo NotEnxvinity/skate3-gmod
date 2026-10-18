@@ -55,16 +55,14 @@ function S3.Draw(v)
 
 	if GLOWS[tier] then UI.Shape(GLOWS[tier], CX, CY, 1, 255, 255, 255, 255 * a * 0.7) end
 	UI.Shape("51", CX, CY, 1, 255, 255, 255, 255 * a)
+	Track(a)
 	if v.live then
-		Track(a)
 		UI.Sector(RINGS[tier], CX, CY, 0, math.Clamp(v.timer, 0, 1), 255, 255, 255, 255 * a)
-	else
-		UI.Shape(RINGS[tier], CX, CY, 1, 255, 255, 255, 255 * a * 0.4)
 	end
 	if MULTIPLIER_ART[tier] and v.live then
 		UI.Shape(MULTIPLIER_ART[tier], CX, CY, 1, 255, 255, 255, 255 * a)
 	else
-		UI.Futura(Multiplier(m), CX, CY - 12, 24, WHITE, a, TEXT_ALIGN_CENTER)
+		UI.Futura(Multiplier(m), CX, CY - 14, 27, WHITE, a, TEXT_ALIGN_CENTER) -- ID_TRICKDISPLAY_15 is 27 high
 	end
 
 	local color = v.live and WHITE or (v.good and LINE or RED)
