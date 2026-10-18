@@ -338,6 +338,8 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"speed");
     lua.push_str(&p.state);
     lua.set_field(-2, c"state");
+    lua.push_number(f64::from(p.invincible));
+    lua.set_field(-2, c"invincible");
     lua.push_number(p.tick as f64);
     lua.set_field(-2, c"tick");
     // Only the bones Lua draws or retargets; the rest are fingers and faces.

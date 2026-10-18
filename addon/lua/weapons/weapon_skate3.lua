@@ -1,10 +1,10 @@
--- The skateboard as a weapon: equip it for skate mode, board in hand.
+-- The skateboard as a weapon: equip it for skate mode.
 -- The riding itself lives in skate3/cl_skate3.lua, which watches for it.
 
 SWEP.PrintName = "Skateboard"
 SWEP.Category = "Skate 3"
-SWEP.Purpose = "Skate 3 mode: start on foot with your board, Y to get on."
-SWEP.Instructions = "Needs a controller. Y gets on and off the board, A pushes. Switch weapons to leave skate mode."
+SWEP.Purpose = "Skate 3 mode: start on the board, Y to get off and on."
+SWEP.Instructions = "Needs a controller. Y gets off and on the board, A pushes. Switch weapons to leave skate mode."
 SWEP.Spawnable = true
 SWEP.Slot = 5
 SWEP.SlotPos = 1

@@ -1,0 +1,143 @@
+diff --git a/skate/crates/skate-core/src/player/wipeout/requests.rs b/skate/crates/skate-core/src/player/wipeout/requests.rs
+index 6326f92..30dc1e3 100644
+--- a/skate/crates/skate-core/src/player/wipeout/requests.rs
++++ b/skate/crates/skate-core/src/player/wipeout/requests.rs
+@@ -8,7 +8,13 @@ pub struct Requests {
+     pub contact_frames: i32,
+     pub balance: f32,
+     pub mode: u32,
++    /// Seconds of respawn invincibility left.
++    pub grace: f32,
+ }
++
++/// Skate 3 can't bail the skater for this long after a respawn, which is what
++/// lets a fast player act (the backwards man) before anything can knock them down.
++pub const RESPAWN_GRACE: f32 = 0.2;
+ impl Requests {
+     ///Player ctor82DB20B8..D8 and first ClearRequests initialize this storage.
+     pub fn new() -> Self {
+@@ -20,6 +26,7 @@ impl Requests {
+             contact_frames: 0,
+             balance: 0.0,
+             mode: 0,
++            grace: 0.0,
+         }
+     }
+     ///Player initialization82DB3024 supplies the short initial grace period.
+@@ -30,6 +37,19 @@ impl Requests {
+     pub fn teleport(&mut self) {
+         self.cooldown = f32::from_bits(0x3ecc_cccd);
+     }
++    ///A respawn or teleport puts the skater back: no bails for RESPAWN_GRACE.
++    pub fn start_grace(&mut self) {
++        self.grace = RESPAWN_GRACE;
++        self.clear_after_selection();
++    }
++    ///One simulation step of the grace. Whatever asked to bail during it is
++    ///dropped, not held over until it ends.
++    pub fn tick_grace(&mut self, timestep: f32) {
++        if self.grace > 0.0 {
++            self.grace = (self.grace - timestep).max(0.0);
++            self.clear_after_selection();
++        }
++    }
+     ///Ground Enter82D378E0..F4 and CheckForGroundWipeout share this state.
+     pub fn enter_ground(&mut self) {
+         if self.mode != 1 {
+@@ -56,16 +76,18 @@ impl Requests {
+     }
+     ///82DB9188: count reflects individual triggers, not unique reasons.
+     pub fn requests_runout(&self, frame: &super::RequestInput) -> bool {
+-        (self.count == 1
+-            && (self.reasons[2] || self.reasons[24] || self.reasons[10])
+-            && frame.flags_2468 & (1 << 5) == 0
+-            && frame.flags_2476 & (1 << 26) == 0
+-            && frame.animation_up_y.abs() > f32::from_bits(0x3f4f_5c29))
+-            || (frame.flags_2484 & (1 << 12) != 0 && frame.category == 400)
++        self.grace <= 0.0
++            && ((self.count == 1
++                && (self.reasons[2] || self.reasons[24] || self.reasons[10])
++                && frame.flags_2468 & (1 << 5) == 0
++                && frame.flags_2476 & (1 << 26) == 0
++                && frame.animation_up_y.abs() > f32::from_bits(0x3f4f_5c29))
++                || (frame.flags_2484 & (1 << 12) != 0 && frame.category == 400))
+     }
+     ///82DB9100 first excludes runout, then combines reason OR with2480bit3.
+     pub fn requests_wipeout(&self, frame: &super::RequestInput) -> bool {
+-        !self.requests_runout(frame)
++        self.grace <= 0.0
++            && !self.requests_runout(frame)
+             && (self.reasons.iter().any(|&v| v) || frame.flags_2480 & (1 << 3) != 0)
+     }
+ }
+diff --git a/skate/crates/skate-core/src/player/wipeout/tests.rs b/skate/crates/skate-core/src/player/wipeout/tests.rs
+index de44044..96e60a3 100644
+--- a/skate/crates/skate-core/src/player/wipeout/tests.rs
++++ b/skate/crates/skate-core/src/player/wipeout/tests.rs
+@@ -248,3 +248,21 @@ fn wipeout_ground_animation_keeps_additional_checks_during_cooldown() {
+     assert!(state.reasons[0]);
+     assert!(!state.reasons[20]);
+ }
++
++#[test]
++fn respawn_grace_blocks_every_bail_for_a_fifth_of_a_second() {
++    let mut state = Requests::new();
++    state.start_grace();
++    state.request(24, 0.0); //A landing bail, which no cooldown covers.
++    assert!(!state.requests_wipeout(&request_input()));
++    state.tick_grace(0.1);
++    state.request(15, 1.0);
++    assert!(!state.requests_wipeout(&request_input()));
++    assert_eq!(state.count, 1);
++    state.tick_grace(0.1); //Requests made during the grace are dropped.
++    assert_eq!(state.count, 0);
++    assert!(state.grace <= 0.0);
++    assert!(!state.requests_wipeout(&request_input()));
++    state.request(24, 0.0);
++    assert!(state.requests_runout(&request_input()) || state.requests_wipeout(&request_input()));
++}
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 00a4169..630486f 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -45,6 +45,8 @@ pub struct Pose {
+     pub velocity: Vec3,
+     pub tick: u64,
+     pub state: String,
++    /// Seconds of respawn invincibility left.
++    pub invincible: f32,
+ }
+ impl Session {
+     pub fn new(
+@@ -208,6 +210,7 @@ impl Session {
+             velocity: Vec3::new(v.x, v.y, v.z),
+             tick: self.physics.ticks,
+             state: format!("{:?}", self.skater.player_state.current()),
++            invincible: self.skater.wipeout.state.grace,
+         }
+     }
+ }
+diff --git a/skate/crates/skate-host/src/physics/frame.rs b/skate/crates/skate-host/src/physics/frame.rs
+index 7b84483..c0509ea 100644
+--- a/skate/crates/skate-host/src/physics/frame.rs
++++ b/skate/crates/skate-host/src/physics/frame.rs
+@@ -230,6 +230,7 @@ pub(super) fn advance(
+     // Source State82DB6120 submits the queue once, then advances state time.
+     // BoardRuntime applies that same queue during its shared solve.
+     skater.player_input.player.state_timer_1344 += skater.player_input.processed.timestep_2604;
++    skater.wipeout.state.tick_grace(skater.player_input.processed.timestep_2604);
+     super::offboard_audit_trace::stage(tick, "state", physics, skater, controls);
+     #[cfg(test)]
+     super::offboard_root_trace::trace(tick, "state", skater);
+diff --git a/skate/crates/skate-host/src/physics/input_teleport.rs b/skate/crates/skate-host/src/physics/input_teleport.rs
+index 4a61e90..1937fb6 100644
+--- a/skate/crates/skate-host/src/physics/input_teleport.rs
++++ b/skate/crates/skate-host/src/physics/input_teleport.rs
+@@ -131,6 +131,7 @@ impl Callbacks<'_, '_> {
+             self.settings.step.simulation,
+         )?;
+         self.wipeout.state.teleport(); //82DB8DB4, separate from ResetSystems.
++        self.wipeout.state.start_grace();
+         self.teleported = true;
+         Ok(())
+     }

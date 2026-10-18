@@ -570,10 +570,16 @@ local LIMBS = {
 -- lengths and the hips at the skater's height they squatted. The hips are
 -- lifted away from the ankles by how much longer the model's legs are, so
 -- knees bend as much as the skater's do.
--- All the way up straightened the arms (they couldn't reach the board any
--- more), so by default the hips go part of the way.
-local cv_height = CreateClientConVar("skate3_body_height", "0.9", true, false,
-	"How far the hips lift towards the playermodel's own leg length: 0 = the skater's height (squats), 1 = all the way (straight arms)")
+-- All the way up straightened the arms before the arm reach fix; with it, 1
+-- looks best on every playermodel, so that is the default now.
+local cv_height = CreateClientConVar("skate3_body_height", "1", true, false,
+	"How far the hips lift towards the playermodel's own leg length: 0 = the skater's height (squats), 1 = all the way")
+-- The old default (0.9) was saved into players' settings, so it would keep
+-- winning over the new one. Moved to 1 once; any other value is theirs.
+if cookie.GetNumber("skate3_body_height_default", 0) < 1 then
+	if math.abs(cv_height:GetFloat() - 0.9) < 0.001 then cv_height:SetFloat(1) end
+	cookie.Set("skate3_body_height_default", "1")
+end
 local legScale -- the model's hip-to-ankle height over the skater's
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
@@ -1048,6 +1054,88 @@ function Skater.NetFrame()
 	return CopyFrame(pose)
 end
 
+-- After a bail respawn the skater fades in. The simulation can't bail them
+-- for the first 0.2 s (pose.invincible, counting down), and the fade runs a
+-- little past that.
+local FADE_TIME = 0.35
+local TRANSLUCENT = 2097152 -- MATERIAL_VAR_TRANSLUCENT
+local fadeStart -- RealTime the fade began, nil when not fading
+local fadeEnt, fadeWas -- the entity faded, and its { render mode, color } before
+local fadeLastState, fadeLastInvincible = nil, 0
+local fadeShown = 1
+
+local function FadeMaterials(alpha)
+	for _, part in ipairs(parts or {}) do
+		local mat = part.material
+		local flags = mat:GetInt("$flags") or 0
+		if alpha < 1 then
+			mat:SetInt("$flags", bit.bor(flags, TRANSLUCENT))
+			mat:SetFloat("$alpha", alpha)
+		else
+			mat:SetInt("$flags", bit.band(flags, bit.bnot(TRANSLUCENT)))
+			mat:SetFloat("$alpha", 1)
+		end
+	end
+end
+
+local function RestoreFadeEntity()
+	if IsValid(fadeEnt) and fadeWas then
+		fadeEnt:SetRenderMode(fadeWas[1])
+		fadeEnt:SetColor(fadeWas[2])
+	end
+	fadeEnt, fadeWas = nil, nil
+end
+
+local function ApplyFade(alpha)
+	local ent = IsValid(model) and (model.skate3Real and owner or model) or nil
+	if alpha >= 1 then
+		if fadeShown < 1 then
+			RestoreFadeEntity()
+			FadeMaterials(1)
+		end
+		fadeShown = 1
+		return
+	end
+	if IsValid(ent) then
+		if fadeEnt ~= ent then
+			RestoreFadeEntity()
+			fadeEnt, fadeWas = ent, { ent:GetRenderMode(), ent:GetColor() }
+			ent:SetRenderMode(RENDERMODE_TRANSCOLOR)
+		end
+		local c = fadeWas[2]
+		ent:SetColor(Color(c.r, c.g, c.b, math.floor(c.a * alpha)))
+	end
+	FadeMaterials(alpha)
+	fadeShown = alpha
+end
+
+local function ResetFade()
+	fadeStart, fadeLastState, fadeLastInvincible = nil, nil, 0
+	ApplyFade(1)
+	RestoreFadeEntity()
+end
+
+-- Called with each pose: starts the fade when the skater comes back from a
+-- bail (the invincibility begins after a wipeout or the teleport back).
+local function UpdateFade(p)
+	local invincible = p.invincible or 0
+	local state = p.state or ""
+	if invincible > 0 and fadeLastInvincible <= 0
+		and fadeLastState and (fadeLastState:find("^Wipeout") or fadeLastState == "Teleporting") then
+		fadeStart = RealTime()
+	end
+	fadeLastInvincible, fadeLastState = invincible, state
+	if not fadeStart then return end
+	local t = (RealTime() - fadeStart) / FADE_TIME
+	if t >= 1 then
+		fadeStart = nil
+		ApplyFade(1)
+		return
+	end
+	-- Smoothstep, from invisible to solid.
+	ApplyFade(t * t * (3 - 2 * t))
+end
+
 function Skater.UpdateModel(p)
 	pose = p
 	-- The player's model can change mid-ride (or arrive late after spawning).
@@ -1067,6 +1155,7 @@ function Skater.UpdateModel(p)
 	end
 	if not (IsValid(model) and p) then return end
 	model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
+	UpdateFade(p)
 	-- Only on the model it was measured from: another model's bones are
 	-- numbered differently, and the old frame would stretch it.
 	-- Skipping the posing lets go of the body altogether, so its per-frame
@@ -1122,6 +1211,7 @@ concommand.Add("skate3_body_report", function()
 end)
 
 function Skater.HideModel()
+	ResetFade()
 	if IsValid(model) and IsValid(model.skate3AnimEnt) then Anim.Clear(model.skate3AnimEnt) end
 	pose = nil
 	lastFrame = nil
