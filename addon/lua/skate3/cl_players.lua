@@ -111,6 +111,8 @@ return function(Skater, Others, Score)
 	local function Crash(now, pose)
 		if now < nextCrash or Server("skate3_player_collision", 1) == 0 then return end
 		if not Riding(pose.state) then return end
+		-- The respawn grace (0.2 s after a bail) covers crashes too.
+		if (pose.invincible or 0) > 0 then return end
 		local me, vel = V(pose.pos), V(pose.velocity or { 0, 0, 0 })
 		local need = Server("skate3_player_collision_speed", 4)
 		local worst
@@ -226,7 +228,7 @@ return function(Skater, Others, Score)
 		if now - hit.at > 0.5 then return end
 		hurt = { at = now, kind = hit.kind }
 		Say("Hit by " .. (IsValid(hit.from) and hit.from:Nick() or "someone"))
-		if Riding(pose.state) then Players.Bail("hit by " .. (IsValid(hit.from) and hit.from:Nick() or "someone")) end
+		if Riding(pose.state) and (pose.invincible or 0) <= 0 then Players.Bail("hit by " .. (IsValid(hit.from) and hit.from:Nick() or "someone")) end
 	end
 
 	-- Called every frame while skating, before the simulation steps. `buttons`
