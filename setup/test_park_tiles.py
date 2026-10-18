@@ -78,3 +78,23 @@ class TileTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class GroundHeightTest(unittest.TestCase):
+    def quad(self, z, size=100.0, x=0.0, up=True):
+        """Two triangles of a flat square at height z, facing up or down (the
+        way Skate 3's outward clockwise triangles do)."""
+        a, b, c, d = (x, 0, z), (x + size, 0, z), (x + size, size, z), (x, size, z)
+        tris = [(a, c, b), (a, d, c)] if up else [(a, b, c), (a, c, d)]
+        return [v for t in tris for corner in t for v in corner]
+
+    def test_ignores_a_deep_pit(self):
+        flat = self.quad(0.0, 1000.0) + self.quad(-5000.0, 10.0)
+        self.assertEqual(park_tiles.ground_height(flat), 0.0)
+
+    def test_ignores_ceilings(self):
+        flat = self.quad(0.0, 100.0) + self.quad(-900.0, 5000.0, up=False)
+        self.assertEqual(park_tiles.ground_height(flat), 0.0)
+
+    def test_no_floor(self):
+        self.assertIsNone(park_tiles.ground_height(self.quad(0.0, up=False)))

@@ -34,6 +34,13 @@ end
 -- Read once at startup: did the last park load on this side never finish?
 Park.Safe = file.Exists(Park.NOTE, "DATA")
 
+-- Leaving the game or the map on purpose isn't a crash: a note still there
+-- when this runs is cleared, unless safe mode is already on and waits for
+-- the player to say it's fine.
+hook.Add("ShutDown", "skate3_park_note", function()
+	if not Park.Safe then Park.Note(false) end
+end)
+
 function Park.Index()
 	if index == nil then
 		local text = file.Read("skate3/park/index.json", "DATA")

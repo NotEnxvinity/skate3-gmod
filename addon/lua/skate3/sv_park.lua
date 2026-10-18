@@ -179,9 +179,13 @@ end
 local function StandingSpot(id, info, origin)
 	local lo, hi = info.bounds[1], info.bounds[2]
 	local mid = origin + Vector((lo[1] + hi[1]) / 2, (lo[2] + hi[2]) / 2, 0)
+	-- From above the park down to a little below its ground; its lowest
+	-- point can be far below, past what a trace reaches.
+	local top = hi[3] + 64
+	local bottom = math.max(lo[3], (info.floor or 0) - 512) - 64
 	local spot = util.TraceLine({
-		start = mid + Vector(0, 0, hi[3] + 64),
-		endpos = mid + Vector(0, 0, lo[3] - 64),
+		start = mid + Vector(0, 0, top),
+		endpos = mid + Vector(0, 0, math.max(bottom, top - 16000)),
 		ignoreworld = true,
 		filter = function(e) return e:GetClass() == "skate3_piece" and e.skate3Park == id end,
 	})
@@ -241,14 +245,19 @@ function Park.Build(id, origin, owner, drop)
 	Park.Note(true)
 	job = { id = id, info = info, origin = origin, owner = owner, drop = drop, i = 0, reported = 0 }
 	Say(("Building %s (%d tiles)..."):format(info.name, #info.tiles))
+	print(("[skate3] park %s: origin %s, floor %s, bounds %s to %s"):format(id, tostring(origin), tostring(info.floor),
+		tostring(Vector(info.bounds[1][1], info.bounds[1][2], info.bounds[1][3])),
+		tostring(Vector(info.bounds[2][1], info.bounds[2][2], info.bounds[2][3]))))
 	timer.Create("skate3_park_build", STEP_EVERY, 0, Step)
 	return true
 end
 
--- The park's origin so its lowest point sits just over the ground at `at`.
+-- The park's origin so its ground (info.floor, found by setup) sits just
+-- over the ground at `at`. Its lowest point can't be used: a park's models
+-- reach far below it. Without a floor the park's own zero is its ground.
 local function OriginOver(info, at)
 	local ground = util.TraceLine({ start = at + Vector(0, 0, 64), endpos = at - Vector(0, 0, 32768), mask = MASK_SOLID_BRUSHONLY })
-	return Vector(at.x, at.y, ground.HitPos.z - info.bounds[1][3] + 8)
+	return Vector(at.x, at.y, ground.HitPos.z - (info.floor or 0) + 4)
 end
 
 local function BuildOnBaseMap(id)

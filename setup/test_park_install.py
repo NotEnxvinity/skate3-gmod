@@ -6,7 +6,8 @@ import park
 
 
 def grid(n, size=10.0):
-    """A flat n x n quad grid as one render group plus matching collision."""
+    """A flat n x n quad grid as one render group plus matching collision, its
+    triangles facing up the way Skate 3 winds them (clockwise from outside)."""
     pos, uv, idx, collision = [], [], [], []
     for y in range(n + 1):
         for x in range(n + 1):
@@ -15,7 +16,7 @@ def grid(n, size=10.0):
     for y in range(n):
         for x in range(n):
             a = y * (n + 1) + x
-            idx += [a, a + 1, a + n + 1, a + 1, a + n + 2, a + n + 1]
+            idx += [a, a + n + 1, a + 1, a + 1, a + n + 1, a + n + 2]
     for t in range(0, len(idx), 3):
         for k in range(3):
             collision += pos[idx[t + k] * 3:idx[t + k] * 3 + 3]
@@ -40,6 +41,8 @@ class WriteAllTest(unittest.TestCase):
             by_id = {p['id']: p for p in index}
             self.assertEqual(index[0]['id'], 'bb', 'parks come first')
             self.assertNotIn('tiles', by_id['aa'])
+            self.assertNotIn('floor', by_id['aa'])
+            self.assertEqual(by_id['bb']['floor'], 0.0)
             tiles = by_id['bb']['tiles']
             self.assertGreater(len(tiles), 1)
             total = 0

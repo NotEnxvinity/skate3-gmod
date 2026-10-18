@@ -57,6 +57,30 @@ def clean_collision(flat):
     return out
 
 
+def ground_height(flat, share=0.01):
+    """Height of a park's ground in Source units: the level below which only
+    `share` of its upward facing collision area lies. The render and collision
+    bounds reach far below a park (terrain, sky models), so the lowest point
+    can't say where its floor is; this ignores a few deep drains and pits.
+    None when it has no upward facing collision."""
+    levels = []
+    for i in range(0, len(flat) - 8, 9):
+        a, b, c = flat[i:i + 3], flat[i + 3:i + 6], flat[i + 6:i + 9]
+        n = _cross(_sub(c, a), _sub(b, a))
+        size = _length(n)
+        # Skate 3's triangles face out clockwise: this normal points out.
+        if size > 0 and n[2] / size > 0.7:
+            levels.append(((a[2] + b[2] + c[2]) / 3, size * 0.5))
+    if not levels:
+        return None
+    levels.sort()
+    total, seen = sum(area for _, area in levels), 0.0
+    for z, area in levels:
+        seen += area
+        if seen >= total * share:
+            return round(z, 1)
+
+
 def _bounds(points):
     if not points:
         return [[0, 0, 0], [0, 0, 0]]

@@ -21,7 +21,7 @@ local function MaterialFor(guid, cut)
 	if not guid then return Material("models/debug/debugwhite") end
 	local key = guid .. (cut and "_cut" or "")
 	if materials[key] then return materials[key] end
-	local png = Material("skate3/park/" .. guid .. ".png", "smooth mips")
+	local png = Material("skate3/park/" .. guid .. ".png", "noclamp smooth mips")
 	local mat = CreateMaterial("skate3park_" .. key, "VertexLitGeneric", {
 		["$basetexture"] = "models/debug/debugwhite",
 		["$alphatest"] = cut and "1" or nil,

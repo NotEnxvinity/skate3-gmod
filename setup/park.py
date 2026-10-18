@@ -273,6 +273,10 @@ def write_all(made, textures, gmod, report=print):
             for t in tiles:
                 write_piece(data_out, t)
             entry['tiles'] = [t['id'] for t in tiles]
+            # Where the ground is, to set the park down on a map's ground.
+            floor = park_tiles.ground_height(park_tiles.clean_collision(p['collision']))
+            if floor is not None:
+                entry['floor'] = floor
             report(f'{p["name"]}: {len(tiles)} tiles')
         else:
             p['collision'] = park_tiles.clean_collision(p['collision'])
