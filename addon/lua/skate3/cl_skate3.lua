@@ -17,13 +17,13 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.2.1")
+print("[skate3] lua build: v2.2.2-respawn-test-1")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
 
--- Equipping this weapon starts skate mode standing with the board in hand,
--- the way Skate 3 does off the board; Y gets on and off. Switching away ends it.
+-- Equipping this weapon starts skate mode on the board; Y gets off and on.
+-- Switching away ends it.
 local BOARD_WEAPON = "weapon_skate3"
 local PAD_Y = 0x8000
 -- How long to keep tapping Y to step off after equipping, before giving up.
@@ -271,9 +271,9 @@ local function FollowWeapon()
 	-- Equipped before the map's collision finished: start once it's ready.
 	if rideWhenReady and not active and status.state ~= "loading" then
 		rideWhenReady = false
-		-- A fresh equip starts on foot, and so does recovering from a glitch
-		-- that happened on foot.
-		local onFoot = resumeAt == nil or resumeOnFoot
+		-- A fresh equip starts on the board. Only recovering from a glitch that
+		-- happened on foot puts the skater back on foot.
+		local onFoot = resumeAt ~= nil and resumeOnFoot
 		resumeOnFoot = false
 		Start()
 		if active and onFoot then

@@ -44,8 +44,8 @@ The Skate 3 host is a git dependency on
 4. Use 64-bit Garry's Mod: Steam → Garry's Mod → Properties → Betas →
    **x86-64**. Native Linux loads the `linux64` module, Proton the `win64` one.
 5. Plug in a controller, load a map, and equip the **Skateboard** (spawn menu →
-   Weapons → Skate 3). You start on foot with the board in hand; **Y** gets
-   on and off it, as in Skate 3. Switch weapons to leave skate mode.
+   Weapons → Skate 3). You start on the board; **Y** gets
+   off and on it, as in Skate 3. Switch weapons to leave skate mode.
    **D-pad down** drops a session marker; hold **D-pad up** to go back to it
    (the hold gets longer the further away you are, like Skate 3).
    `skate3_toggle` in the console starts and ends it without the weapon (bind

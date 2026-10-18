@@ -57,6 +57,8 @@ pub struct Pose {
     pub speed: f32,
     pub camera: Option<Camera>,
     pub state: String,
+    /// Seconds of respawn invincibility left.
+    pub invincible: f32,
     pub tick: u64,
     /// Every bone of the skater and board, in Source space.
     pub bones: Vec<(String, Mat4)>,
@@ -608,6 +610,7 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
         speed: velocity.length(),
         camera,
         state: p.state.clone(),
+        invincible: p.invincible,
         tick: p.tick,
         // Bones are relative to the skater's root, as the mashup places them.
         bones: {
