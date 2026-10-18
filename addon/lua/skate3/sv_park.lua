@@ -378,3 +378,26 @@ hook.Add("PlayerInitialSpawn", "skate3_park_safe", function(ply)
 		end
 	end)
 end)
+
+-- The server's half of skate3_park_info.
+concommand.Add("skate3_park_info_sv", function(ply)
+	local total, physics, moving, tiles = 0, 0, 0, 0
+	for _, e in ipairs(ents.FindByClass("skate3_piece")) do
+		total = total + 1
+		if e:IsTile() then tiles = tiles + 1 end
+		local phys = e:GetPhysicsObject()
+		if IsValid(phys) then
+			physics = physics + 1
+			if phys:IsMotionEnabled() then moving = moving + 1 end
+		end
+	end
+	local text = {
+		"[skate3] park info (server)",
+		("  map %s, safe mode %s, a park is being built: %s"):format(game.GetMap(), tostring(Park.Safe), tostring(job ~= nil)),
+		("  pieces %d (tiles %d), with physics %d, not frozen %d"):format(total, tiles, physics, moving),
+	}
+	for _, line in ipairs(text) do
+		print(line)
+		if IsValid(ply) then ply:PrintMessage(HUD_PRINTCONSOLE, line) end
+	end
+end)

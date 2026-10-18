@@ -109,6 +109,33 @@ concommand.Add("skate3_park_safe", function(_, _, args)
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white, Park.Safe and "Park physics are off." or "Park physics are on again.")
 end)
 
+-- One block of facts for a bug report: is safe mode on, how many pieces and
+-- tiles are loaded, how many have physics, and what is under the player.
+concommand.Add("skate3_park_info", function()
+	local total, loaded, physics, tiles = 0, 0, 0, 0
+	local nearest, nearestDist
+	local me = LocalPlayer()
+	for _, e in ipairs(ents.FindByClass("skate3_piece")) do
+		total = total + 1
+		if e.loadedId then loaded = loaded + 1 end
+		if IsValid(e:GetPhysicsObject()) then physics = physics + 1 end
+		if e:IsTile() then tiles = tiles + 1 end
+		local d = e.DistanceSqrTo and e:DistanceSqrTo(me:GetPos())
+		if d and (not nearestDist or d < nearestDist) then nearest, nearestDist = e, d end
+	end
+	print("[skate3] park info (client)")
+	print(("  map %s, safe mode %s, park physics %s"):format(game.GetMap(), tostring(Park.Safe), tostring(GetConVar("skate3_park_physics"):GetBool())))
+	print(("  pieces %d (tiles %d), loaded %d, with physics %d"):format(total, tiles, loaded, physics))
+	print("  you are at " .. tostring(me:GetPos()) .. ", on ground " .. tostring(me:OnGround()) .. ", riding " .. tostring(me:GetNW2Bool("skate3_riding")))
+	if nearest then
+		print(("  nearest piece %s is %.0f units away, physics %s, solid %s"):format(nearest:GetPieceId(), math.sqrt(nearestDist),
+			tostring(IsValid(nearest:GetPhysicsObject())), tostring(nearest:GetSolid())))
+	end
+	local tr = util.TraceLine({ start = me:GetPos() + Vector(0, 0, 16), endpos = me:GetPos() - Vector(0, 0, 256), filter = me })
+	print(("  under you: %s at %s"):format(tr.Hit and (IsValid(tr.Entity) and tr.Entity:GetClass() or "the map") or "nothing", tostring(tr.HitPos)))
+	RunConsoleCommand("skate3_park_info_sv")
+end)
+
 -- The load note: written while pieces are still being built, removed once
 -- they've stood a while. A crash in between leaves it for the next start.
 local settledAt
