@@ -480,9 +480,7 @@ Menu.RegisterInteract("doors", function()
 	if not api then return end
 	local ent = api.Target()
 	if not IsValid(ent) then return end
-	local class = ent:GetClass()
-	local label = class:find("door") and "Open Door" or class:find("button") and "Press Button" or "Use"
-	return { label = label, run = function() api.Use() end }
+	return { label = "Interact", run = function() api.Use() end }
 end)
 
 return Menu
