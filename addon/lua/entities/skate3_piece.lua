@@ -26,16 +26,22 @@ function ENT:IsTile()
 	return self:GetPieceId():find("_t%d+$") ~= nil
 end
 
+-- Without physics of its own a piece has none: the client would otherwise
+-- keep the plain model's, a small loose body that falls and slides.
+function ENT:NoPhysics()
+	if CLIENT then self:PhysicsDestroy() end
+end
+
 function ENT:BuildPhysics(piece)
-	if Park.Safe or not cv_physics:GetBool() then return end
+	if Park.Safe or not cv_physics:GetBool() then return self:NoPhysics() end
 	local soup = Park.Soup(piece)
 	local count = #soup / 3
-	if count < 1 then return end
+	if count < 1 then return self:NoPhysics() end
 	if count > Park.MAX_PHYSICS then
 		print(("[skate3] %s has %d collision triangles, too many for Garry's Mod physics; the board still rides it"):format(piece.id or "a piece", count))
-		return
+		return self:NoPhysics()
 	end
-	if self:PhysicsFromMesh(soup) == false then return end
+	if self:PhysicsFromMesh(soup) == false then return self:NoPhysics() end
 	self:SetSolid(SOLID_VPHYSICS)
 	self:SetMoveType(MOVETYPE_VPHYSICS)
 	self:EnableCustomCollisions(true)
@@ -62,6 +68,8 @@ function ENT:Initialize()
 		-- The server never draws or rides it, and a tile is big.
 		piece.soup = nil
 		if self:IsTile() then Park.Forget(self:GetPieceId()) end
+	else
+		self:FreezeModelPhysics()
 	end
 end
 
@@ -114,9 +122,18 @@ end
 -- builds one tile per frame instead of all in one.
 local builtFrame, builtCount = 0, 0
 
+-- Until the piece's own physics is built, the client entity has the plain
+-- model's: a loose body that falls and slides client side, and only a resync
+-- (the physgun) puts it back. It never gets to move.
+function ENT:FreezeModelPhysics()
+	local phys = self:GetPhysicsObject()
+	if IsValid(phys) and phys:IsMotionEnabled() then phys:EnableMotion(false) end
+end
+
 function ENT:Think()
 	local id = self:GetPieceId()
 	if id == "" then return end
+	if self.loadedId ~= id then self:FreezeModelPhysics() end
 	if self.loadedId == id then
 		self:SyncPhysics()
 		return
