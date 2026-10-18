@@ -1,17 +1,22 @@
 -- The trick score widget, after Skate 3's: a ring with the combo multiplier
 -- inside and the line timer running down around it, the line's score beside
 -- it, and the latest trick's name. When a line ends, what it was worth (or
--- that it was lost to a bail) shows for a moment. Three looks: that widget on
--- screen, the same floating in the world beside the skater, or Half-Life 2's
--- HUD panels.
+-- that it was lost to a bail) shows for a moment. Three looks (skate3_ui_style):
+-- Skate 3's own art, from the player's disc (cl_score_skate3.lua), the
+-- minimal widget in Helvetica Neue Bold, or Half-Life 2's HUD panels; and the
+-- first two can sit on screen, bottom left, or float beside the skater
+-- (skate3_ui_world).
 
 local Score = {}
 local Meat = include("skate3/cl_hall_of_meat.lua")
 Score.Meat = Meat
 
+local UI = S3GM_UI
+local Skate3 = include("skate3/cl_score_skate3.lua")
+
 local cv_score = CreateClientConVar("skate3_score_hud", "1", true, false, "Show the trick score widget")
-local cv_style = CreateClientConVar("skate3_score_style", "world", true, false,
-	"Trick score look: minimal (on screen), world (beside the skater) or hl2")
+-- Retired: the look is skate3_ui_style now (with skate3_ui_world for where).
+CreateClientConVar("skate3_score_style", "world", true, false, "Old setting, no longer used")
 
 -- How long a finished line stays on screen, and how long it fades.
 local HOLD = 2.5
@@ -24,15 +29,18 @@ local RING = Color(255, 255, 255)
 local RING_EMPTY = Color(255, 255, 255, 50)
 local DISC = Color(0, 0, 0, 150)
 
+-- The minimal look's fonts: Helvetica Neue Bold where the player has it
+-- (cl_ui.lua says what stands in otherwise).
+local FONT = {}
 local fontsFor
 local function Fonts()
 	local h = ScrH()
 	if fontsFor == h then return end
 	fontsFor = h
 	local s = h / 1080
-	surface.CreateFont("skate3_mult", { font = "Roboto", size = math.Round(30 * s), weight = 900, italic = true })
-	surface.CreateFont("skate3_points", { font = "Roboto", size = math.Round(36 * s), weight = 800, italic = true })
-	surface.CreateFont("skate3_trick", { font = "Roboto", size = math.Round(22 * s), weight = 700 })
+	FONT.mult = UI.Font(30 * s)
+	FONT.points = UI.Font(38 * s)
+	FONT.trick = UI.Font(22 * s)
 end
 
 -- The engine names tricks by localisation ID, such as
@@ -243,11 +251,11 @@ local function Minimal(v, cx, cy, s)
 	Disc(cx, cy, r, ColorAlpha(DISC, DISC.a * alpha))
 	Arc(cx, cy, r - 5 * s, r, 1, ColorAlpha(RING_EMPTY, RING_EMPTY.a * alpha))
 	Arc(cx, cy, r - 5 * s, r, v.timer, ColorAlpha(RING, RING.a * alpha))
-	Shadowed(Multiplier(v.multiplier), "skate3_mult", cx, cy, WHITE, alpha, TEXT_ALIGN_CENTER)
+	Shadowed(Multiplier(v.multiplier), FONT.mult, cx, cy, WHITE, alpha, TEXT_ALIGN_CENTER)
 	local x = cx + r + 14 * s
 	local color = v.live and WHITE or (v.good and GREEN or RED)
-	Shadowed(v.points, "skate3_points", x, cy - 8 * s, color, alpha, TEXT_ALIGN_LEFT)
-	Shadowed(v.trick, "skate3_trick", x, cy + 20 * s, WHITE, alpha, TEXT_ALIGN_LEFT)
+	Shadowed(v.points, FONT.points, x, cy - 8 * s, color, alpha, TEXT_ALIGN_LEFT)
+	Shadowed(v.trick, FONT.trick, x, cy + 20 * s, WHITE, alpha, TEXT_ALIGN_LEFT)
 end
 
 -- Half-Life 2's HUD, laid out like its HEALTH panel on the same row: a dim
@@ -290,40 +298,28 @@ local function HL2(v)
 	end
 end
 
--- The session marker's badge, over the score: a note when one is dropped or
--- reached, and a ring (a bar in the HL2 look) filling while the button is
--- held to go back. Kept apart from the score, which a return resets.
-local badge = { text = nil, at = -math.huge, progress = 0 }
-
+-- Short notes (marker set, back at marker) go through cl_ui.lua's toast; the
+-- old names still work for anything that calls them.
 function Score.Marker(text)
-	badge.text, badge.at, badge.progress = text, RealTime(), 0
+	UI.Toast(text)
 end
 
-function Score.MarkerHold(progress)
-	badge.progress = progress
-end
+function Score.MarkerHold() end
 
--- What the badge says and how opaque it is, or nil when it's gone.
-local function Badge()
-	if badge.progress > 0 then return "Back to marker", 1 end
-	local alpha = math.Clamp((HOLD + FADE - (RealTime() - badge.at)) / FADE, 0, 1)
-	if badge.text and alpha > 0 then return badge.text, alpha end
-end
-
--- The Skate 3 look, left-aligned at x around y.
-local function MinimalBadge(x, y, s)
-	local text, alpha = Badge()
+-- The Skate 3 and minimal looks put the toast over the score, the HL2 look in
+-- a small panel above its health row.
+local function MinimalToast(x, y, s)
+	local text, alpha = UI.CurrentToast()
 	if not text then return end
 	Fonts()
 	local r = 9 * s
 	Disc(x + r, y, r, ColorAlpha(DISC, DISC.a * alpha))
-	Arc(x + r, y, r - 3 * s, r, badge.progress > 0 and badge.progress or 1, ColorAlpha(RING, RING.a * alpha))
-	Shadowed(text, "skate3_trick", x + 2 * r + 8 * s, y, WHITE, alpha, TEXT_ALIGN_LEFT)
+	Arc(x + r, y, r - 3 * s, r, 1, ColorAlpha(RING, RING.a * alpha))
+	Shadowed(text, FONT.trick, x + 2 * r + 8 * s, y, WHITE, alpha, TEXT_ALIGN_LEFT)
 end
 
--- The HL2 look, a small panel centred above the score's.
-local function HL2Badge()
-	local text, alpha = Badge()
+local function HL2Toast()
+	local text, alpha = UI.CurrentToast()
 	if not text then return end
 	local s = ScrH() / 480
 	text = text:upper()
@@ -333,23 +329,33 @@ local function HL2Badge()
 	local x, y = math.floor(ScrW() * 0.5 - w * 0.5), math.floor(ScrH() - 12 * s - 36 * s - 6 * s - h)
 	draw.RoundedBox(4, x, y, w, h, ColorAlpha(HL2_BG, HL2_BG.a * alpha))
 	draw.SimpleText(text, "HudSelectionText", x + 8 * s, y + 2 * s, ColorAlpha(HL2_FG, HL2_FG.a * alpha))
-	if badge.progress > 0 then
-		surface.SetDrawColor(ColorAlpha(HL2_FG, HL2_FG.a * alpha))
-		surface.DrawRect(x + 8 * s, y + h - 3 * s, (w - 16 * s) * badge.progress, 2 * s)
-	end
+end
+
+-- The menu hides the score while it's up (the toasts stay).
+local function MenuUp()
+	return S3GM_Menu and S3GM_Menu.Visible()
 end
 
 function Score.Draw(pose)
 	Update(pose)
-	local style = cv_style:GetString()
+	local style = UI.Style()
+	local menu = MenuUp()
 	if style == "hl2" then
-		if view then HL2(view) end
-		HL2Badge()
-	elseif style ~= "world" then
+		if view and not menu then HL2(view) end
+		HL2Toast()
+		return
+	end
+	if style == "skate3" then
+		-- On screen the score sits bottom left; in the world it's drawn by DrawWorld.
+		UI.BeginBottomLeft()
+		if view and not menu and not UI.World() then Skate3.Draw(view) end
+		local text, alpha = UI.CurrentToast()
+		if text then Skate3.Toast(text, alpha) end
+	else
 		local s = ScrH() / 1080
-		local cx, cy = ScrW() * 0.5 - 90 * s, ScrH() - 150 * s
-		if view then Minimal(view, cx, cy, s) end
-		MinimalBadge(cx - 34 * s, cy - 56 * s, s)
+		local cx, cy = 150 * s, ScrH() - 150 * s
+		if view and not menu and not UI.World() then Minimal(view, cx, cy, s) end
+		MinimalToast(cx - 34 * s, cy - 56 * s, s)
 	end
 end
 
@@ -357,18 +363,24 @@ end
 -- the camera. The offset eases round as the camera swings, so it trails a little.
 local worldOffset
 function Score.DrawWorld(pos)
-	if not (view or Badge()) or cv_style:GetString() ~= "world" then
+	if not view or MenuUp() or not UI.World() then
 		worldOffset = nil
 		return
 	end
 	local yaw = EyeAngles().y
 	local target = Angle(0, yaw, 0):Right() * 34 + Vector(0, 0, 52)
 	worldOffset = worldOffset and LerpVector(math.min(FrameTime() * 8, 1), worldOffset, target) or target
-	local s = ScrH() / 1080
 	cam.IgnoreZ(true)
-	cam.Start3D2D(pos + worldOffset, Angle(0, yaw - 90, 90), 0.15 / s)
-	if view then Minimal(view, 0, 0, s) end
-	MinimalBadge(-34 * s, -56 * s, s)
+	if UI.Style() == "skate3" then
+		-- The disc's centre at the plane's origin.
+		cam.Start3D2D(pos + worldOffset, Angle(0, yaw - 90, 90), 0.1)
+		UI.Begin(-164, -604, 1)
+		Skate3.Draw(view)
+	else
+		local s = ScrH() / 1080
+		cam.Start3D2D(pos + worldOffset, Angle(0, yaw - 90, 90), 0.15 / s)
+		Minimal(view, 0, 0, s)
+	end
 	cam.End3D2D()
 	cam.IgnoreZ(false)
 end

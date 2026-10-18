@@ -1,0 +1,180 @@
+"""Skate 3's on-screen look, from the player's own disc: the trick score
+widget's art, the D-pad menu's panel and button icons, and the Futura bitmap
+fonts the game draws its text with. The engine's own HUD extractors (the
+ones its prepare_hud and extract_session_marker scripts run) decode the
+disc's APT/GEO/RX2 files; this turns what they produce into PNGs Garry's Mod
+can draw plus one ui.json that says where each piece sits.
+
+Writes assets/ui/*.png and assets/ui/ui.json. Nothing here is distributed:
+it is made on the player's machine from their disc, like the rest of
+assets/. Everything is laid out on Skate 3's own 1280x720 canvas; the mod
+scales it to the screen.
+"""
+from pathlib import Path
+import json, sys, tempfile
+
+# The retail button icons the menus use (all "_hud" variants, the ones the
+# in-game D-pad menu draws).
+BUTTONS = ('A', 'B', 'X', 'Y', 'L_Bumper', 'R_Bumper', 'L_Trigger', 'R_Trigger', 'DPad', 'DPad_Up', 'DPad_Down',
+           'DPad_Left', 'DPad_Right', 'Start', 'Back', 'Stick_Left', 'Stick_Right', 'L3_Click', 'R3_Click')
+# FontManager's APT names for the two atlases the HUD text uses.
+FONTS = {'heavy': 'Futura Std Medium', 'shadow': 'Futura Shadow'}
+# Shapes of the trickdisplay2 movie the score widget is built from.
+SHAPES = ('36', '38', '40', '43', '45', '46', '47', '51', '54', '57', '61', '64', '68', '72', '81')
+# Where an upscaled copy of a texture sits in the HD pack: the same names and
+# folders as the exported UI textures (ui/screens/hud2/trickdisplay2/35.png).
+HD_SCORE = 'ui/screens/hud2/trickdisplay2/%s.png'
+HD_PANEL = 'ui/screens/hud2/hudphonelist/%s.png'
+HD_BUTTON = 'ui/images/buttons/xbox360/buttons/button_%s_hud.png'
+PANEL = (91.0, 48.0)  # where the quick menu's panel sits on the canvas
+# The front-end archives the extractors read (miscboot.big is names.py's too).
+FROM_DISC = {'data/big/fedata.big', 'data/big/fetexture.big', 'data/big/fedynamic.big', 'data/big/miscboot.big'}
+
+
+def png(raw, width, height, path):
+    from PIL import Image
+    if len(raw) != width * height * 4:
+        raise ValueError(f'{path.name}: expected {width * height * 4} bytes, found {len(raw)}')
+    path.parent.mkdir(parents=True, exist_ok=True)
+    Image.frombytes('RGBA', (width, height), raw).save(path)
+
+
+def quad(vertices):
+    """[[x, y, u, v] x 4], clockwise from the top left, from a rectangle's
+    triangles ({position, uv} vertices). None if it isn't a rectangle."""
+    unique = {}
+    for v in vertices:
+        unique[(round(v['position'][0], 3), round(v['position'][1], 3))] = [min(1.0, max(0.0, round(c, 4))) for c in v['uv']]
+    xs = sorted({k[0] for k in unique})
+    ys = sorted({k[1] for k in unique})
+    if len(xs) != 2 or len(ys) != 2 or len(unique) != 4:
+        return None
+    return [[x, y, *unique[(x, y)]] for x, y in ((xs[0], ys[0]), (xs[1], ys[0]), (xs[1], ys[1]), (xs[0], ys[1]))]
+
+
+def build(scoring, marker, out, report=print):
+    """scoring: prepare_hud's output folder; marker: extract_session_marker's."""
+    scoring, marker, out = Path(scoring), Path(marker), Path(out)
+    hud = json.loads((scoring / 'runtime/trickdisplay.json').read_text(encoding='utf-8'))
+    menu = json.loads((marker / 'hud.json').read_text(encoding='utf-8'))
+    ui = {'version': 1, 'canvas': [1280, 720], 'textures': {}, 'shapes': {}, 'fonts': {}, 'buttons': {}, 'panel': {}}
+
+    def add_texture(name, raw, width, height, hd=None):
+        if name not in ui['textures']:
+            png(raw, width, height, out / (name + '.png'))
+            ui['textures'][name] = {'w': width, 'h': height}
+            if hd:
+                ui['textures'][name]['hd'] = hd
+        return name
+
+    # The score widget's pieces.
+    for shape in SHAPES:
+        pieces = []
+        for prim in hud['shapes'].get(shape, []):
+            rect = quad([v for tri in prim['triangles'] for v in tri])
+            if rect is None:
+                continue
+            t = prim['texture']
+            number = t['resource_name'].split('\\')[-1].split('.')[0]
+            name = add_texture('hud' + number, (scoring / t['rgba']).read_bytes(), t['width'], t['height'],
+                               HD_SCORE % number)
+            pieces.append({'tex': name, 'quad': rect, 'color': prim['color']})
+        ui['shapes'][shape] = pieces
+
+    # The Futura bitmap fonts (the text pass pairs a black shadow atlas with
+    # the foreground one).
+    for key, family in FONTS.items():
+        font = hud['fonts'][family]
+        definition = font['definition']
+        atlas = definition['textures'][0]
+        name = add_texture('font_' + key, (scoring / font['texture']).read_bytes(), atlas['width'], atlas['height'])
+        glyphs = {g['glyph_index']: g for g in definition['glyphs']}
+        chars = {}
+        for item in definition['characters']:
+            g = glyphs.get(item['glyph_index'])
+            if g is None:
+                continue
+            a, b, c, d = g['atlas_bounds']
+            chars[str(item['codepoint'])] = [round(a / atlas['width'], 6), round(b / atlas['height'], 6),
+                                             round(c / atlas['width'], 6), round(d / atlas['height'], 6),
+                                             g['width'], g['height'], g['x_offset'], g['y_offset'], g['x_advance']]
+        ui['fonts'][key] = {'tex': name, 'ascent': definition['metrics']['Ascent'], 'chars': chars}
+
+    # The D-pad menu's panel: three rows' worth, cut into a top, a stretchy
+    # middle and a bottom, each as the mirrored halves the movie places.
+    panel = {'top': [], 'mid': [], 'bottom': []}
+    for mesh in menu['meshes']:
+        if mesh['role'] != 'art':
+            continue
+        t = menu['textures'][mesh['texture']]
+        # source: .../hudphonelist/0001_2.Texture.rgba, the texture's number is 2
+        number = Path(t['source']).name.split('.')[0].split('_', 1)[-1]
+        name = add_texture('panel%d' % mesh['texture'], (marker / t['file']).read_bytes(), t['width'], t['height'],
+                           HD_PANEL % number)
+        rect = quad(mesh['vertices'])
+        if rect is None:
+            continue
+        ys = [p[1] for p in rect]
+        part = 'top' if max(ys) <= 80 else 'mid' if min(ys) >= 80 and max(ys) <= 151 else 'bottom'
+        panel[part].append({'tex': name, 'quad': rect})
+    ui['panel'] = {'origin': list(PANEL), 'top_y': 48.0, 'mid_y': 80.0, 'bottom_y': 151.0, 'bottom_end': 183.0,
+                   'opacity': menu['presentation']['panel_opacity'], **panel}
+
+    # Button icons: the same bank the game's own menus use.
+    bank = marker / 'source-cache/assets/data/fe/source/images/buttons/xbox360/buttons'
+    listing = json.loads((bank / 'manifest.json').read_text(encoding='utf-8'))['textures']
+    by_name = {t['name']: t for t in listing}
+    for button in BUTTONS:
+        item = by_name.get(f'button_{button}_hud.Texture')
+        if item is None:
+            continue
+        ui['buttons'][button] = add_texture('btn_' + button, (bank / item['rgba_file']).read_bytes(), item['width'], item['height'],
+                                          HD_BUTTON % button)
+
+    (out / 'ui.json').write_text(json.dumps(ui, separators=(',', ':')), encoding='utf-8')
+    report(f'Skate 3 UI art ready: {len(ui["textures"])} images, {len(ui["fonts"])} fonts')
+    return ui
+
+
+def export(engine, game, out, collections, report):
+    """Runs the engine's HUD extractors on the disc's files and writes `out`
+    (garrysmod/data/skate3/assets/ui)."""
+    engine = Path(engine).resolve()
+    sys.path.insert(0, str(engine / 'tools'))
+    sys.path.insert(0, str(engine))
+    import prepare_hud, extract_session_marker
+    with tempfile.TemporaryDirectory(prefix='skate3-ui-') as tmp:
+        tmp = Path(tmp)
+        prepare_hud.prepare(Path(game).resolve(), tmp / 'scoring', Path(collections).resolve())
+        extract_session_marker.prepare(Path(game).resolve(), tmp / 'marker')
+        return build(tmp / 'scoring', tmp / 'marker', out, report)
+
+
+def install_hd(source, out, report):
+    """The optional HD pack (upscaled copies of the textures above, in the
+    folders HD_* name) from a folder or a zip into out (data/skate3/ui-hd).
+    Only .png files under ui/ are taken. Returns how many were installed."""
+    import shutil, zipfile
+    source, out = Path(source), Path(out)
+    count = 0
+    if source.is_dir():
+        files = ((p.relative_to(source).as_posix(), p) for p in source.rglob('*.png'))
+        opener = lambda p: p.open('rb')
+    else:
+        archive = zipfile.ZipFile(source)
+        files = ((n, n) for n in archive.namelist() if n.lower().endswith('.png'))
+        opener = archive.open
+    for name, handle in files:
+        parts = [x for x in name.split('/') if x]
+        if 'ui' not in parts:
+            continue
+        rel = parts[parts.index('ui'):]  # drops a wrapping Skate3-UI-HD folder
+        if '..' in rel:
+            continue
+        target = out.joinpath(*rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with opener(handle) as src, open(target, 'wb') as dst:
+            shutil.copyfileobj(src, dst)
+        count += 1
+    report(f'Installed {count} HD UI images')
+    return count

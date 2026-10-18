@@ -7,6 +7,7 @@ util.AddNetworkString("skate3_blood")
 util.AddNetworkString("skate3_watched")
 util.AddNetworkString("skate3_hit")
 util.AddNetworkString("skate3_interact")
+util.AddNetworkString("skate3_marker")
 
 local Pose = include("skate3/sh_pose.lua")
 local Interact = include("skate3/sh_interact.lua")
@@ -85,6 +86,27 @@ net.Receive("skate3_interact", function(_, ply)
 	if hook.Run("PlayerUse", ply, ent) == false then return end
 	ent:Use(ply, ply, USE_TOGGLE, 1)
 end)
+
+-- A skater's session marker (placed from the contextual menu), kept so modes
+-- that run here, such as a game of S.K.A.T.E., know where to start. Read it
+-- with S3GM_GetMarker(ply): { pos = Vector, yaw = number } or nil.
+net.Receive("skate3_marker", function(_, ply)
+	if not net.ReadBool() then
+		ply.skate3Marker = nil
+		ply:SetNW2Bool("skate3_has_marker", false)
+		return
+	end
+	local pos, yaw = net.ReadVector(), net.ReadFloat()
+	if not (pos.x == pos.x and pos.y == pos.y and pos.z == pos.z and yaw == yaw) or pos:Length() > 1e7 then return end
+	ply.skate3Marker = { pos = pos, yaw = yaw }
+	ply:SetNW2Vector("skate3_marker_pos", pos)
+	ply:SetNW2Float("skate3_marker_yaw", yaw)
+	ply:SetNW2Bool("skate3_has_marker", true)
+end)
+
+function S3GM_GetMarker(ply)
+	return ply.skate3Marker
+end
 
 -- A skater's Garry's Mod body stands still or is moved by the simulation, so
 -- its footsteps would sound in place; the skate sounds play the real ones.

@@ -1,6 +1,10 @@
+-- The on-screen UI first: the score, the menu and the marker all use it.
+include("skate3/cl_ui.lua")
+local Marker = include("skate3/cl_marker.lua")
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
+local Menu = include("skate3/cl_contextmenu.lua")
 -- Hall of Meat's X-ray skeleton is posed like the body the skater shows.
 Score.Meat.Body = Skater.BodyEntity
 Score.Meat.Skipped = function() return Skater.Skip.hom end
@@ -23,23 +27,17 @@ local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skat
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
 
--- Equipping this weapon starts skate mode on the board; Y gets off and on.
--- Switching away ends it.
+-- Equipping this weapon starts skate mode on the board; Y gets off and on
+-- again. Switching away ends it.
 local BOARD_WEAPON = "weapon_skate3"
-local PAD_Y = 0x8000
--- How long to keep tapping Y to step off after equipping, before giving up.
-local STEP_OFF_FOR = 3
 
 local loaded = false
 local active = false
 local boardHeld = false
 local rideWhenReady = false
 local lastRemount = -math.huge
-local resumeAt -- where a glitched ride ended, for hopping back on
-local stepOffUntil -- tapping Y until then, to start off the board
-local resumeOnFoot = false -- the glitched ride ended on foot
+local resumeAt -- where a glitched ride ended, or the marker, for hopping back on
 local resumeYaw -- the heading to start at instead of the view's
-local stepOffFrame = 0
 local pose
 local rails
 local railsRevision -- the collision swap the rails above came from
@@ -189,6 +187,7 @@ local function Stop()
 	Sounds.Stop()
 	Score.Reset()
 	Players.Reset()
+	Menu.Reset()
 end
 
 local function Start()
@@ -257,6 +256,7 @@ net.Receive("skate3_state", function()
 		Skater.HideModel()
 		Sounds.Stop()
 		Players.Reset()
+		Menu.Reset()
 	end
 end)
 
@@ -269,7 +269,6 @@ local function FollowWeapon()
 	if held ~= boardHeld then
 		boardHeld = held
 		rideWhenReady = held
-		stepOffUntil = nil
 		if not held then
 			resumeAt = nil
 			Stop()
@@ -278,15 +277,7 @@ local function FollowWeapon()
 	-- Equipped before the map's collision finished: start once it's ready.
 	if rideWhenReady and not active and status.state ~= "loading" then
 		rideWhenReady = false
-		-- A fresh equip starts on the board. Only recovering from a glitch that
-		-- happened on foot puts the skater back on foot.
-		local onFoot = resumeAt ~= nil and resumeOnFoot
-		resumeOnFoot = false
 		Start()
-		if active and onFoot then
-			stepOffUntil = RealTime() + STEP_OFF_FOR
-			stepOffFrame = 0
-		end
 	end
 end
 
@@ -327,53 +318,17 @@ concommand.Add("skate3_gc", function()
 	print(("[skate3] lua %.1f MB before a full collection, %.1f MB after (%.1f MB was garbage)"):format(before, after, before - after))
 end)
 
--- Session markers, as in Skate 3: D-pad down drops one where the skater is
--- (rolling on four wheels or standing), and holding D-pad up goes back to it,
--- the hold taking longer the further away it is. Returns true when it just
--- took the skater back, which restarts the ride.
-local PAD_DPAD_UP, PAD_DPAD_DOWN = 0x0001, 0x0002
-local marker -- { pos, yaw, onFoot }
-local lastButtons = 0
-local holdingSince
-local function SessionMarker(now)
-	local input = skate3.GetInput and skate3.GetInput()
-	local buttons = bit.bor(input and input.buttons or 0, Keyboard.buttons)
-	local pressed = bit.band(buttons, bit.bnot(lastButtons))
-	lastButtons = buttons
-	if bit.band(pressed, PAD_DPAD_DOWN) ~= 0 and pose and pose.camera then
-		local state = pose.state or ""
-		if state == "PhysicsGround" or state:find("^Biped") then
-			marker = { pos = V(pose.pos), yaw = V(pose.camera.forward):Angle().y, onFoot = state:find("^Biped") ~= nil }
-			Score.Marker("Marker set")
-		else
-			Score.Marker("Can't set a marker here")
-		end
-	end
-	if not marker or bit.band(buttons, PAD_DPAD_UP) == 0 or not pose then
-		if holdingSince then Score.MarkerHold(0) end
-		holdingSince = nil
-		return false
-	end
-	-- Skate 3's timing: a fifth of a second up to 100 m away, a second past
-	-- a kilometre, and nothing within half a metre.
-	local metres = V(pose.pos):Distance(marker.pos) * 0.0254
-	if metres < 0.5 then return false end
-	holdingSince = holdingSince or now
-	local duration = math.Clamp(0.2 + (metres - 100) * 0.8 / 900, 0.2, 1)
-	local progress = math.min((now - holdingSince) / duration, 1)
-	Score.MarkerHold(progress)
-	if progress < 1 then return false end
-	holdingSince = nil
-	Stop()
-	resumeAt, resumeYaw = marker.pos, marker.yaw
-	Start()
-	if active and marker.onFoot then
-		stepOffUntil = RealTime() + STEP_OFF_FOR
-		stepOffFrame = 0
-	end
-	Score.Marker("Back at marker")
-	return true
-end
+-- Session markers live in cl_marker.lua and the menu that drives them in
+-- cl_contextmenu.lua. This is how they read the skater and take them back to
+-- a marker (a fresh ride there, on the board).
+Marker.Bind({
+	pose = function() return pose end,
+	teleport = function(at, yaw)
+		Stop()
+		resumeAt, resumeYaw = at, yaw
+		Start()
+	end,
+})
 
 net.Receive("skate3_watched", function()
 	watched = net.ReadBool()
@@ -416,7 +371,6 @@ hook.Add("Think", "skate3_step", function()
 			file.CreateDir("skate3")
 			file.Append("skate3/errors.txt", os.date("%Y-%m-%d %H:%M:%S  ") .. why .. "\n\n")
 			local endedAt = pose and V(pose.pos)
-			local endedOnFoot = pose and pose.state and pose.state:find("^Biped") ~= nil
 			Stop()
 			-- Still holding the board: hop back on where the ride ended (on a
 			-- fresh simulation, which takes a few seconds), unless it keeps failing.
@@ -424,7 +378,6 @@ hook.Add("Think", "skate3_step", function()
 				lastRemount = now
 				rideWhenReady = true
 				resumeAt = endedAt
-				resumeOnFoot = endedOnFoot or false
 				Say("Skate glitched, putting you back where you were. (details in console)")
 			else
 				Say("Skate stopped: " .. why:sub(1, 120) .. (#why > 120 and "... (full error in console)" or ""))
@@ -433,18 +386,6 @@ hook.Add("Think", "skate3_step", function()
 	end
 	if status.state == "ready" and not Skater.Skip.props then Perf.Time("prop scan", LiveProps.Think, now, active and pose and pose.state) end
 	if not active then return end
-	-- The simulation always spawns on the board, so tap Y for the player
-	-- until the skater is on foot.
-	local press = 0
-	if stepOffUntil then
-		local onFoot = pose and pose.state and pose.state:find("^Biped")
-		if onFoot or now > stepOffUntil then
-			stepOffUntil = nil
-		else
-			stepOffFrame = stepOffFrame + 1
-			if stepOffFrame % 20 >= 10 and stepOffFrame % 20 < 14 then press = PAD_Y end
-		end
-	end
 	local skip = Skater.Skip
 	local keys, analog = Keyboard.Read(FrameTime())
 	-- Crashes, punches and board swings (and the bails they ask for), which
@@ -461,8 +402,12 @@ hook.Add("Think", "skate3_step", function()
 		analog = analog or { 0, 0, 0, 0, 0, 0 }
 		for i = 1, 6 do analog[i] = math.max(analog[i] or 0, moreAnalog[i]) end
 	end
-	if not skip.step then Perf.Time("step", skate3.Step, FrameTime(), ScrW() / ScrH(), bit.bor(press, keys), analog) end
-	if SessionMarker(now) then return end
+	if not skip.step then Perf.Time("step", skate3.Step, FrameTime(), ScrW() / ScrH(), keys, analog) end
+	-- The contextual menu reads the same buttons the simulation does (it never
+	-- takes L1 from it, so mach 1 works as ever). It says when it took the
+	-- skater to their marker, which restarts the ride.
+	local input = skate3.GetInput and skate3.GetInput()
+	if Menu.Update(now, pose, bit.bor(input and input.buttons or 0, Keyboard.buttons)) then return end
 	if not skip.pose or not pose then pose = Perf.Time("get pose", skate3.GetPose) or pose end
 	if pose and pose.tick ~= lastTick then
 		local frozen = now - tickAt
@@ -598,7 +543,10 @@ end)
 -- has its own switch (skate3_score_hud), and the status line's
 -- (skate3_hud) must never hide it.
 hook.Add("HUDPaint", "skate3_score", function()
-	if active and pose and not Skater.Skip.score then Score.Draw(pose) end
+	if active and pose and not Skater.Skip.score then
+		Score.Draw(pose)
+		Menu.Draw(pose)
+	end
 end)
 
 hook.Add("HUDPaint", "skate3_hud", function()
