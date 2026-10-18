@@ -71,6 +71,7 @@ return function(Skater, Others, Score)
 	local hurt = { at = -math.huge } -- the last hit taken, for the flash
 	local pending -- a hit from the server waiting for the next frame
 	local debugLines = {}
+	local debugPose
 
 	local Players = {}
 
@@ -153,10 +154,14 @@ return function(Skater, Others, Score)
 	-- Who a punch or swing from here reaches.
 	local function Targets(def, pose)
 		local me = V(pose.pos)
-		local facing = V(pose.forward or { 1, 0, 0 })
-		facing.z = 0
-		if facing:LengthSqr() < 1e-4 then return {} end
-		facing:Normalize()
+		-- The way the body drawn faces; the skater's root heading isn't it on foot.
+		local facing = Skater.Facing()
+		if not facing then
+			facing = V(pose.forward or { 1, 0, 0 })
+			facing.z = 0
+			if facing:LengthSqr() < 1e-4 then return {} end
+			facing:Normalize()
+		end
 		local found = {}
 		for _, ply in ipairs(player.GetAll()) do
 			local pos = Other(ply)
@@ -233,6 +238,7 @@ return function(Skater, Others, Score)
 	-- is everything held (pad and keyboard). Returns the buttons and the
 	-- { lx, ly, rx, ry, lt, rt } to press on top of the player's own.
 	function Players.Think(now, pose, buttons)
+		debugPose = pose
 		if cv_debug:GetBool() then debugLines = {} end
 		if pose and pose.state then
 			Hurt(now, pose)
@@ -272,6 +278,11 @@ return function(Skater, Others, Score)
 			draw.SimpleTextOutlined(line, "DermaDefaultBold", 16, y, color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, 1, color_black)
 			y = y + 16
 		end
+		local face, root = Skater.Facing(), debugPose and debugPose.forward
+		draw.SimpleTextOutlined(("facing (body) yaw %s, root heading yaw %s"):format(
+			face and ("%.0f"):format(face:Angle().y) or "none", root and ("%.0f"):format(Vector(root[1], root[2], 0):Angle().y) or "none"),
+			"DermaDefaultBold", 16, y, color_white, TEXT_ALIGN_LEFT, TEXT_ALIGN_TOP, 1, color_black)
+		y = y + 16
 		draw.SimpleTextOutlined(("collision %s, hits %s, melee %s, strike %s"):format(
 			Server("skate3_player_collision", 1) ~= 0 and "on" or "off", Server("skate3_player_hits", 1) ~= 0 and "on" or "off",
 			cv_melee:GetBool() and "on" or "off", strike and HITS[strike.kind].name or "none"),
