@@ -33,6 +33,8 @@ pub enum Job {
     Suspend,
     /// Objects on top of the map, such as spawned props, in Source units.
     Props { extra: Vec<[Vec3; 3]> },
+    /// Where the map's moving brush entities (doors...) stand now.
+    Doors { live: Vec<crate::bsp::Live> },
 }
 
 #[derive(Clone, Default)]
@@ -164,6 +166,22 @@ struct Built {
     props: usize,
 }
 
+/// The triangles of the moving brush entities where `live` has them now.
+fn door_triangles(
+    movers: &[(usize, Vec<Vec<[f32; 4]>>)],
+    live: &[crate::bsp::Live],
+) -> Vec<[Vec3; 3]> {
+    let mut out = Vec::new();
+    for planes in crate::bsp::placed(movers, live) {
+        for face in collision::brush_faces(&planes) {
+            for i in 1..face.len().saturating_sub(1) {
+                out.push([face[0], face[i], face[i + 1]]);
+            }
+        }
+    }
+    out
+}
+
 /// Starts building the map with `extra` on top, on its own thread.
 fn build_props(
     builder: skate_bridge::bridge::CollisionBuilder,
@@ -240,6 +258,15 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let (built_tx, built_rx) = mpsc::channel::<Built>();
     let mut building: Option<std::thread::JoinHandle<()>> = None;
     let mut pending: Option<Vec<[Vec3; 3]>> = None;
+    // When the newest change came in: a build starts a moment after the last
+    // of a burst (props and doors change together), not once for each.
+    let mut pending_at = std::time::Instant::now();
+    // What goes on top of the map: spawned and streamed props from Lua, and
+    // the moving brush entities (their brushes in their own space, then
+    // where they stand now). Any change builds the whole lot again.
+    let mut props_extra: Vec<[Vec3; 3]> = Vec::new();
+    let mut movers: Vec<(usize, Vec<Vec<[f32; 4]>>)> = Vec::new();
+    let mut door_extra: Vec<[Vec3; 3]> = Vec::new();
     let mut map_id: u64 = 0;
     loop {
         let job = match jobs.recv_timeout(std::time::Duration::from_millis(50)) {
@@ -299,26 +326,36 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
             }
         }
         if building.is_none()
+            && pending_at.elapsed() >= std::time::Duration::from_millis(30)
             && let (Some(s), Some(m)) = (session.as_ref(), map.as_ref())
             && let Some(extra) = pending.take()
         {
             building = build_props(s.collision_builder(), m, map_id, extra, built_tx.clone());
         }
         let Some(job) = job else { continue };
-        if let Job::Props { extra } = job {
-            pending = Some(extra);
-            if building.is_none()
-                && let (Some(s), Some(m)) = (session.as_ref(), map.as_ref())
-                && let Some(extra) = pending.take()
-            {
-                building = build_props(s.collision_builder(), m, map_id, extra, built_tx.clone());
+        let job = match job {
+            Job::Props { extra } => {
+                props_extra = extra;
+                pending = Some([props_extra.as_slice(), door_extra.as_slice()].concat());
+                pending_at = std::time::Instant::now();
+                None
             }
-            continue;
-        }
+            Job::Doors { live } => {
+                door_extra = door_triangles(&movers, &live);
+                pending = Some([props_extra.as_slice(), door_extra.as_slice()].concat());
+                pending_at = std::time::Instant::now();
+                None
+            }
+            other => Some(other),
+        };
+        let Some(job) = job else { continue };
         if matches!(job, Job::Load { .. }) {
             // Props belong to the map they were placed in.
             map_id = map_id.wrapping_add(1);
             pending = None;
+            props_extra.clear();
+            door_extra.clear();
+            movers.clear();
         }
         let riding = !matches!(job, Job::Load { .. });
         // A panic in the engine fails this job instead of silently killing
@@ -339,6 +376,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         });
                         let solids = crate::bsp::parse_live(&bsp, &live)?;
                         drop(bsp);
+                        movers = solids.movers;
                         let mut triangles = solids.triangles;
                         triangles.extend(extra);
                         stage("finding grind rails");
@@ -469,7 +507,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             set(&|s| s.pose = Some(pose.clone()));
                         }
                     }
-                    Job::Props { .. } => {}
+                    Job::Props { .. } | Job::Doors { .. } => {}
                     Job::Suspend => {
                         if let Some(session) = session.as_mut().filter(|_| !broken) {
                             record(&mut recording, &mut recording_full, Event::Suspend);

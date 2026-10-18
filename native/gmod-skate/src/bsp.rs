@@ -37,6 +37,10 @@ pub struct Solids {
     pub brushes: Vec<Vec<[f32; 4]>>,
     /// Displacement triangles, wound counterclockwise seen from their top.
     pub triangles: Vec<[Vec3; 3]>,
+    /// Brush entities that move (doors, lifts, trains), kept out of
+    /// `brushes`: each one's model number and its brushes as compiled, in the
+    /// entity's own space. Lua says where they stand now ([`placed`]).
+    pub movers: Vec<(usize, Vec<Vec<[f32; 4]>>)>,
 }
 
 pub fn parse(data: &[u8]) -> Result<Solids, String> {
@@ -59,10 +63,44 @@ pub fn parse_live(data: &[u8], live: &[Live]) -> Result<Solids, String> {
     let bsp = Bsp::new(data)?;
     let planes = bsp.planes()?;
     let owners = bsp.solid_brushes(live);
+    let (brushes, movers) = bsp.brushes(&planes, owners.as_ref())?;
     Ok(Solids {
-        brushes: bsp.brushes(&planes, owners.as_ref())?,
+        brushes,
         triangles: bsp.displacements(&planes)?,
+        movers,
     })
+}
+
+/// The movers' brushes where the game has them now, as planes in map space:
+/// the ones in `live` that are solid. A mover that isn't in `live` (the game
+/// has no such entity) is left out.
+pub fn placed(movers: &[(usize, Vec<Vec<[f32; 4]>>)], live: &[Live]) -> Vec<Vec<[f32; 4]>> {
+    let mut out = Vec::new();
+    for (model, brushes) in movers {
+        let Some(l) = live.iter().find(|l| l.model == *model && l.solid) else {
+            continue;
+        };
+        let place = Place {
+            origin: l.origin,
+            angles: l.angles,
+            mover: None,
+        };
+        if !(l.origin.is_finite() && l.angles.is_finite()) {
+            continue;
+        }
+        for brush in brushes {
+            out.push(
+                brush
+                    .iter()
+                    .map(|p| {
+                        let (n, d) = place.plane(Vec3::new(p[0], p[1], p[2]), p[3]);
+                        [n.x, n.y, n.z, d]
+                    })
+                    .collect(),
+            );
+        }
+    }
+    out
 }
 
 struct Bsp<'a> {
@@ -174,15 +212,26 @@ impl<'a> Bsp<'a> {
             .into_iter()
             .filter_map(
                 |(model, place)| match live.iter().find(|l| l.model == model) {
+                    // The game moves these about: Lua places them as they
+                    // stand, so here they only wait in their own space.
+                    Some(_) if place.mover.is_some() => Some((
+                        model,
+                        Place {
+                            mover: Some(model),
+                            ..Place::default()
+                        },
+                    )),
                     Some(l) if !l.solid => None,
                     Some(l) => Some((
                         model,
                         Place {
                             origin: l.origin,
                             angles: l.angles,
+                            mover: None,
                         },
                     )),
-                    None => Some((model, place)),
+                    // Nobody to say where it stands: where it was compiled.
+                    None => Some((model, Place { mover: None, ..place })),
                 },
             );
         let mut keep = vec![None; count];
@@ -221,13 +270,15 @@ impl<'a> Bsp<'a> {
         keep.iter().any(Option::is_some).then_some(keep)
     }
 
+    #[allow(clippy::type_complexity)]
     fn brushes(
         &self,
         planes: &[Plane],
         keep: Option<&Vec<Option<Place>>>,
-    ) -> Result<Vec<Vec<[f32; 4]>>, String> {
+    ) -> Result<(Vec<Vec<[f32; 4]>>, Vec<(usize, Vec<Vec<[f32; 4]>>)>), String> {
         let sides = self.lump(LUMP_BRUSHSIDES, 8)?;
         let mut out = Vec::new();
+        let mut movers: Vec<(usize, Vec<Vec<[f32; 4]>>)> = Vec::new();
         for (index, brush) in self.lump(LUMP_BRUSHES, 12)?.chunks_exact(12).enumerate() {
             let place = match keep {
                 Some(k) => match k.get(index).copied().flatten() {
@@ -260,10 +311,16 @@ impl<'a> Bsp<'a> {
                 }
             }
             if brush_planes.len() >= 4 {
-                out.push(brush_planes);
+                match place.mover {
+                    Some(model) => match movers.iter_mut().find(|(m, _)| *m == model) {
+                        Some((_, list)) => list.push(brush_planes),
+                        None => movers.push((model, vec![brush_planes])),
+                    },
+                    None => out.push(brush_planes),
+                }
             }
         }
-        Ok(out)
+        Ok((out, movers))
     }
 
     fn displacements(&self, planes: &[Plane]) -> Result<Vec<[Vec3; 3]>, String> {
@@ -385,6 +442,9 @@ struct Place {
     origin: Vec3,
     /// Pitch, yaw and roll in degrees.
     angles: Vec3,
+    /// Set for a brush entity that moves and is placed by Lua at run time:
+    /// its model number.
+    mover: Option<usize>,
 }
 
 impl Place {
@@ -447,6 +507,22 @@ fn three(value: &str) -> Option<Vec3> {
     let v = Vec3::new(parts.next()??, parts.next()??, parts.next()??);
     v.is_finite().then_some(v)
 }
+
+/// Brush entities that change place while the map runs. Their brushes are
+/// compiled where they start (a door closed), so the game says where they
+/// stand now and they're laid over the map like props (cl_live_props.lua
+/// keeps the same list).
+const MOVERS: &[&str] = &[
+    "func_door",
+    "func_door_rotating",
+    "func_movelinear",
+    "func_lookdoor",
+    "func_plat",
+    "func_platrot",
+    "func_train",
+    "func_tracktrain",
+    "func_rotating",
+];
 
 /// Brush entities a skater should hit, by model number (`"model" "*3"`),
 /// with where they sit: the func_ ones that stay solid. Triggers and the
@@ -518,6 +594,9 @@ fn solid_brush_models(entities: &[u8]) -> Vec<(usize, Place)> {
             && !NOT_SOLID.contains(&class.as_str())
             && !never_solid
         {
+            if MOVERS.contains(&class.as_str()) {
+                place.mover = Some(model);
+            }
             out.push((model, place));
         }
     }
@@ -712,6 +791,104 @@ pub(crate) mod tests {
             ..at(Vec3::ZERO, false)
         };
         assert_eq!(parse_live(&data, &[other]).unwrap().brushes.len(), 2);
+    }
+
+
+    #[test]
+    fn doors_wait_for_the_game_to_say_where_they_stand() {
+        let world = "{\n\"classname\" \"worldspawn\"\n}\n";
+        let data = world_and_entity(&format!(
+            "{world}{{\n\"classname\" \"func_door\" \"model\" \"*1\"\n}}\n"
+        ));
+        let at = |origin: Vec3, solid: bool| Live {
+            model: 1,
+            solid,
+            origin,
+            angles: Vec3::ZERO,
+        };
+        // Without word from the game a door is where it was compiled.
+        let solids = parse(&data).unwrap();
+        assert_eq!(solids.brushes.len(), 2);
+        assert!(solids.movers.is_empty());
+        // With it, the door leaves the map and waits to be placed.
+        let live = [at(Vec3::ZERO, true)];
+        let solids = parse_live(&data, &live).unwrap();
+        assert_eq!(solids.brushes.len(), 1);
+        assert_eq!(solids.movers.len(), 1);
+        assert_eq!(solids.movers[0].0, 1);
+        // Closed, open (slid 3000 along y) and not solid at all.
+        assert_eq!(placed(&solids.movers, &live).len(), 1);
+        let open = [at(Vec3::new(0., 3000., 0.), true)];
+        let brushes = placed(&solids.movers, &open);
+        assert_eq!(brushes.len(), 1);
+        assert!(
+            brushes[0]
+                .iter()
+                .any(|q| q[1] > 0.99 && (q[3] - 3064.).abs() < 0.01)
+        );
+        assert!(placed(&solids.movers, &[at(Vec3::ZERO, false)]).is_empty());
+        assert!(placed(&solids.movers, &[]).is_empty());
+        let bad = [at(Vec3::new(f32::NAN, 0., 0.), true)];
+        assert!(placed(&solids.movers, &bad).is_empty());
+    }
+
+    #[test]
+    fn a_rotating_door_swings_about_its_origin() {
+        let world = "{\n\"classname\" \"worldspawn\"\n}\n";
+        let data = world_and_entity(&format!(
+            "{world}{{\n\"classname\" \"func_door_rotating\" \"origin\" \"1000 0 0\" \"model\" \"*1\"\n}}\n"
+        ));
+        let closed = Live {
+            model: 1,
+            solid: true,
+            origin: Vec3::new(1000., 0., 0.),
+            angles: Vec3::ZERO,
+        };
+        let solids = parse_live(&data, &[closed]).unwrap();
+        // Swung a quarter turn: its +x side (64 out) now faces +y.
+        let open = Live {
+            angles: Vec3::new(0., 90., 0.),
+            ..closed
+        };
+        let brushes = placed(&solids.movers, &[open]);
+        assert!(
+            brushes[0]
+                .iter()
+                .any(|q| q[1] > 0.99 && (q[3] - 64.).abs() < 0.01)
+        );
+    }
+
+    /// `S3GM_TEST_BSP=maps/x.bsp cargo test -p gmod-skate real_map -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn real_map_report() {
+        let Ok(path) = std::env::var("S3GM_TEST_BSP") else {
+            return;
+        };
+        let data = std::fs::read(path).unwrap();
+        let bsp = Bsp::new(&data).unwrap();
+        let entities = bsp.lump(LUMP_ENTITIES, 1).unwrap();
+        let live: Vec<Live> = solid_brush_models(&entities)
+            .into_iter()
+            .map(|(model, place)| Live {
+                model,
+                solid: true,
+                origin: place.origin,
+                angles: place.angles,
+            })
+            .collect();
+        let started = std::time::Instant::now();
+        let solids = parse_live(&data, &live).unwrap();
+        println!(
+            "{} brushes, {} displacement triangles, {} movers ({} brushes), parsed in {:?}",
+            solids.brushes.len(),
+            solids.triangles.len(),
+            solids.movers.len(),
+            solids.movers.iter().map(|m| m.1.len()).sum::<usize>(),
+            started.elapsed()
+        );
+        let placed = placed(&solids.movers, &live);
+        println!("{} mover brushes placed where compiled", placed.len());
     }
 
     #[test]

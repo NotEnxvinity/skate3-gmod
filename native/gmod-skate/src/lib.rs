@@ -93,6 +93,18 @@ lua_fn!(init, |lua| {
 
 static ASSETS: Mutex<Option<PathBuf>> = Mutex::new(None);
 
+fn live_brushes(flat: Vec<f32>) -> Vec<crate::bsp::Live> {
+    flat.chunks_exact(8)
+        .filter(|e| e[0] >= 1.)
+        .map(|e| crate::bsp::Live {
+            model: e[0] as usize,
+            solid: e[1] != 0.,
+            origin: Vec3::new(e[2], e[3], e[4]),
+            angles: Vec3::new(e[5], e[6], e[7]),
+        })
+        .collect()
+}
+
 lua_fn!(load_map, |lua| {
     let Some(bsp) = lua.bytes(1) else {
         return lua.fail("LoadMap expects the map's .bsp contents as a string");
@@ -112,18 +124,7 @@ lua_fn!(load_map, |lua| {
         .collect();
     // Optional flat {model, solid (0/1), x, y, z, pitch, yaw, roll, ...}:
     // the map's brush entities as the game has them now.
-    let live = lua
-        .numbers(3)
-        .unwrap_or_default()
-        .chunks_exact(8)
-        .filter(|e| e[0] >= 1.)
-        .map(|e| crate::bsp::Live {
-            model: e[0] as usize,
-            solid: e[1] != 0.,
-            origin: Vec3::new(e[2], e[3], e[4]),
-            angles: Vec3::new(e[5], e[6], e[7]),
-        })
-        .collect();
+    let live = live_brushes(lua.numbers(3).unwrap_or_default());
     let Some(assets) = ASSETS.lock().ok().and_then(|a| a.clone()) else {
         return lua.fail("call skate3.Init first");
     };
@@ -174,6 +175,21 @@ lua_fn!(set_props, |lua| {
         })
         .collect();
     match with_runtime(|r| r.send(Job::Props { extra })) {
+        Some(()) => {
+            lua.push_bool(true);
+            1
+        }
+        None => lua.fail("call skate3.Init first"),
+    }
+});
+
+// Where the map's moving brush entities (doors, lifts) stand now, as the flat
+// {model, solid (0/1), x, y, z, pitch, yaw, roll, ...} LoadMap takes. Only the
+// ones that were handed to LoadMap as live are moved. Replaces the last set;
+// swapped in mid-ride once built.
+lua_fn!(set_brushes, |lua| {
+    let live = live_brushes(lua.numbers(1).unwrap_or_default());
+    match with_runtime(|r| r.send(Job::Doors { live })) {
         Some(()) => {
             lua.push_bool(true);
             1
@@ -611,6 +627,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Init", init as lua::CFunction),
         (c"LoadMap", load_map),
         (c"SetProps", set_props),
+        (c"SetBrushes", set_brushes),
         (c"Unlzma", unlzma),
         (c"SetHallOfMeat", set_hall_of_meat),
         (c"BrokenBone", broken_bone),

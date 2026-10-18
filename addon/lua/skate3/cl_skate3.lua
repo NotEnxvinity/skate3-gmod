@@ -17,7 +17,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
-print("[skate3] lua build: v2.2.1")
+print("[skate3] lua build: v2.2.2-collision-test-1")
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
@@ -59,6 +59,9 @@ local stalls, longestStall = 0, 0
 local function Say(...)
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white, ...)
 end
+
+-- Doors and buttons while skating (S3GM_Interact.Use / .Target).
+include("skate3/cl_interact.lua")(function() return active and pose end)
 
 local function V(t)
 	return Vector(t[1], t[2], t[3])
