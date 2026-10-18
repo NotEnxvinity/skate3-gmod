@@ -98,7 +98,7 @@ function S3.Draw(v)
 	end
 
 	local color = v.live and WHITE or (v.good and LINE or RED)
-	local big = v.live and v.sequence or v.points
+	local big = v.live and v.sequence or v.banked or v.points
 	UI.Futura(big or v.points, SCORE_X, SCORE_Y, SCORE_H, color, a, TEXT_ALIGN_LEFT)
 	if v.live and v.line then
 		UI.Futura("LINE: " .. v.line, LINE_X, LINE_Y, LINE_H, LINE, a * 0.9, TEXT_ALIGN_LEFT)

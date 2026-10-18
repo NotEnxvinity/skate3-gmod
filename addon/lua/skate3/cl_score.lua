@@ -174,7 +174,11 @@ local wasLive = false
 -- number: no score comes with them. Garry's Mod units are inches.
 local readouts = {} -- { air = { feet, at }, manual = { feet, at } }
 local airFrom, manualLast, manualFeet
-local MIN_AIR_FEET, MIN_MANUAL_FEET = 8, 10
+-- How far a jump or a manual has to go before its box shows (feet).
+local cv_air_min = CreateClientConVar("skate3_ui_air_min_feet", "100", true, false,
+	"Show the Air Distance box once a jump goes at least this many feet")
+local cv_manual_min = CreateClientConVar("skate3_ui_manual_min_feet", "50", true, false,
+	"Show the Manual Distance box once a manual goes at least this many feet")
 
 local function Flat(a, b)
 	local dx, dy = a[1] - b[1], a[2] - b[2]
@@ -220,7 +224,7 @@ local function Distances(pose, sc, bailing, now)
 	elseif not air and airFrom then
 		local feet = Flat(pos, airFrom)
 		airFrom = nil
-		if not bailing and feet >= MIN_AIR_FEET then readouts.air = { feet = feet, at = now } end
+		if not bailing and feet >= cv_air_min:GetFloat() then readouts.air = { feet = feet, at = now } end
 	end
 
 	local manual = sc.active and not air and (sc.trick or ""):upper():find("MANUAL") ~= nil
@@ -228,7 +232,7 @@ local function Distances(pose, sc, bailing, now)
 		if not manualLast then manualLast, manualFeet = { pos[1], pos[2], pos[3] }, 0 end
 		manualFeet = manualFeet + Flat(pos, manualLast)
 		manualLast = { pos[1], pos[2], pos[3] }
-		if manualFeet >= MIN_MANUAL_FEET then readouts.manual = { feet = manualFeet, at = now } end
+		if manualFeet >= cv_manual_min:GetFloat() then readouts.manual = { feet = manualFeet, at = now } end
 	elseif manualLast then
 		manualLast = nil
 	end
@@ -305,6 +309,8 @@ local function Update(pose)
 		timer = live and sc.timer or 0,
 		multiplier = live and sc.multiplier or 1,
 		points = showFlash and flash.text or Points(shown),
+		-- Skate 3's look shows what was banked as a plain number, no "+".
+		banked = showFlash and flash.good and Points(flash.value) or nil,
 		-- The same as a bare number, for fonts with only digits.
 		value = math.floor((showFlash and flash.value or shown) + 0.5),
 		good = not showFlash or flash.good,
