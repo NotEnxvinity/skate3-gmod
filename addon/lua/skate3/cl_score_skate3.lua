@@ -51,6 +51,19 @@ local function Multiplier(m)
 	return (m == math.floor(m) and "x%d" or "x%.1f"):format(m)
 end
 
+-- The distance boxes ("Air Distance 30.2 ft") stacked above the trick stack,
+-- newest at the bottom: dark translucent boxes with a thin light edge.
+local BOX_X, BOX_BOTTOM, BOX_STEP, BOX_H, BOX_TEXT = 120, 420, 32, 25, 19
+local function Readouts(rows, a)
+	for i, text in ipairs(rows) do
+		local y = BOX_BOTTOM - (#rows - i) * BOX_STEP - BOX_H / 2
+		local w = UI.FuturaWidth(text, BOX_TEXT) + 22
+		UI.Rounded(4, BOX_X, y, w, BOX_H, Color(120, 140, 175, 150 * a))
+		UI.Rounded(3, BOX_X + 1, y + 1, w - 2, BOX_H - 2, Color(18, 28, 52, 205 * a))
+		UI.Futura(text, BOX_X + 11, y + 2, BOX_TEXT, TRICK, a, TEXT_ALIGN_LEFT)
+	end
+end
+
 -- Hall of Meat's score, as the retail game draws it: a frosted panel bottom
 -- left with the "Hall of Meat" caption over the bail's score in cream. (The
 -- magazine logo above the caption comes from the disc and isn't drawn yet.)
@@ -87,6 +100,8 @@ function S3.Draw(v)
 	if v.live and v.line then
 		UI.Futura("LINE: " .. v.line, LINE_X, LINE_Y, LINE_H, LINE, a * 0.9, TEXT_ALIGN_LEFT)
 	end
+
+	if v.readouts and #v.readouts > 0 then Readouts(v.readouts, a) end
 
 	local stack = v.tricks
 	if stack and #stack > 0 then

@@ -170,6 +170,16 @@ local tricks = {} -- this line's trick names, oldest first (the stack above the 
 local lastLabel = ""
 local lastSeq = 0 -- the last trick sequence's score, the big number in Skate 3's look
 local wasLive = false
+-- Distance readouts (Skate 3's "Air Distance 30.2 ft" boxes). They only show a
+-- number: no score comes with them. Garry's Mod units are inches.
+local readouts = {} -- { air = { feet, at }, manual = { feet, at } }
+local airFrom, manualLast, manualFeet
+local MIN_AIR_FEET, MIN_MANUAL_FEET = 8, 10
+
+local function Flat(a, b)
+	local dx, dy = a[1] - b[1], a[2] - b[2]
+	return math.sqrt(dx * dx + dy * dy) / 12
+end
 local seenAt = -math.huge -- when the widget last had something live to show
 local view -- what to draw this frame, or nil
 
@@ -198,6 +208,42 @@ local function Fakie(pose)
 	local horizontal = math.sqrt(v[1] * v[1] + v[2] * v[2])
 	if horizontal < 40 then return false end
 	return (v[1] * f[1] + v[2] * f[2]) < -0.6 * horizontal
+end
+
+-- Watches the jump and the manual for how far they went.
+local function Distances(pose, sc, bailing, now)
+	local pos, state = pose.pos, pose.state or ""
+	if not pos then return end
+	local air = state:find("Air") ~= nil
+	if air and not airFrom then
+		airFrom = { pos[1], pos[2], pos[3] }
+	elseif not air and airFrom then
+		local feet = Flat(pos, airFrom)
+		airFrom = nil
+		if not bailing and feet >= MIN_AIR_FEET then readouts.air = { feet = feet, at = now } end
+	end
+
+	local manual = sc.active and not air and (sc.trick or ""):upper():find("MANUAL") ~= nil
+	if manual then
+		if not manualLast then manualLast, manualFeet = { pos[1], pos[2], pos[3] }, 0 end
+		manualFeet = manualFeet + Flat(pos, manualLast)
+		manualLast = { pos[1], pos[2], pos[3] }
+		if manualFeet >= MIN_MANUAL_FEET then readouts.manual = { feet = manualFeet, at = now } end
+	elseif manualLast then
+		manualLast = nil
+	end
+end
+
+local function ReadoutRows()
+	local rows = {}
+	for label, key in pairs({ ["Air Distance"] = "air", ["Manual Distance"] = "manual" }) do
+		local r = readouts[key]
+		if r then rows[#rows + 1] = { at = r.at, text = ("%s %.1f ft"):format(label, r.feet) } end
+	end
+	table.sort(rows, function(a, b) return a.at < b.at end)
+	local out = {}
+	for i, r in ipairs(rows) do out[i] = r.text end
+	return out
 end
 
 -- Works out this frame's view from the engine's score.
@@ -232,8 +278,9 @@ local function Update(pose)
 	last = { banked = sc.banked, active = sc.active, sequence = sc.sequence, line = sc.line }
 
 	local live = sc.active or sc.timer > 0
+	Distances(pose, sc, bailing, now)
 	if live then
-		if not wasLive then tricks, lastLabel, lastSeq = {}, "", 0 end
+		if not wasLive then tricks, lastLabel, lastSeq, readouts = {}, "", 0, {} end
 		seenAt = now
 		shown = sc.line + (sc.active and sc.sequence or 0)
 		if sc.trick ~= "" then lastTrick = sc.trick end
@@ -268,6 +315,7 @@ local function Update(pose)
 		sequence = Points(lastSeq > 0 and lastSeq or shown),
 		line = Points(shown),
 		stance = Fakie(pose) and "FAKIE" or nil,
+		readouts = ReadoutRows(),
 	}
 end
 
@@ -372,6 +420,9 @@ hook.Add("HUDShouldDraw", "skate3_hide_hl2_hud", function(name)
 	if HL2_HUD[name] and CurTime() - drawnAt < 0.25 and UI.Style() ~= "hl2" then return false end
 end)
 
+-- What this frame's widget shows, or nil (for tests and other HUD code).
+function Score.View() return view end
+
 function Score.Draw(pose)
 	drawnAt = CurTime()
 	Update(pose)
@@ -426,6 +477,7 @@ function Score.Reset()
 	Meat.Reset()
 	last, flash, shown, lastTrick, seenAt, view, worldOffset = nil, nil, 0, "", -math.huge, nil, nil
 	tricks, lastLabel, lastSeq, wasLive = {}, "", 0, false
+	readouts, airFrom, manualLast = {}, nil, nil
 end
 
 return Score
