@@ -50,6 +50,23 @@ local MOVERS = {
 	func_plat = true, func_platrot = true, func_train = true, func_tracktrain = true, func_rotating = true,
 }
 
+-- A brush entity is a mover too when it hangs off one (a door built of a
+-- func_door_rotating with func_brush and func_breakable children, as in
+-- gm_funkis): it goes where the door goes.
+local function IsMover(ent)
+	local mover = MOVERS[ent:GetClass()]
+	if not mover then
+		local up = ent:GetParent()
+		for _ = 1, 8 do
+			if not IsValid(up) then return false end
+			if MOVERS[up:GetClass()] or up:GetClass() == "prop_door_rotating" then mover = true break end
+			up = up:GetParent()
+		end
+		if not mover then return false end
+	end
+	return tonumber((ent:GetModel() or ""):match("^%*(%d+)$")) ~= nil
+end
+
 -- Collision groups players walk through: the board does too.
 local PASSABLE = {
 	[COLLISION_GROUP_DEBRIS] = true,
@@ -345,14 +362,14 @@ local function Scan(now)
 		-- as they are.
 		local first = not brushesSent
 		for _, ent in ipairs(ents.GetAll()) do
-			if MOVERS[ent:GetClass()] and not ent:IsDormant() and tonumber((ent:GetModel() or ""):match("^%*(%d+)$")) then
+			if not ent:IsDormant() and IsMover(ent) then
 				local place = BrushPlace(ent)
 				local s = brushSeen[ent]
 				if not s or s.place ~= place then
 					s = { place = place, since = first and now - STILL_FOR or now }
 				end
 				-- One switched off (or opened non-solid) isn't in the collision at all.
-				if now - s.since >= STILL_FOR and ent:IsSolid() then settled[ent] = place end
+				if now - s.since >= STILL_FOR and ent:IsSolid() and not PASSABLE[ent:GetCollisionGroup()] then settled[ent] = place end
 				freshBrush[ent] = s
 			elseif brushCurrent[ent] and ent:IsValid() and ent:IsDormant() then
 				-- Out of sight: stays where it was.

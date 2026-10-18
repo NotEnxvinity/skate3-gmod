@@ -10,6 +10,7 @@
 //! those over separately.
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 
 use glam::{Mat3, Vec3};
 
@@ -564,11 +565,44 @@ fn solid_brush_models(entities: &[u8]) -> Vec<(usize, Place)> {
         "func_upgradestation",
     ];
     let text = String::from_utf8_lossy(entities);
+    // Who hangs off whom: a brush entity parented to a door goes where the
+    // door goes. gm_funkis builds its doors out of func_door_rotating plus
+    // func_brush and func_breakable (glass) children, and the children stayed
+    // behind in the closed position as invisible walls.
+    let mut parents: HashMap<&str, (&str, &str)> = HashMap::new();
+    for block in text.split('{').skip(1) {
+        let block = block.split('}').next().unwrap_or("");
+        let mut fields = block.split('"').skip(1).step_by(2);
+        let (mut class, mut name, mut parent) = ("", "", "");
+        while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
+            match key.to_ascii_lowercase().as_str() {
+                "classname" => class = value,
+                "targetname" => name = value,
+                "parentname" => parent = value.split(',').next().unwrap_or(""),
+                _ => {}
+            }
+        }
+        if !name.is_empty() {
+            parents.insert(name, (class, parent));
+        }
+    }
+    fn moves_with_parent<'a>(parents: &HashMap<&'a str, (&'a str, &'a str)>, mut parent: &'a str) -> bool {
+        for _ in 0..8 {
+            let Some(&(class, up)) = parents.get(parent) else {
+                return false;
+            };
+            if MOVERS.contains(&class) || class == "prop_door_rotating" {
+                return true;
+            }
+            parent = up;
+        }
+        false
+    }
     let mut out = Vec::new();
     for block in text.split('{').skip(1) {
         let block = block.split('}').next().unwrap_or("");
         let mut fields = block.split('"').skip(1).step_by(2);
-        let (mut class, mut model, mut never_solid) = ("", None, false);
+        let (mut class, mut model, mut never_solid, mut parent) = ("", None, false, "");
         let mut place = Place::default();
         while let (Some(key), Some(value)) = (fields.next(), fields.next()) {
             match key.to_ascii_lowercase().as_str() {
@@ -578,6 +612,7 @@ fn solid_brush_models(entities: &[u8]) -> Vec<(usize, Place)> {
                 "solidity" => never_solid = value == "1",
                 "origin" => place.origin = three(value).unwrap_or_default(),
                 "angles" => place.angles = three(value).unwrap_or_default(),
+                "parentname" => parent = value.split(',').next().unwrap_or(""),
                 _ => {}
             }
         }
@@ -598,7 +633,7 @@ fn solid_brush_models(entities: &[u8]) -> Vec<(usize, Place)> {
             && !NOT_SOLID.contains(&class.as_str())
             && !never_solid
         {
-            if MOVERS.contains(&class.as_str()) {
+            if MOVERS.contains(&class.as_str()) || moves_with_parent(&parents, parent) {
                 place.mover = Some(model);
             }
             out.push((model, place));
@@ -834,6 +869,24 @@ pub(crate) mod tests {
         assert!(placed(&solids.movers, &[]).is_empty());
         let bad = [at(Vec3::new(f32::NAN, 0., 0.), true)];
         assert!(placed(&solids.movers, &bad).is_empty());
+    }
+
+    #[test]
+    fn what_hangs_off_a_door_moves_with_it() {
+        // gm_funkis: the glass and the leaf are children of the door.
+        let text = "{\"classname\" \"func_door_rotating\" \"targetname\" \"door\" \"model\" \"*1\"}\n\
+            {\"classname\" \"func_breakable\" \"parentname\" \"door\" \"model\" \"*2\"}\n\
+            {\"classname\" \"func_brush\" \"targetname\" \"mid\" \"parentname\" \"door,hinge\" \"model\" \"*3\"}\n\
+            {\"classname\" \"func_brush\" \"parentname\" \"mid\" \"model\" \"*4\"}\n\
+            {\"classname\" \"func_brush\" \"targetname\" \"wall\" \"model\" \"*5\"}\n\
+            {\"classname\" \"func_brush\" \"parentname\" \"wall\" \"model\" \"*6\"}\n\
+            {\"classname\" \"func_brush\" \"parentname\" \"nobody\" \"model\" \"*7\"}\n";
+        let movers: Vec<usize> = solid_brush_models(text.as_bytes())
+            .into_iter()
+            .filter(|(_, p)| p.mover.is_some())
+            .map(|(m, _)| m)
+            .collect();
+        assert_eq!(movers, vec![1, 2, 3, 4]);
     }
 
     #[test]
