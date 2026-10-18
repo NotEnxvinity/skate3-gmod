@@ -73,7 +73,7 @@ pub fn parse_live(data: &[u8], live: &[Live]) -> Result<Solids, String> {
 
 /// The movers' brushes where the game has them now, as planes in map space:
 /// the ones in `live` that are solid. A mover that isn't in `live` (the game
-/// has no such entity) is left out.
+/// doesn't have it, or it is moving or switched off) is left out.
 pub fn placed(movers: &[(usize, Vec<Vec<[f32; 4]>>)], live: &[Live]) -> Vec<Vec<[f32; 4]>> {
     let mut out = Vec::new();
     for (model, brushes) in movers {
@@ -214,7 +214,11 @@ impl<'a> Bsp<'a> {
                 |(model, place)| match live.iter().find(|l| l.model == model) {
                     // The game moves these about: Lua places them as they
                     // stand, so here they only wait in their own space.
-                    Some(_) if place.mover.is_some() => Some((
+                    // Whether the game has them yet doesn't matter: a door
+                    // far from the spawn isn't known to the client until the
+                    // skater comes near, and one baked in closed stayed a
+                    // wall when it opened.
+                    _ if place.mover.is_some() => Some((
                         model,
                         Place {
                             mover: Some(model),
@@ -806,11 +810,11 @@ pub(crate) mod tests {
             origin,
             angles: Vec3::ZERO,
         };
-        // Without word from the game a door is where it was compiled.
+        // A door is never part of the map: it waits to be placed, whether
+        // or not the game has said anything about it yet.
         let solids = parse(&data).unwrap();
-        assert_eq!(solids.brushes.len(), 2);
-        assert!(solids.movers.is_empty());
-        // With it, the door leaves the map and waits to be placed.
+        assert_eq!(solids.brushes.len(), 1);
+        assert_eq!(solids.movers.len(), 1);
         let live = [at(Vec3::ZERO, true)];
         let solids = parse_live(&data, &live).unwrap();
         assert_eq!(solids.brushes.len(), 1);

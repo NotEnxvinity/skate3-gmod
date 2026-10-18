@@ -95,6 +95,10 @@ pub struct Shared {
     pub revision: u32,
     /// Triangles of the objects laid over the map.
     pub props: usize,
+    /// Brush entities the map has that move (doors...), and how many of their
+    /// brushes were laid over the map by the last update.
+    pub movers: usize,
+    pub doors: usize,
 }
 
 pub struct Runtime {
@@ -172,16 +176,18 @@ struct Built {
 fn door_triangles(
     movers: &[(usize, Vec<Vec<[f32; 4]>>)],
     live: &[crate::bsp::Live],
-) -> Vec<[Vec3; 3]> {
+) -> (Vec<[Vec3; 3]>, usize) {
     let mut out = Vec::new();
-    for planes in crate::bsp::placed(movers, live) {
+    let placed = crate::bsp::placed(movers, live);
+    let pieces = placed.len();
+    for planes in placed {
         for face in collision::brush_faces(&planes) {
             for i in 1..face.len().saturating_sub(1) {
                 out.push([face[0], face[i], face[i + 1]]);
             }
         }
     }
-    out
+    (out, pieces)
 }
 
 /// Starts building the map with `extra` on top, on its own thread.
@@ -343,7 +349,9 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 None
             }
             Job::Doors { live } => {
-                door_extra = door_triangles(&movers, &live);
+                let (tris, pieces) = door_triangles(&movers, &live);
+                door_extra = tris;
+                set(&|s| s.doors = pieces);
                 pending = Some([props_extra.as_slice(), door_extra.as_slice()].concat());
                 pending_at = std::time::Instant::now();
                 None
@@ -379,6 +387,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         let solids = crate::bsp::parse_live(&bsp, &live)?;
                         drop(bsp);
                         movers = solids.movers;
+                        let mover_count = movers.len();
                         let mut triangles = solids.triangles;
                         triangles.extend(extra);
                         stage("finding grind rails");
@@ -426,6 +435,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             s.triangles = count;
                             s.rails = rails.clone();
                             s.props = 0;
+                            s.movers = mover_count;
+                            s.doors = 0;
                             s.revision = s.revision.wrapping_add(1);
                         });
                     }
