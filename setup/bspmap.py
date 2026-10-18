@@ -39,7 +39,9 @@ WALL = 64  # thickness of the box's six brushes
 
 FLOOR_MATERIAL = 'nature/grassfloor002a'
 SKY_MATERIAL = 'tools/toolsskybox'
-SKY_NAME = 'sky_day01_01'
+# gm_construct's look: Garry's Mod's own painted sky, a sun, fog and the
+# construct.outside soundscape (defined in Garry's Mod's own scripts).
+SKY_NAME = 'painted'
 
 # Units per lightmap luxel on the ground: the field is one face, and a
 # brush face's lightmap may be at most 32 luxels across.
@@ -107,8 +109,33 @@ def entities(park):
             'skate3_park': park,
         },
         {'classname': 'info_player_start', 'origin': '0 0 16', 'angles': '0 0 0'},
+        {'classname': 'light_environment', 'origin': '0 0 11000', 'targetname': 'sun_light', 'pitch': '-56',
+         'angles': '0 306 0', 'SunSpreadAngle': '6', '_light': '242 234 218 560', '_ambient': '114 136 148 420'},
+        {'classname': 'env_sun', 'origin': '0 0 12000', 'use_angles': '1', 'size': '16', 'rendercolor': '241 240 199',
+         'pitch': '-50', 'angles': '0 306 0', 'material': 'sprites/light_glow02_add_noz',
+         'overlaymaterial': 'sprites/light_glow02_add_noz', 'overlaysize': '-1', 'overlaycolor': '244 242 236'},
+        {'classname': 'shadow_control', 'origin': '0 0 256', 'angles': '90 0 0', 'distance': '1000', 'color': '187 187 187'},
+        {'classname': 'env_skypaint', 'origin': '0 0 10944', 'topcolor': '0.22 0.51 1.00', 'bottomcolor': '0.919 0.929 0.992',
+         'startexture': 'skybox/clouds', 'starspeed': '0.03', 'starscale': '2', 'starfade': '0.5', 'drawstars': '1',
+         'hdrscale': '0.56', 'fadebias': '0.1', 'duskscale': '0.5', 'duskintensity': '2', 'duskcolor': '1 1 1',
+         'sunsize': '0', 'sunposmethod': '1', 'sunnormal': '0 0 1', 'suncolor': '0 0 0'},
+        {'classname': 'env_fog_controller', 'origin': '0 0 10900', 'use_angles': '1', 'spawnflags': '1', 'angles': '0 35 0',
+         'fogenable': '1', 'fogstart': '1024', 'fogend': '250000', 'fogmaxdensity': '1', 'fogblend': '1',
+         'fogcolor': '142 164 178', 'fogcolor2': '142 164 178', 'fogdir': '1 0 0', 'farz': '-1'},
+        {'classname': 'env_tonemap_controller', 'origin': '0 0 10950', 'targetname': 'TonemapController'},
+        {'classname': 'logic_auto', 'origin': '0 0 10960', 'spawnflags': '1',
+         'OnMapSpawn': ['TonemapController,SetAutoExposureMax,1.8,0,-1', 'TonemapController,SetAutoExposureMin,0.7,0,-1',
+                        'TonemapController,SetBloomScale,0.3,0,-1', 'TonemapController,SetTonemapRate,0.2,0,-1']},
+        {'classname': 'env_soundscape', 'origin': '0 0 5632', 'targetname': 'soundscape_outside',
+         'soundscape': 'construct.outside', 'radius': '-1'},
     ]
-    text = ''.join('{\n' + ''.join(f'"{k}" "{v}"\n' for k, v in e.items()) + '}\n' for e in ents)
+    text = ''
+    for e in ents:
+        text += '{\n'
+        for k, v in e.items():
+            for value in (v if isinstance(v, list) else [v]):
+                text += f'"{k}" "{value}"\n'
+        text += '}\n'
     return text.encode() + b'\0'
 
 
