@@ -21,6 +21,11 @@ BUTTONS = ('A', 'B', 'X', 'Y', 'L_Bumper', 'R_Bumper', 'L_Trigger', 'R_Trigger',
 FONTS = {'heavy': 'Futura Std Medium', 'shadow': 'Futura Shadow'}
 # Shapes of the trickdisplay2 movie the score widget is built from.
 SHAPES = ('36', '38', '40', '43', '45', '46', '47', '51', '54', '57', '61', '64', '68', '72', '81')
+# Where an upscaled copy of a texture sits in the HD pack: the same names and
+# folders as the exported UI textures (ui/screens/hud2/trickdisplay2/35.png).
+HD_SCORE = 'ui/screens/hud2/trickdisplay2/%s.png'
+HD_PANEL = 'ui/screens/hud2/hudphonelist/%s.png'
+HD_BUTTON = 'ui/images/buttons/xbox360/buttons/button_%s_hud.png'
 PANEL = (91.0, 48.0)  # where the quick menu's panel sits on the canvas
 # The front-end archives the extractors read (miscboot.big is names.py's too).
 FROM_DISC = {'data/big/fedata.big', 'data/big/fetexture.big', 'data/big/fedynamic.big', 'data/big/miscboot.big'}
@@ -54,10 +59,12 @@ def build(scoring, marker, out, report=print):
     menu = json.loads((marker / 'hud.json').read_text(encoding='utf-8'))
     ui = {'version': 1, 'canvas': [1280, 720], 'textures': {}, 'shapes': {}, 'fonts': {}, 'buttons': {}, 'panel': {}}
 
-    def add_texture(name, raw, width, height):
+    def add_texture(name, raw, width, height, hd=None):
         if name not in ui['textures']:
             png(raw, width, height, out / (name + '.png'))
             ui['textures'][name] = {'w': width, 'h': height}
+            if hd:
+                ui['textures'][name]['hd'] = hd
         return name
 
     # The score widget's pieces.
@@ -68,8 +75,9 @@ def build(scoring, marker, out, report=print):
             if rect is None:
                 continue
             t = prim['texture']
-            name = add_texture('hud' + t['resource_name'].split('\\')[-1].split('.')[0],
-                               (scoring / t['rgba']).read_bytes(), t['width'], t['height'])
+            number = t['resource_name'].split('\\')[-1].split('.')[0]
+            name = add_texture('hud' + number, (scoring / t['rgba']).read_bytes(), t['width'], t['height'],
+                               HD_SCORE % number)
             pieces.append({'tex': name, 'quad': rect, 'color': prim['color']})
         ui['shapes'][shape] = pieces
 
@@ -99,7 +107,10 @@ def build(scoring, marker, out, report=print):
         if mesh['role'] != 'art':
             continue
         t = menu['textures'][mesh['texture']]
-        name = add_texture('panel%d' % mesh['texture'], (marker / t['file']).read_bytes(), t['width'], t['height'])
+        # source: .../hudphonelist/0001_2.Texture.rgba, the texture's number is 2
+        number = Path(t['source']).name.split('.')[0].split('_', 1)[-1]
+        name = add_texture('panel%d' % mesh['texture'], (marker / t['file']).read_bytes(), t['width'], t['height'],
+                           HD_PANEL % number)
         rect = quad(mesh['vertices'])
         if rect is None:
             continue
@@ -117,7 +128,8 @@ def build(scoring, marker, out, report=print):
         item = by_name.get(f'button_{button}_hud.Texture')
         if item is None:
             continue
-        ui['buttons'][button] = add_texture('btn_' + button, (bank / item['rgba_file']).read_bytes(), item['width'], item['height'])
+        ui['buttons'][button] = add_texture('btn_' + button, (bank / item['rgba_file']).read_bytes(), item['width'], item['height'],
+                                          HD_BUTTON % button)
 
     (out / 'ui.json').write_text(json.dumps(ui, separators=(',', ':')), encoding='utf-8')
     report(f'Skate 3 UI art ready: {len(ui["textures"])} images, {len(ui["fonts"])} fonts')
@@ -136,3 +148,33 @@ def export(engine, game, out, collections, report):
         prepare_hud.prepare(Path(game).resolve(), tmp / 'scoring', Path(collections).resolve())
         extract_session_marker.prepare(Path(game).resolve(), tmp / 'marker')
         return build(tmp / 'scoring', tmp / 'marker', out, report)
+
+
+def install_hd(source, out, report):
+    """The optional HD pack (upscaled copies of the textures above, in the
+    folders HD_* name) from a folder or a zip into out (data/skate3/ui-hd).
+    Only .png files under ui/ are taken. Returns how many were installed."""
+    import shutil, zipfile
+    source, out = Path(source), Path(out)
+    count = 0
+    if source.is_dir():
+        files = ((p.relative_to(source).as_posix(), p) for p in source.rglob('*.png'))
+        opener = lambda p: p.open('rb')
+    else:
+        archive = zipfile.ZipFile(source)
+        files = ((n, n) for n in archive.namelist() if n.lower().endswith('.png'))
+        opener = archive.open
+    for name, handle in files:
+        parts = [x for x in name.split('/') if x]
+        if 'ui' not in parts:
+            continue
+        rel = parts[parts.index('ui'):]  # drops a wrapping Skate3-UI-HD folder
+        if '..' in rel:
+            continue
+        target = out.joinpath(*rel)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with opener(handle) as src, open(target, 'wb') as dst:
+            shutil.copyfileobj(src, dst)
+        count += 1
+    report(f'Installed {count} HD UI images')
+    return count

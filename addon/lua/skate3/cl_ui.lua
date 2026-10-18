@@ -104,7 +104,9 @@ local function Mat(name)
 	local m = UI.mats[name]
 	if m then return m end
 	local path = ART .. name .. ".png"
-	if file.Exists(HD .. name .. ".png", "DATA") then path = HD .. name .. ".png" end
+	-- An upscaled copy from the optional HD pack, where ui.json says it would be.
+	local info = art and art.textures and art.textures[name]
+	if info and info.hd and file.Exists(HD .. info.hd, "DATA") then path = HD .. info.hd end
 	m = Material("../data/" .. path, "smooth noclamp")
 	UI.mats[name] = m
 	return m
