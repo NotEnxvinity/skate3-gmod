@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, convert, names, xdvdfs  # noqa: E402
+import audio, convert, names, park, xdvdfs  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -38,6 +38,7 @@ FROM_DISC = {
     'data/content/createacharacter.big',
     *audio.FROM_DISC,
     *names.FROM_DISC,
+    *park.FROM_DISC,
 }
 FROM_DISC_FOLDERS = ('data/anim/',)
 # The engine's top-level scripts the converters run as steps, and the ones
@@ -371,6 +372,13 @@ def install(selected, gmod, report, with_addon=True):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
+        # The park pieces and skateparks for the Skate 3 spawn tab; the rest
+        # works without them.
+        try:
+            park.install(xex.parent, gmod, report)
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t read the park pieces ({error}); the Skate 3 spawn tab will be empty.')
     if with_addon and workshop_copy(gmod):
         report(WORKSHOP_NOTE)
     report(f'All set: S3GM {s3gm_version()} is installed. Start Garry\'s Mod, load a map and equip the Skateboard.'.replace('  ', ' '))

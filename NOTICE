@@ -37,3 +37,12 @@ game's audio code: the sound ids, curves and thresholds are taken from it.
 setup/audio_tuning.py ports the part of its tools/asset_pipeline/audio_export.py
 that reads the collision tuning from the player's own disc (GPL-3.0, the same
 licence as this project).
+
+setup/skate3_formats/ reads the park pieces and the Mega Park stadium off the
+player's own disc. archive.py, arena.py, geometry.py, world_materials.py and
+world_textures.py come from NativeX World Studio
+(https://github.com/NativeXex/nativex-world-studio-skate3), MIT licensed
+(LICENSE-NativeX.txt); archive.py is changed to read stored chunks.
+skate3_streams.py and retail_collision_mesh.py come from SK8-Engine
+(https://github.com/SK8-ENGINE/SK8-Engine, tree 311cd40), MIT licensed
+(LICENSE-SK8-ENGINE.txt), as NativeX vendors them. See that folder's README.

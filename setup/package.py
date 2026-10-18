@@ -50,6 +50,8 @@ def stage_folder(modules, out):
                  'windows-setup.ps1', 'VERSION', 'README-S3GM.txt'):
         if (HERE / name).is_file():
             shutil.copy2(HERE / name, out / name)
+    shutil.copytree(HERE / 'skate3_formats', out / 'skate3_formats',
+                    ignore=shutil.ignore_patterns('__pycache__'))
     (out / 'bin').mkdir()
     for m in MODULES:
         # A download can lack one platform's module (no Mac build yet).
