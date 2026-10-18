@@ -7,6 +7,16 @@
 -- breaks red. The engine has no injuries of its own, so the hits are read
 -- off the bail's bones here; the numbers are our tuning.
 -- Bail on purpose: both triggers and both sticks clicked.
+--
+-- Every hit is also announced to the rest of the mod with the hook
+-- "Skate3BodyHit" (cl_sounds.lua plays the impacts and bone breaks from it, so
+-- what you hear is exactly what scored): one table with
+--   part      the body part's id ("skull", "lshin"...)
+--   bone      the engine bone it's read from
+--   severity  how hard it hit, m/s of speed lost in one step
+--   pos       where it hit; normal, matType: what it hit
+--   level     the part's injury after this hit: 0 sound, 1 fractured, 2 broken
+--   injury    set to the new level (1 or 2) when this hit is what hurt it
 
 local Meat = {}
 
@@ -102,10 +112,10 @@ local function Bleed(tr, now)
 	net.SendToServer()
 end
 
-local function Hit(index, state, severity, now)
+local function Hit(index, part, state, severity, now, tr)
 	state.damage = state.damage + severity
 	bail.points = bail.points + severity * severity * HIT_POINTS
-	local level = state.level
+	local level, injury = state.level, nil
 	if severity >= BREAK_HIT or state.damage >= BREAK_TOTAL then
 		level = 2
 	elseif severity >= FRACTURE_HIT or state.damage >= FRACTURE_TOTAL then
@@ -118,8 +128,13 @@ local function Hit(index, state, severity, now)
 		bail.points = bail.points + (level == 2 and BREAK_POINTS or FRACTURE_POINTS)
 			- (state.level == 1 and FRACTURE_POINTS or 0)
 		state.level = level
+		injury = level
 	end
 	bail.hitAt = now
+	hook.Run("Skate3BodyHit", {
+		part = part.id, bone = part.bones[1], severity = severity, pos = tr.HitPos, normal = tr.HitNormal,
+		matType = tr.MatType, level = state.level, injury = injury,
+	})
 end
 
 local told -- the mode switch as the engine last heard it
@@ -173,7 +188,7 @@ function Meat.Update(pose, ply)
 						local reach = t.vel:GetNormalized() * (t.vel:Length() * dt + 6)
 						local tr = util.TraceLine({ start = t.pos, endpos = t.pos + reach, mask = MASK_SOLID, filter = ply })
 						if tr.Hit then
-							Hit(index, bail.parts[part.id], change, now)
+							Hit(index, part, bail.parts[part.id], change, now, tr)
 							if change >= BLOOD_HIT then Bleed(tr, now) end
 							t.coolUntil = now + COOLDOWN
 						end

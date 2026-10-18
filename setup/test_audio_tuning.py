@@ -46,6 +46,14 @@ def vault():
         rows.append(''.join(struct.pack('>i', w).hex() for w in words))
     out.append({'class': t.SURFACE_MAP[0], 'key': t.SURFACE_MAP[1], 'parent': '',
                 'fields': {t.SURFACE_MAP[2]: {'type': 'Sk8::AudioSurface', 'array': {'items': rows}}}})
+    # Front-end records: one keyed by name, one hashed with a name field, one
+    # inheriting its sound from the first, one silent.
+    text = lambda v: {'type': 'Attrib::Types::Text', 'data': v}
+    out.append({'class': t.FE_CLASSES[0], 'key': 'score_multiplier_x2', 'parent': '',
+                'fields': {t.FE_ID: i32(77), t.FE_LEVEL: f32(0.5)}})
+    out.append({'class': t.FE_CLASSES[0], 'key': 'Hash_00000000000000CC', 'parent': 'score_multiplier_x2',
+                'fields': {t.FE_NAMES[0]: text('score_multiplier_x3'), t.FE_ID: i32(78)}})
+    out.append({'class': t.FE_CLASSES[0], 'key': 'quiet', 'parent': '', 'fields': {t.FE_ID: i32(0), t.FE_LEVEL: f32(1.0)}})
     out.append({'class': t.BODY, 'key': 'default', 'parent': '', 'fields': {t.BODY_COOLDOWN: f32(12.0)}})
     return {'collections': out}
 
@@ -67,6 +75,7 @@ class AudioTuningTest(unittest.TestCase):
         self.assertEqual(table['surfaces'][2], [4, 3, 0])
         self.assertEqual(table['grounds'], {'asphalt_rough': 0, 'concrete_smooth': 2, 'wood': 3, 'metal': 8})
         self.assertEqual(table['body_cooldown'], 12.0)
+        self.assertEqual(table['frontend'], {'score_multiplier_x2': [77, 0.5], 'score_multiplier_x3': [78, 0.5]})
 
     def test_without_collision_records(self):
         self.assertIsNone(t.export({'collections': []}))

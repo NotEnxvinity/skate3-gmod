@@ -140,6 +140,45 @@ def _number(field):
     return words[0] if words else 0
 
 
+# The front-end ("fe") records: the interface sounds, each naming a sound in
+# the sk8_menu bank (audio_export.frontend_sounds upstream).
+FE_CLASSES = ('Hash_5831CB95F3E90598', 'fe')
+FE_ID, FE_LEVEL = 'Hash_8FCC7EF9B9208858', 'Hash_875BA75341DC8391'
+FE_NAMES = ('Hash_942AB8AEE4B414ED', 'Name')
+
+
+def _text(field):
+    data = field.get('data', '') if field else ''
+    return data if isinstance(data, str) else ''
+
+
+def frontend(by_class):
+    """{record name: [sk8_menu sound id, level]} for every front-end record
+    that plays something. Records without a name keep their key."""
+    out = {}
+    for cls in FE_CLASSES:
+        records = by_class.get(cls, {})
+
+        def resolve(key, field):
+            seen = 0
+            while key in records and seen < 32:
+                if field in records[key]['fields']:
+                    return records[key]['fields'][field]
+                key, seen = records[key].get('parent', ''), seen + 1
+            return None
+
+        for key in records:
+            sound, level = resolve(key, FE_ID), resolve(key, FE_LEVEL)
+            sound = _words(sound)[0] if sound is not None and _words(sound) else 0
+            level = _number(level) if level is not None else 1.0
+            if sound < 1 or level <= 0:
+                continue
+            name = key if not key.startswith('Hash_') else next(
+                (_text(f) for n in FE_NAMES if (f := resolve(key, n)) and _text(f)), key)
+            out[name] = [sound, round(level, 4)]
+    return out
+
+
 def _floats(field):
     data = ''.join(field.get('data', '').split())
     return [struct.unpack('>f', bytes.fromhex(data[i:i + 8]))[0] for i in range(0, len(data) - 7, 8)]
@@ -198,6 +237,9 @@ def export(collections):
         materials.append(row)
 
     out = {'materials': materials}
+    fe = frontend(by_class)
+    if fe:
+        out['frontend'] = fe
     holder = by_class.get(SURFACE_MAP[0], {}).get(SURFACE_MAP[1])
     if holder and SURFACE_MAP[2] in holder['fields']:
         surfaces = []
@@ -243,5 +285,5 @@ def install(path, report=print):
         report('The vault has no collision sounds: bails will use Half-Life 2 sounds.')
         return None
     found = sum(1 for row in table['materials'] if row['kind'] >= 0)
-    report(f'Read the collision sounds of {found} materials, grounds: {", ".join(sorted(table.get("grounds", {})))}')
+    report(f'Read the collision sounds of {found} materials, grounds: {", ".join(sorted(table.get("grounds", {})))}; {len(table.get("frontend", {}))} interface sounds')
     return table
