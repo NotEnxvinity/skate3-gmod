@@ -46,3 +46,9 @@ world_textures.py come from NativeX World Studio
 skate3_streams.py and retail_collision_mesh.py come from SK8-Engine
 (https://github.com/SK8-ENGINE/SK8-Engine, tree 311cd40), MIT licensed
 (LICENSE-SK8-ENGINE.txt), as NativeX vendors them. See that folder's README.
+
+setup/physbox.py writes the ground's collision solid for addon/maps/*.bsp. The
+byte layout of a vphysics box solid (what Source's .phy files and a map's
+physcollide lump hold) was learned from a box .phy that ships with Garry's
+Mod; the file only supplies the generic 12-triangle box topology, and every
+coordinate and size in it is rewritten.

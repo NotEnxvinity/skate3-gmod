@@ -277,14 +277,21 @@ concommand.Add("skate3_park_load", function(ply, _, args)
 		if IsValid(ply) then ply:ChatPrint("[skate3] No skatepark " .. id .. ". Run the setup app to convert them from your disc.") end
 		return
 	end
-	if game.GetMap() == cv_base:GetString() then
-		BuildOnBaseMap(id)
+	-- A park with a map of its own loads as that map; the others go on the
+	-- open base map.
+	local map = Park.MapOf(id) or cv_base:GetString()
+	if game.GetMap() == map then
+		if Park.Maps[map] then
+			Say("You're already in " .. info.name .. ".")
+		else
+			BuildOnBaseMap(id)
+		end
 		return
 	end
 	file.CreateDir("skate3")
 	file.Write(PENDING, id)
 	Say("Loading " .. info.name .. "...")
-	timer.Simple(0.5, function() RunConsoleCommand("changelevel", cv_base:GetString()) end)
+	timer.Simple(0.5, function() RunConsoleCommand("changelevel", map) end)
 end)
 
 -- Builds a park right here, on whatever map this is: its middle goes where
@@ -318,9 +325,16 @@ end)
 
 hook.Add("InitPostEntity", "skate3_park_load", function()
 	local id = file.Read(PENDING, "DATA")
-	if not id then return end
-	file.Delete(PENDING)
-	if game.GetMap() ~= cv_base:GetString() then return end
+	if id then file.Delete(PENDING) end
+	-- A park's own map builds that park however it was started (the map
+	-- list, the console, the spawn tab).
+	local own = Park.Maps[game.GetMap()]
+	if own then
+		id = own
+	elseif game.GetMap() ~= cv_base:GetString() then
+		return
+	end
+	if not id or not Park.Index() then return end
 	-- Let the map settle before a hundred tiles go in.
 	timer.Simple(1, function() BuildOnBaseMap(id) end)
 end)
@@ -335,6 +349,15 @@ hook.Add("PlayerSpawn", "skate3_park_load", function(ply)
 			end
 		end)
 	end
+end)
+
+hook.Add("PlayerInitialSpawn", "skate3_park_missing", function(ply)
+	if not Park.Maps[game.GetMap()] or Park.Index() then return end
+	timer.Simple(8, function()
+		if IsValid(ply) then
+			ply:ChatPrint("[skate3] This map is an empty field until the park is converted from your Skate 3 disc: run the S3GM setup again.")
+		end
+	end)
 end)
 
 hook.Add("PlayerInitialSpawn", "skate3_park_safe", function(ply)

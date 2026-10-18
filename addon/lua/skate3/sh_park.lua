@@ -72,6 +72,25 @@ Park.Presets = {
 }
 for _, p in ipairs(Park.Presets) do Park.Presets[p.id] = p end
 
+-- The skateparks that ship a map of their own (addon/maps, made by
+-- setup/bspmap.py): an open grass field that builds the park on it at load.
+Park.Maps = {
+	gm_skate3_megapark = "megapark_stadium",
+	gm_skate3_maloof = "map_maloof",
+	gm_skate3_blackbox = "map_blackbox",
+	gm_skate3_downtown_park = "map_downtown_park",
+	gm_skate3_industrial_park = "map_industrial_park",
+	gm_skate3_skate_school = "map_skate_school",
+	gm_skate3_start_park = "map_start_park",
+}
+
+-- The map that holds a park, when this install has it.
+function Park.MapOf(id)
+	for map, park in pairs(Park.Maps) do
+		if park == id and file.Exists("maps/" .. map .. ".bsp", "GAME") then return map end
+	end
+end
+
 -- A piece's whole data, read once. A park's tiles are big and only read by
 -- whoever is building them, so callers let those go again (Park.Forget).
 function Park.Get(id)

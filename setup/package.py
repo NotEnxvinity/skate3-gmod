@@ -44,7 +44,7 @@ def stage_folder(modules, out):
     shutil.rmtree(out, ignore_errors=True)
     out.mkdir(parents=True)
     for path in HERE.glob('*.py'):
-        if not path.name.startswith('test_') and path.name != 'package.py':
+        if not path.name.startswith('test_') and path.name not in ('package.py', 'bspmap.py', 'physbox.py'):
             shutil.copy2(path, out / path.name)
     for name in ('skate3-setup.sh', 'S3GM-setup-Linux.sh', 'S3GM-setup-Mac.command', 'S3GM-setup-Windows.bat',
                  'windows-setup.ps1', 'VERSION', 'README-S3GM.txt'):

@@ -69,8 +69,9 @@ Parks and ramps: setup also converts the park editor's pieces and Skate 3's
 skateparks from your disc. Open the **Skate 3** tab in the spawn menu, pick a
 piece (left click) and place it with the tool gun, or right click to drop it at
 your crosshair. Move pieces with the physics gun; reload with it to lock a piece
-in place. Parks are tiles loaded onto a stock map (admins: right click a park in
-the tab, "Load on gm_flatgrass" (the base map is a server setting) or "Build here"). If Garry's Mod ever crashes
+in place. Each skatepark also has a map of its own (`gm_skate3_maloof`, `gm_skate3_megapark` and so on, in
+the map list): an open grass field that builds the park in the middle of it when it loads
+(admins can also right click a park in the tab to load its map, or "Build here" on any map). If Garry's Mod ever crashes
 while a park loads, the next start builds parks without Garry's Mod physics
 until you run `skate3_park_safe 0`; the board rides them either way.
 
