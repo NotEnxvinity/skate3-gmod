@@ -60,6 +60,7 @@ def stage_folder(modules, out):
     shutil.copytree(HERE.parent / 'addon/lua', out / 'addon/lua')
     shutil.copytree(HERE.parent / 'addon/materials', out / 'addon/materials')
     shutil.copytree(HERE.parent / 'addon/resource', out / 'addon/resource')
+    shutil.copytree(HERE.parent / 'addon/maps', out / 'addon/maps')
     shutil.copy2(HERE.parent / 'addon/addon.json', out / 'addon/addon.json')
 
 

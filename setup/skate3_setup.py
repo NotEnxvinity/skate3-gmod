@@ -336,6 +336,10 @@ def install_addon(gmod, wanted, report):
     if (addon.parent / 'resource').is_dir():
         shutil.rmtree(local / 'resource', ignore_errors=True)
         shutil.copytree(addon.parent / 'resource', local / 'resource')
+    # The skatepark maps (gm_skate3_*.bsp) Gmod lists once the addon is mounted.
+    if (addon.parent / 'maps').is_dir():
+        shutil.rmtree(local / 'maps', ignore_errors=True)
+        shutil.copytree(addon.parent / 'maps', local / 'maps')
     report(f'Installed the S3GM {s3gm_version()} addon in {local}'.replace('  ', ' '))
 
 
