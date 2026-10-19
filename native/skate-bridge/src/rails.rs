@@ -450,6 +450,12 @@ fn merge_collinear(lips: Vec<(Vec3, Vec3)>) -> Vec<(Vec3, Vec3)> {
         }
         runs.push((o + d * current.0, o + d * current.1));
     }
+    // The line map iterates in no fixed order, and the chains, their order
+    // and so the rails' numbers would follow it: the same map must give the
+    // same rails every time, or a rebuild mid-grind renumbers the rail
+    // under the skater.
+    let key = |r: &(Vec3, Vec3)| [r.0.x, r.0.y, r.0.z, r.1.x, r.1.y, r.1.z];
+    runs.sort_by(|p, q| key(p).iter().zip(key(q)).map(|(x, y)| x.total_cmp(&y)).find(|o| o.is_ne()).unwrap_or(std::cmp::Ordering::Equal));
     runs
 }
 

@@ -294,3 +294,23 @@ fn scan_region() {
         eprintln!("  rail {}", pts.join(" "));
     }
 }
+
+#[test]
+#[ignore]
+fn scan_map_rails() {
+    let Ok(path) = std::env::var("S3GM_SCAN_BSP") else { return };
+    let data = std::fs::read(path).unwrap();
+    let solids = crate::bsp::parse(&data).unwrap();
+    let tris = world::collect(&solids.triangles, &solids.brushes);
+    if let Ok(dump) = std::env::var("S3GM_SCAN_TRIS") {
+        let t: Vec<String> = tris.iter().map(|t| t.iter().map(|v| format!("{:.3} {:.3} {:.3}", v.x, v.y, v.z)).collect::<Vec<_>>().join(" ")).collect();
+        std::fs::write(dump, t.join("\n")).unwrap();
+    }
+    let built = world::finish(&tris, &Default::default());
+    let len: f32 = built.rails.iter().map(|r| r.windows(2).map(|w| Vec3::from_array(w[0]).distance(Vec3::from_array(w[1]))).sum::<f32>()).sum();
+    eprintln!("MAPRAILS triangles {} rails {} total length {:.0} m", built.triangles.len(), built.rails.len(), len);
+    if let Ok(dump) = std::env::var("S3GM_SCAN_DUMP") {
+        let t: Vec<String> = built.rails.iter().map(|r| r.iter().map(|p| { let v = skate_bridge::collision::from_skate(Vec3::from_array(*p)); format!("({:.1} {:.1} {:.1})", v.x, v.y, v.z) }).collect::<Vec<_>>().join(" ")).collect();
+        std::fs::write(dump, t.join("\n")).unwrap();
+    }
+}

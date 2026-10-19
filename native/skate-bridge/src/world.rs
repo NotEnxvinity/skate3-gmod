@@ -44,7 +44,6 @@ pub fn collect(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> Vec<[Vec3;
         }
     }
     dedupe(&mut out);
-    drop_internal(&mut out);
     out
 }
 
@@ -52,25 +51,32 @@ pub fn collect(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> Vec<[Vec3;
 /// solid, not on it: where separate brushes or models meet (a pipe built from
 /// wedges, floor tiles side by side) each leaves a wall at the seam. Left in,
 /// the engine's edge logic sees the wall's top edge under every seam and
-/// pushes a rolling wheel back with a sideways normal. Floors and ceilings
-/// (flatter than about 25 degrees) stay, so ledges still find their lips.
+/// pushes a rolling wheel back with a sideways normal. A face goes only when
+/// opposite-facing faces on its plane cover all of it: a wall that is only
+/// partly buried stays whole. Floors and ceilings (flatter than about 25
+/// degrees) stay, so ledges still find their lips.
 fn drop_internal(tris: &mut Vec<[Vec3; 3]>) {
-    const CELL: f32 = 32.;
-    const FAR: usize = 512;
+    const CELL: f32 = 64.;
+    const FAR: usize = 4096;
     let normal = |t: &[Vec3; 3]| (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero();
     let normals: Vec<Vec3> = tris.iter().map(normal).collect();
     let cell = |v: f32| (v / CELL).floor() as i32;
+    let span = |t: &[Vec3; 3]| {
+        let lo = t[0].min(t[1]).min(t[2]) - Vec3::splat(0.2);
+        let hi = t[0].max(t[1]).max(t[2]) + Vec3::splat(0.2);
+        ((cell(lo.x), cell(lo.y), cell(lo.z)), (cell(hi.x), cell(hi.y), cell(hi.z)))
+    };
+    let cells = |a: (i32, i32, i32), b: (i32, i32, i32)| {
+        (b.0 - a.0 + 1) as usize * (b.1 - a.1 + 1) as usize * (b.2 - a.2 + 1) as usize
+    };
     let mut grid = std::collections::HashMap::<(i32, i32, i32), Vec<u32>>::new();
     let mut big = Vec::<u32>::new();
     for (i, t) in tris.iter().enumerate() {
         if normals[i] == Vec3::ZERO {
             continue;
         }
-        let lo = t[0].min(t[1]).min(t[2]) - Vec3::splat(0.2);
-        let hi = t[0].max(t[1]).max(t[2]) + Vec3::splat(0.2);
-        let (a, b) = ((cell(lo.x), cell(lo.y), cell(lo.z)), (cell(hi.x), cell(hi.y), cell(hi.z)));
-        let count = (b.0 - a.0 + 1) as usize * (b.1 - a.1 + 1) as usize * (b.2 - a.2 + 1) as usize;
-        if count > FAR {
+        let (a, b) = span(t);
+        if cells(a, b) > FAR {
             big.push(i as u32);
             continue;
         }
@@ -82,35 +88,68 @@ fn drop_internal(tris: &mut Vec<[Vec3; 3]>) {
             }
         }
     }
-    let covered = |i: usize, p: Vec3| {
-        let near = grid
-            .get(&(cell(p.x), cell(p.y), cell(p.z)))
-            .into_iter()
-            .flatten()
-            .chain(&big);
-        near.into_iter().any(|&j| {
-            let j = j as usize;
-            let (n, u) = (normals[j], &tris[j]);
-            if j == i || n.dot(normals[i]) > -0.999 || (p - u[0]).dot(n).abs() > 0.1 {
-                return false;
+    // Area of `poly` inside the triangle `u`, on the plane they share.
+    let clipped = |poly: &[Vec3], u: &[Vec3; 3], n: Vec3| -> f32 {
+        let mut poly = poly.to_vec();
+        for k in 0..3 {
+            let (a, b) = (u[k], u[(k + 1) % 3]);
+            let inside = |p: Vec3| (b - a).cross(p - a).dot(n);
+            let mut out = Vec::with_capacity(poly.len() + 1);
+            for m in 0..poly.len() {
+                let (p, q) = (poly[m], poly[(m + 1) % poly.len()]);
+                let (dp, dq) = (inside(p), inside(q));
+                if dp >= 0. {
+                    out.push(p);
+                }
+                if (dp >= 0.) != (dq >= 0.) {
+                    out.push(p + (q - p) * (dp / (dp - dq)));
+                }
             }
-            (0..3).all(|k| {
-                let (a, b) = (u[k], u[(k + 1) % 3]);
-                let edge = b - a;
-                edge.cross(p - a).dot(n) >= -0.2 * edge.length()
-            })
-        })
+            poly = out;
+            if poly.len() < 3 {
+                return 0.;
+            }
+        }
+        (1..poly.len() - 1).map(|m| (poly[m] - poly[0]).cross(poly[m + 1] - poly[0]).length()).sum::<f32>() * 0.5
     };
-    let drop: Vec<bool> = (0..tris.len())
-        .map(|i| {
-            if normals[i] == Vec3::ZERO || normals[i].z.abs() > 0.9 {
-                return false;
+    let mut stamp = vec![u32::MAX; tris.len()];
+    let mut drop = vec![false; tris.len()];
+    for i in 0..tris.len() {
+        let t = &tris[i];
+        if normals[i] == Vec3::ZERO || normals[i].z.abs() > 0.9 {
+            continue;
+        }
+        let (a, b) = span(t);
+        if cells(a, b) > FAR {
+            continue;
+        }
+        let whole = (t[1] - t[0]).cross(t[2] - t[0]).length() * 0.5;
+        let mut covered = 0.;
+        let mut visit = |j: usize| {
+            if j == i || stamp[j] == i as u32 {
+                return;
             }
-            let t = &tris[i];
-            let c = (t[0] + t[1] + t[2]) / 3.;
-            covered(i, c) && t.iter().all(|v| covered(i, (c + *v) / 2.))
-        })
-        .collect();
+            stamp[j] = i as u32;
+            let (n, u) = (normals[j], &tris[j]);
+            if n.dot(normals[i]) > -0.999 || t.iter().any(|v| (*v - u[0]).dot(n).abs() > 0.1) {
+                return;
+            }
+            covered += clipped(t, u, n);
+        };
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                for z in a.2..=b.2 {
+                    for &j in grid.get(&(x, y, z)).into_iter().flatten() {
+                        visit(j as usize);
+                    }
+                }
+            }
+        }
+        for &j in &big {
+            visit(j as usize);
+        }
+        drop[i] = covered >= whole * 0.995;
+    }
     let mut i = 0;
     tris.retain(|_| {
         i += 1;
@@ -136,7 +175,6 @@ pub fn finish(collected: &[[Vec3; 3]], fixes: &Fitted) -> World {
         fixes.apply(&mut fixed);
         fixed.retain(usable);
         dedupe(&mut fixed);
-        drop_internal(&mut fixed);
         &fixed
     } else {
         collected
@@ -165,8 +203,12 @@ pub fn finish(collected: &[[Vec3; 3]], fixes: &Fitted) -> World {
     } else {
         Vec::new()
     };
+    // The rails were found on the faces as compiled, which the finder reads
+    // right; what the board rides has the buried walls taken out.
+    let mut ridden = out.to_vec();
+    drop_internal(&mut ridden);
     World {
-        triangles: out
+        triangles: ridden
             .iter()
             .chain(&ramps)
             .map(|p| p.map(|v| collision::to_skate(v).to_array()))
@@ -204,7 +246,6 @@ pub fn extra(map: &[[[f32; 3]; 3]], extra: &[[Vec3; 3]], fixes: &Fitted) -> Extr
         fixes.apply(&mut tris);
         tris.retain(usable);
     }
-    drop_internal(&mut tris);
     let own = tris.len();
     if own == 0 {
         return Extra {
@@ -218,6 +259,7 @@ pub fn extra(map: &[[[f32; 3]; 3]], extra: &[[Vec3; 3]], fixes: &Fitted) -> Extr
     );
     let (found, _) = rails::find_among(&tris, own);
     tris.truncate(own);
+    drop_internal(&mut tris);
     Extra {
         triangles: tris
             .into_iter()
@@ -271,11 +313,48 @@ mod tests {
     }
 
     #[test]
+    fn the_same_map_gives_the_same_rails_every_time() {
+        let brushes: Vec<_> = (0..6)
+            .map(|i| {
+                let x = i as f32 * 160.;
+                box_brush(Vec3::new(x, 0., 0.), Vec3::new(x + 128., 48. + i as f32 * 8., 16.))
+            })
+            .collect();
+        let first = build(&[], &brushes).rails;
+        assert!(!first.is_empty());
+        for _ in 0..8 {
+            assert_eq!(build(&[], &brushes).rails, first);
+        }
+    }
+
+    #[test]
+    fn a_wall_only_partly_buried_stays_whole() {
+        // A tall block beside a short one: the short block's wall is buried
+        // against the tall one, the part of the tall wall above it is not.
+        let tall = box_brush(Vec3::new(0., 0., 0.), Vec3::new(64., 64., 128.));
+        let short = box_brush(Vec3::new(64., 0., 0.), Vec3::new(128., 64., 32.));
+        let out: Vec<[Vec3; 3]> = build(&[], &[tall, short])
+            .triangles
+            .iter()
+            .map(|t| t.map(|v| collision::from_skate(Vec3::from_array(v))))
+            .collect();
+        let tall_wall = out.iter().any(|t| {
+            let n = (t[1] - t[0]).cross(t[2] - t[0]).normalize();
+            n.x > 0.99 && t.iter().all(|v| (v.x - 64.).abs() < 1e-3) && t.iter().any(|v| v.z > 100.)
+        });
+        assert!(tall_wall, "the part of the tall wall above the short block must stay");
+    }
+
+    #[test]
     fn walls_between_touching_brushes_go_but_floors_stay() {
         let a = box_brush(Vec3::new(0., 0., 0.), Vec3::new(64., 64., 64.));
         let b = box_brush(Vec3::new(64., 0., 0.), Vec3::new(128., 64., 64.));
-        let one = collect(&[], &[a.clone()]).len();
-        let both = collect(&[], &[a, b]);
+        let one = build(&[], &[a.clone()]).triangles.len();
+        let both: Vec<[Vec3; 3]> = build(&[], &[a, b])
+            .triangles
+            .iter()
+            .map(|t| t.map(|v| collision::from_skate(Vec3::from_array(v))))
+            .collect();
         // Each box is 12 triangles; the two touching walls (4) are gone.
         assert_eq!(one, 12);
         assert_eq!(both.len(), 24 - 4);
