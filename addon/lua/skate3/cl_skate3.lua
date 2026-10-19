@@ -20,6 +20,7 @@ local Others = include("skate3/cl_others.lua")(Skater, Perf)
 local Players = include("skate3/cl_players.lua")(Skater, Others, Score)
 include("skate3/cl_collision_report.lua")
 local Surfaces = include("skate3/cl_surfaces.lua")
+local Demo = include("skate3/cl_demo.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OSX" and "gmcl_skate3_osx64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -100,7 +101,21 @@ local function LiveBrushes()
 	return out
 end
 
+-- Playing a demo: no ride and no map collision, only the board's look, so
+-- your recorded skater is drawn with the real board (cl_demo.lua).
+local demoBoardTried = false
+local function LoadBoardForDemo()
+	demoBoardTried = true
+	if jit.arch ~= "x64" or not file.Exists("lua/bin/" .. MODULE, "MOD") then return end
+	local ok = pcall(require, "skate3")
+	if not ok or not skate3 then return end
+	if not skate3.Init(cv_path:GetString()) then return end
+	Skater.Load()
+end
+
 local function Load()
+	-- A demo is a recording; there is nothing to ride in it.
+	if Demo.Playing() then return end
 	if jit.arch ~= "x64" then
 		Say("Skate 3 mode needs 64-bit Garry's Mod (the x86-64 beta branch).")
 		return
@@ -345,10 +360,40 @@ net.Receive("skate3_watched", function()
 	watched = net.ReadBool()
 end)
 
+-- Camera height presets, in units above (or below) the game's own camera.
+local CAMERA_HEIGHTS = { low = -16, normal = 0, high = 32 }
+local cv_camera = CreateClientConVar("skate3_camera", "low", true, false, "Skate camera height: low, normal or high")
+
+-- Where the skate camera is: origin, forward, up and field of view.
+local function ViewOf(pose)
+	local c = pose.camera
+	local origin, forward, up = V(c.pos), V(c.forward), V(c.up)
+	local lift = CAMERA_HEIGHTS[cv_camera:GetString()] or 0
+	if lift ~= 0 then
+		-- Move the camera up or down and keep it aimed at the same spot by
+		-- the skater, so the framing stays centred.
+		local target = origin + forward * math.max(origin:Distance(V(pose.pos)), 32)
+		-- Stop short of ceilings and floors.
+		local tr = util.TraceLine({ start = origin, endpos = origin + Vector(0, 0, lift), mask = MASK_SOLID_BRUSHONLY })
+		origin = tr.Hit and tr.HitPos + tr.HitNormal * 4 or tr.HitPos
+		forward = (target - origin):GetNormalized()
+		up = forward:Cross(up):Cross(forward)
+		up:Normalize()
+	end
+	return origin, forward, up, c.fov
+end
+
 hook.Add("Think", "skate3_step", function()
 	Perf.Frame()
+	-- Playing a demo: the skater is drawn from what the recording holds
+	-- (cl_others.lua, cl_demo.lua), never ridden live.
+	if Demo.Playing() then
+		if not demoBoardTried and IsValid(LocalPlayer()) then LoadBoardForDemo() end
+		return
+	end
 	FollowWeapon()
 	if not loaded then return end
+	Demo.Watch(RealTime())
 	local now = RealTime()
 	Health(now)
 	if now >= nextStatus then
@@ -451,6 +496,12 @@ hook.Add("Think", "skate3_step", function()
 			Perf.Sent(net.BytesWritten() or 0)
 			net.SendToServer()
 		end
+		-- While a demo records, the camera goes the same way (the server sends
+		-- it back into the demo).
+		if Demo.Recording() and pose.camera then
+			local origin, forward, up, fov = ViewOf(pose)
+			Demo.SendCamera(origin, forward, up, fov)
+		end
 		Perf.End("net send")
 	end
 end)
@@ -460,10 +511,6 @@ hook.Add("CreateMove", "skate3_block", function(cmd)
 	cmd:ClearMovement()
 	cmd:ClearButtons()
 end)
-
--- Camera height presets, in units above (or below) the game's own camera.
-local CAMERA_HEIGHTS = { low = -16, normal = 0, high = 32 }
-local cv_camera = CreateClientConVar("skate3_camera", "low", true, false, "Skate camera height: low, normal or high")
 
 concommand.Add("skate3_camera_cycle", function()
 	local order = { low = "normal", normal = "high", high = "low" }
@@ -477,24 +524,11 @@ hook.Add("CalcView", "skate3_view", function()
 	-- Looking through something else, such as the camera tool's camera, so
 	-- leave the view to it.
 	if GetViewEntity() ~= LocalPlayer() then return end
-	local c = pose.camera
-	local origin, forward, up = V(c.pos), V(c.forward), V(c.up)
-	local lift = CAMERA_HEIGHTS[cv_camera:GetString()] or 0
-	if lift ~= 0 then
-		-- Move the camera up or down and keep it aimed at the same spot by
-		-- the skater, so the framing stays centred.
-		local target = origin + forward * math.max(origin:Distance(V(pose.pos)), 32)
-		-- Stop short of ceilings and floors.
-		local tr = util.TraceLine({ start = origin, endpos = origin + Vector(0, 0, lift), mask = MASK_SOLID_BRUSHONLY })
-		origin = tr.Hit and tr.HitPos + tr.HitNormal * 4 or tr.HitPos
-		forward = (target - origin):GetNormalized()
-		up = forward:Cross(up):Cross(forward)
-		up:Normalize()
-	end
+	local origin, forward, up, fov = ViewOf(pose)
 	return {
 		origin = origin,
 		angles = forward:AngleEx(up),
-		fov = c.fov,
+		fov = fov,
 		-- Your own body is the skater (unless it's posed as a copy).
 		drawviewer = Skater.RealBody(),
 	}

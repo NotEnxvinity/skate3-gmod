@@ -12,6 +12,7 @@
 -- hung crouched in the air, Gmod's falling animation.)
 
 local Pose = include("skate3/sh_pose.lua")
+local Demo = include("skate3/cl_demo.lua")
 
 local cv_mode = CreateClientConVar("skate3_others_body", "copy", true, false,
 	"How other skaters are drawn: copy (a posed copy of their playermodel, the default) or real (their own body, posed)")
@@ -39,7 +40,7 @@ return function(Skater, Perf)
 		local frames = o and o.frames
 		local last = frames and frames[#frames]
 		if not last then return nil end
-		local age = RealTime() - last.t
+		local age = Demo.Clock() - last.t
 		if age > STALE then return nil end
 		local first = frames[1]
 		local span = last.t - first.t
@@ -51,7 +52,8 @@ return function(Skater, Perf)
 		Perf.Got(len / 8)
 		local ply = net.ReadEntity()
 		local f = Pose.Read()
-		if not IsValid(ply) or ply == LocalPlayer() then return end
+		-- Your own pose only comes back while a demo plays (cl_demo.lua).
+		if not IsValid(ply) or (ply == LocalPlayer() and not Demo.Playing()) then return end
 		local a = arrived[ply] or { count = 0 }
 		arrived[ply] = a
 		a.count, a.at, a.bad = a.count + 1, RealTime(), not f
@@ -59,7 +61,10 @@ return function(Skater, Perf)
 		local o = others[ply] or { frames = {} }
 		others[ply] = o
 		local frames = o.frames
-		frames[#frames + 1] = { t = RealTime(), f = f }
+		local t = Demo.Clock()
+		-- A skip back in a demo: what's kept is from the future.
+		if frames[#frames] and t < frames[#frames].t then o.frames, frames = {}, {} end
+		frames[#frames + 1] = { t = t, f = f }
 		while #frames > KEEP do table.remove(frames, 1) end
 	end)
 
@@ -238,10 +243,13 @@ return function(Skater, Perf)
 	hook.Add("Think", "skate3_others", function()
 		if not next(others) or Skater.Skip.others then return end
 		Perf.Begin("other skaters")
-		local now = RealTime()
+		local now = Demo.Clock()
+		-- A demo can start with the riding flag already set long ago and so
+		-- missing from it; frames that keep arriving say who rides.
+		local playing = Demo.Playing()
 		for ply, o in pairs(others) do
 			local frames = o.frames
-			if not IsValid(ply) or not ply:Alive() or not ply:GetNW2Bool("skate3_riding")
+			if not IsValid(ply) or not ply:Alive() or not (playing or ply:GetNW2Bool("skate3_riding"))
 				or now - frames[#frames].t > STALE then
 				Let(ply)
 			else

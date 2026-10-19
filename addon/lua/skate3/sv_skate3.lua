@@ -9,6 +9,8 @@ util.AddNetworkString("skate3_watched")
 util.AddNetworkString("skate3_hit")
 util.AddNetworkString("skate3_interact")
 util.AddNetworkString("skate3_marker")
+util.AddNetworkString("skate3_demo")
+util.AddNetworkString("skate3_cam")
 
 local Pose = include("skate3/sh_pose.lua")
 local Interact = include("skate3/sh_interact.lua")
@@ -130,21 +132,61 @@ net.Receive("skate3_pose", function(len, ply)
 	local to = RecipientFilter()
 	to:AddPVS(f.origin)
 	to:RemovePlayer(ply)
+	local seen = to:GetCount() > 0
+	-- Their own pose goes back to them while they record a demo, which is
+	-- the only way it gets into the demo (see cl_demo.lua).
+	if ply.skate3Demo then
+		net.Start("skate3_pose", true)
+		net.WriteEntity(ply)
+		Pose.Write(f)
+		net.Send(ply)
+	end
 	-- Nobody near enough to see them: their game sends far fewer poses
 	-- until someone is, rather than 20 a second for nothing.
-	local watched = to:GetCount() > 0
+	local watched = seen or ply.skate3Demo == true
 	if ply.skate3Watched ~= watched then
 		ply.skate3Watched = watched
 		net.Start("skate3_watched")
 		net.WriteBool(watched)
 		net.Send(ply)
 	end
-	if not watched then return end
+	if not seen then return end
 	-- Unreliable: a late frame is useless, a newer one follows.
 	net.Start("skate3_pose", true)
 	net.WriteEntity(ply)
 	Pose.Write(f)
 	net.Send(to)
+end)
+
+-- A player recording a demo (cl_demo.lua): their pose and camera come back to
+-- them so the demo can show their skater.
+net.Receive("skate3_demo", function(_, ply)
+	ply.skate3Demo = net.ReadBool()
+	if ply.skate3Demo then
+		-- Their game sends full-rate poses while someone is watching.
+		ply.skate3Watched = true
+		net.Start("skate3_watched")
+		net.WriteBool(true)
+		net.Send(ply)
+	end
+end)
+
+local CAM_EVERY = 1 / 30
+net.Receive("skate3_cam", function(len, ply)
+	local pos, forward, up, fov = net.ReadVector(), net.ReadNormal(), net.ReadNormal(), net.ReadFloat()
+	if not ply.skate3Demo or not ply.Skate3 or len > 1000 then return end
+	local now = SysTime()
+	if now - (ply.skate3CamAt or 0) < CAM_EVERY then return end
+	if not (pos.x == pos.x and pos.y == pos.y and pos.z == pos.z and fov == fov) or pos:Length() > 1e7 then return end
+	local allowed = Allowed(ply) + MAX_STEP
+	if pos:DistToSqr(ply:GetPos()) > allowed * allowed then return end
+	ply.skate3CamAt = now
+	net.Start("skate3_cam", true)
+	net.WriteVector(pos)
+	net.WriteNormal(forward)
+	net.WriteNormal(up)
+	net.WriteFloat(math.Clamp(fov, 1, 179))
+	net.Send(ply)
 end)
 
 -- Bail damage: a server setting, off unless the server turns it on. The

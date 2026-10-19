@@ -49,6 +49,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_surfaces.lua")
 	AddCSLuaFile("skate3/cl_perf.lua")
 	AddCSLuaFile("skate3/cl_perf_test.lua")
+	AddCSLuaFile("skate3/cl_demo.lua")
 	include("skate3/sv_skate3.lua")
 	include("skate3/sv_park.lua")
 else
