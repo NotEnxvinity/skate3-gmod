@@ -44,7 +44,78 @@ pub fn collect(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> Vec<[Vec3;
         }
     }
     dedupe(&mut out);
+    drop_internal(&mut out);
     out
+}
+
+/// Faces that sit exactly against an opposite-facing face are inside the
+/// solid, not on it: where separate brushes or models meet (a pipe built from
+/// wedges, floor tiles side by side) each leaves a wall at the seam. Left in,
+/// the engine's edge logic sees the wall's top edge under every seam and
+/// pushes a rolling wheel back with a sideways normal. Floors and ceilings
+/// (flatter than about 25 degrees) stay, so ledges still find their lips.
+fn drop_internal(tris: &mut Vec<[Vec3; 3]>) {
+    const CELL: f32 = 32.;
+    const FAR: usize = 512;
+    let normal = |t: &[Vec3; 3]| (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero();
+    let normals: Vec<Vec3> = tris.iter().map(normal).collect();
+    let cell = |v: f32| (v / CELL).floor() as i32;
+    let mut grid = std::collections::HashMap::<(i32, i32, i32), Vec<u32>>::new();
+    let mut big = Vec::<u32>::new();
+    for (i, t) in tris.iter().enumerate() {
+        if normals[i] == Vec3::ZERO {
+            continue;
+        }
+        let lo = t[0].min(t[1]).min(t[2]) - Vec3::splat(0.2);
+        let hi = t[0].max(t[1]).max(t[2]) + Vec3::splat(0.2);
+        let (a, b) = ((cell(lo.x), cell(lo.y), cell(lo.z)), (cell(hi.x), cell(hi.y), cell(hi.z)));
+        let count = (b.0 - a.0 + 1) as usize * (b.1 - a.1 + 1) as usize * (b.2 - a.2 + 1) as usize;
+        if count > FAR {
+            big.push(i as u32);
+            continue;
+        }
+        for x in a.0..=b.0 {
+            for y in a.1..=b.1 {
+                for z in a.2..=b.2 {
+                    grid.entry((x, y, z)).or_default().push(i as u32);
+                }
+            }
+        }
+    }
+    let covered = |i: usize, p: Vec3| {
+        let near = grid
+            .get(&(cell(p.x), cell(p.y), cell(p.z)))
+            .into_iter()
+            .flatten()
+            .chain(&big);
+        near.into_iter().any(|&j| {
+            let j = j as usize;
+            let (n, u) = (normals[j], &tris[j]);
+            if j == i || n.dot(normals[i]) > -0.999 || (p - u[0]).dot(n).abs() > 0.1 {
+                return false;
+            }
+            (0..3).all(|k| {
+                let (a, b) = (u[k], u[(k + 1) % 3]);
+                let edge = b - a;
+                edge.cross(p - a).dot(n) >= -0.2 * edge.length()
+            })
+        })
+    };
+    let drop: Vec<bool> = (0..tris.len())
+        .map(|i| {
+            if normals[i] == Vec3::ZERO || normals[i].z.abs() > 0.9 {
+                return false;
+            }
+            let t = &tris[i];
+            let c = (t[0] + t[1] + t[2]) / 3.;
+            covered(i, c) && t.iter().all(|v| covered(i, (c + *v) / 2.))
+        })
+        .collect();
+    let mut i = 0;
+    tris.retain(|_| {
+        i += 1;
+        !drop[i - 1]
+    });
 }
 
 fn dedupe(out: &mut Vec<[Vec3; 3]>) {
@@ -65,6 +136,7 @@ pub fn finish(collected: &[[Vec3; 3]], fixes: &Fitted) -> World {
         fixes.apply(&mut fixed);
         fixed.retain(usable);
         dedupe(&mut fixed);
+        drop_internal(&mut fixed);
         &fixed
     } else {
         collected
@@ -132,6 +204,7 @@ pub fn extra(map: &[[[f32; 3]; 3]], extra: &[[Vec3; 3]], fixes: &Fitted) -> Extr
         fixes.apply(&mut tris);
         tris.retain(usable);
     }
+    drop_internal(&mut tris);
     let own = tris.len();
     if own == 0 {
         return Extra {
@@ -195,6 +268,21 @@ mod tests {
             .filter(|r| r.iter().all(|p| (p[1] - 16. * 0.0254).abs() < 1e-3))
             .count();
         assert!(ledge_rails >= 2, "found {} ledge rails", ledge_rails);
+    }
+
+    #[test]
+    fn walls_between_touching_brushes_go_but_floors_stay() {
+        let a = box_brush(Vec3::new(0., 0., 0.), Vec3::new(64., 64., 64.));
+        let b = box_brush(Vec3::new(64., 0., 0.), Vec3::new(128., 64., 64.));
+        let one = collect(&[], &[a.clone()]).len();
+        let both = collect(&[], &[a, b]);
+        // Each box is 12 triangles; the two touching walls (4) are gone.
+        assert_eq!(one, 12);
+        assert_eq!(both.len(), 24 - 4);
+        assert!(both.iter().all(|t| {
+            let n = (t[1] - t[0]).cross(t[2] - t[0]).normalize();
+            !(n.x.abs() > 0.99 && t.iter().all(|v| (v.x - 64.).abs() < 1e-3))
+        }));
     }
 
     fn ledge_map() -> Vec<[Vec3; 3]> {
