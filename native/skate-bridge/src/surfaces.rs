@@ -23,7 +23,7 @@
 //! where an edge runs, so neighbours are cut at the same points). Everything
 //! works in Source units (inches, Z up).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use glam::Vec3;
 
@@ -65,11 +65,14 @@ pub struct Region {
 pub struct Surfaces {
     pub regions: Vec<Region>,
     pub rails: Vec<Vec<Vec3>>,
+    /// Steps up to this tall get a ramp laid in front of them (0 = none): the
+    /// opt-in forgiveness for small lips, see [`lips`].
+    pub lip: f32,
 }
 
 impl Surfaces {
     pub fn is_empty(&self) -> bool {
-        self.regions.is_empty() && self.rails.is_empty()
+        self.regions.is_empty() && self.rails.is_empty() && self.lip <= 0.
     }
 
     /// Reads the flat lists Lua sends. Regions are
@@ -119,6 +122,7 @@ impl Surfaces {
         Self {
             regions,
             rails: out,
+            lip: 0.,
         }
     }
 
@@ -127,6 +131,7 @@ impl Surfaces {
     pub fn fit(&self, tris: &[[Vec3; 3]]) -> Fitted {
         let mut fitted = Fitted {
             grinds: self.rails.clone(),
+            lip: self.lip,
             ..Fitted::default()
         };
         for region in &self.regions {
@@ -167,6 +172,7 @@ pub struct Fitted {
     patches: Vec<Patch>,
     ignores: Vec<(Vec3, f32)>,
     grinds: Vec<Vec<Vec3>>,
+    lip: f32,
     /// One line per region, for the console.
     pub notes: Vec<String>,
 }
@@ -191,7 +197,15 @@ struct Patch {
 
 impl Fitted {
     pub fn is_empty(&self) -> bool {
-        self.patches.is_empty() && self.ignores.is_empty() && self.grinds.is_empty()
+        self.patches.is_empty()
+            && self.ignores.is_empty()
+            && self.grinds.is_empty()
+            && self.lip <= 0.
+    }
+
+    /// The tallest step that gets a ramp (0 = none).
+    pub fn lip(&self) -> f32 {
+        self.lip
     }
 
     /// Rails the player drew, to add to the ones found in the map.
@@ -404,6 +418,113 @@ impl Patch {
     }
 }
 
+/// Per unit of height, how far out a ramp laid at a step reaches: a gentle
+/// slope of about 22 degrees.
+const LIP_RUN: f32 = 2.5;
+
+/// Ramps for the small steps in `tris`: an edge of an up-facing face with
+/// ground a little below it just past the edge (0.3 to `max_height` units
+/// down), as where two brushes meet a unit or two out of line. The ramp
+/// leans from the edge down to that ground, so it can only add collision
+/// (nothing is cut away or moved, no floor can open up). Without it the
+/// board hits the step like a wall and bails. Add them after the rails are
+/// found: a step this small is no rail, and a ramp must not hide a taller one.
+pub fn lips(tris: &[[Vec3; 3]], max_height: f32) -> Vec<[Vec3; 3]> {
+    const MIN_DROP: f32 = 0.3;
+    const MIN_EDGE: f32 = 4.;
+    let normal = |t: &[Vec3; 3]| (t[1] - t[0]).cross(t[2] - t[0]).normalize_or_zero();
+    let ups: Vec<([Vec3; 3], Vec3)> = tris
+        .iter()
+        .map(|t| (*t, normal(t)))
+        .filter(|(_, n)| n.z > 0.7)
+        .collect();
+    let mut cells = HashMap::<(i32, i32), Vec<usize>>::new();
+    for (i, (t, _)) in ups.iter().enumerate() {
+        let lo = t[0].min(t[1]).min(t[2]);
+        let hi = t[0].max(t[1]).max(t[2]);
+        for x in (lo.x / 64.).floor() as i32..=(hi.x / 64.).floor() as i32 {
+            for y in (lo.y / 64.).floor() as i32..=(hi.y / 64.).floor() as i32 {
+                cells.entry((x, y)).or_default().push(i);
+            }
+        }
+    }
+    // The highest up-facing surface over the spot between two heights.
+    let ground = |p: Vec3, low: f32, high: f32| -> Option<f32> {
+        let list = cells.get(&((p.x / 64.).floor() as i32, (p.y / 64.).floor() as i32))?;
+        list.iter()
+            .filter_map(|&i| {
+                let (t, n) = &ups[i];
+                let at = t[0].z - (n.x * (p.x - t[0].x) + n.y * (p.y - t[0].y)) / n.z;
+                let covered = (0..3).all(|k| {
+                    let (a, b) = (t[k], t[(k + 1) % 3]);
+                    (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x) >= -0.01
+                });
+                (covered && at >= low && at <= high).then_some(at)
+            })
+            .fold(None, |best: Option<f32>, at| {
+                Some(best.map_or(at, |b| b.max(at)))
+            })
+    };
+    let mut out = Vec::new();
+    let mut seen = HashSet::new();
+    for (t, n) in &ups {
+        let centroid = (t[0] + t[1] + t[2]) / 3.;
+        for i in 0..3 {
+            let (a, b) = (t[i], t[(i + 1) % 3]);
+            let along = b - a;
+            let len = along.length();
+            if len < MIN_EDGE || along.z.abs() > 0.2 * len {
+                continue;
+            }
+            let mid = (a + b) * 0.5;
+            let mut side = along.cross(*n);
+            side.z = 0.;
+            let Some(side) = side.try_normalize() else {
+                continue;
+            };
+            let side = if side.dot(centroid - mid) > 0. {
+                -side
+            } else {
+                side
+            };
+            let top = mid.z;
+            // Floor carrying on past the edge: no step here.
+            if ground(mid + side * 0.75, top - MIN_DROP, top + 0.6).is_some() {
+                continue;
+            }
+            let mut drops = Vec::new();
+            for s in [0.15, 0.5, 0.85] {
+                let at = a + along * s + side;
+                match ground(at, top - max_height, top - MIN_DROP) {
+                    Some(z) => drops.push(z),
+                    None => break,
+                }
+            }
+            if drops.len() < 3 {
+                continue;
+            }
+            let low = drops.iter().sum::<f32>() / 3.;
+            if drops.iter().any(|z| (z - low).abs() > 0.4) {
+                continue;
+            }
+            let run = LIP_RUN * (top - low);
+            let foot = |p: Vec3| Vec3::new(p.x + side.x * run, p.y + side.y * run, low);
+            let key = [a, b].map(|v| v.to_array().map(|x| (x * 8.).round() as i32));
+            if !seen.insert((key[0].min(key[1]), key[0].max(key[1]))) {
+                continue;
+            }
+            for mut ramp in [[foot(a), foot(b), b], [foot(a), b, a]] {
+                // Faces out and up.
+                if normal(&ramp).dot(side + Vec3::Z) < 0. {
+                    ramp.swap(1, 2);
+                }
+                out.push(ramp);
+            }
+        }
+    }
+    out
+}
+
 /// The square lattice (in X and Y) over a region that triangles are cut along.
 struct Grid {
     center: Vec3,
@@ -609,6 +730,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Flat, 96.)],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         assert_eq!(fitted.notes.len(), 1, "{:?}", fitted.notes);
@@ -668,6 +790,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Flat, 120.)],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         let mut fixed = map.clone();
@@ -711,6 +834,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Smooth, 100.)],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         let mut fixed = map.clone();
@@ -756,6 +880,7 @@ mod tests {
                 ..region(Kind::Flat, 64.)
             }],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         assert!(
@@ -809,6 +934,7 @@ mod tests {
                 ..region(Kind::Ignore, 20.)
             }],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         let mut fixed = map.clone();
@@ -836,6 +962,7 @@ mod tests {
                 ..region(Kind::Flat, 60.)
             }],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         assert!(
@@ -863,6 +990,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Flat, 120.)],
             rails: vec![],
+            lip: 0.,
         }
         .fit(&map);
         let mut fixed = map.clone();
@@ -959,11 +1087,21 @@ mod bench {
             })
             .collect();
         let started = std::time::Instant::now();
-        let fitted = Surfaces { regions, rails: vec![] }.fit(&tris);
+        let fitted = Surfaces {
+            regions,
+            ..Default::default()
+        }
+        .fit(&tris);
         let fit = started.elapsed();
         let mut copy = tris.clone();
         let started = std::time::Instant::now();
         fitted.apply(&mut copy);
-        eprintln!("{} tris: fit {:?}, apply {:?}, {} after", tris.len(), fit, started.elapsed(), copy.len());
+        eprintln!(
+            "{} tris: fit {:?}, apply {:?}, {} after",
+            tris.len(),
+            fit,
+            started.elapsed(),
+            copy.len()
+        );
     }
 }

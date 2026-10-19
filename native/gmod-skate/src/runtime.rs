@@ -39,7 +39,12 @@ pub enum Job {
     /// The player's surface fixes for this map (see `skate_bridge::surfaces`),
     /// as the flat lists Lua sends. Replaces the last set; the map's collision
     /// is built again with them and swapped in.
-    Surfaces { regions: Vec<f32>, rails: Vec<f32> },
+    Surfaces {
+        regions: Vec<f32>,
+        rails: Vec<f32>,
+        /// The tallest step that gets a ramp laid in front of it, 0 for none.
+        lip: f32,
+    },
 }
 
 #[derive(Clone, Default)]
@@ -427,8 +432,13 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 pending_at = std::time::Instant::now();
                 None
             }
-            Job::Surfaces { regions, rails } => {
+            Job::Surfaces {
+                regions,
+                rails,
+                lip,
+            } => {
                 surfaces = Surfaces::from_flat(&regions, &rails);
+                surfaces.lip = if lip.is_finite() { lip.clamp(0., 3.5) } else { 0. };
                 surfaces_gen = surfaces_gen.wrapping_add(1);
                 // Before a map is loaded there is nothing to redo: the load
                 // reads the new fixes itself.

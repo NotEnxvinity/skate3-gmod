@@ -102,7 +102,14 @@ local function Save()
 	file.Write(Path(), util.TableToJSON({ version = 1, map = game.GetMap(), regions = list, rails = lines }, true))
 end
 
--- What the skate module is told: two flat lists (see skate3.SetSurfaces).
+-- Experimental and off by default: ramps laid at steps this many units tall or
+-- less, such as where two brushes meet a unit or two out of line. Nothing is
+-- cut away, so no floor can open up; it only adds a slope in front of the step.
+local lip = CreateClientConVar("skate3_lip_forgive", "0", true, false,
+	"Lay a small ramp at steps up to this many units tall so the board rolls over them (0 = off, 3 = small lips)", 0, 3.5)
+cvars.AddChangeCallback("skate3_lip_forgive", function() Surf.Push() end, "skate3_surfaces")
+
+-- What the skate module is told: two flat lists and the lip height (see skate3.SetSurfaces).
 function Surf.Push()
 	if not (skate3 and skate3.SetSurfaces) then return end
 	local flat, lines = {}, {}
@@ -119,7 +126,7 @@ function Surf.Push()
 			lines[#lines + 1] = v.z
 		end
 	end
-	skate3.SetSurfaces(flat, lines)
+	skate3.SetSurfaces(flat, lines, lip:GetFloat())
 end
 
 -- Says what the module made of the newest flag once it has built it.

@@ -85,9 +85,18 @@ pub fn finish(collected: &[[Vec3; 3]], fixes: &Fitted) -> World {
             .map(|p| collision::to_skate(p).to_array())
             .collect()
     }));
+    // Ramps at small steps go in after the rails are found, so they hide none.
+    let ramps = if fixes.lip() > 0. {
+        let mut ramps = crate::surfaces::lips(out, fixes.lip());
+        ramps.retain(usable);
+        ramps
+    } else {
+        Vec::new()
+    };
     World {
         triangles: out
             .iter()
+            .chain(&ramps)
             .map(|p| p.map(|v| collision::to_skate(v).to_array()))
             .collect(),
         rails: all_rails,
@@ -219,6 +228,7 @@ mod tests {
                 band: 6.,
             }],
             rails: vec![],
+            ..Default::default()
         }
         .fit(&map);
         let world = finish(&map, &fixes);
@@ -239,6 +249,7 @@ mod tests {
                 band: 6.,
             }],
             rails: vec![vec![Vec3::new(0., 100., 5.), Vec3::new(100., 100., 5.)]],
+            ..Default::default()
         }
         .fit(&map);
         let world = finish(&map, &fixes);
@@ -246,6 +257,49 @@ mod tests {
         // The drawn rail comes first.
         assert_eq!(world.rails[0].len(), 2);
         assert!((world.rails[0][0][1] - 5. * 0.0254).abs() < 1e-5);
+    }
+
+    #[test]
+    fn small_steps_get_a_ramp_only_when_asked_and_nothing_is_taken_away() {
+        // Two floors 2 units out of line, as two brushes that meet.
+        let map = collect(
+            &[],
+            &[
+                box_brush(Vec3::new(-512., -512., -16.), Vec3::new(0., 512., 0.)),
+                box_brush(Vec3::new(0., -512., -16.), Vec3::new(512., 512., 2.)),
+            ],
+        );
+        let plain = finish(&map, &Fitted::default());
+        let fixes = Surfaces {
+            lip: 3.,
+            ..Default::default()
+        }
+        .fit(&map);
+        let ramped = finish(&map, &fixes);
+        assert!(ramped.triangles.len() > plain.triangles.len());
+        assert_eq!(&ramped.triangles[..plain.triangles.len()], &plain.triangles[..]);
+        let sorted = |w: &World| {
+            let mut rails: Vec<String> = w.rails.iter().map(|r| format!("{r:?}")).collect();
+            rails.sort();
+            rails
+        };
+        assert_eq!(sorted(&ramped), sorted(&plain));
+        for t in &ramped.triangles[plain.triangles.len()..] {
+            let n = (glam::Vec3::from_array(t[1]) - glam::Vec3::from_array(t[0]))
+                .cross(glam::Vec3::from_array(t[2]) - glam::Vec3::from_array(t[0]))
+                .normalize();
+            // Faces the way the step does and leans back: up, not under.
+            assert!(n.y > 0.3 && n.y < 0.95, "{n:?}");
+            // Never below the lower floor.
+            assert!(t.iter().all(|p| p[1] >= -0.001));
+        }
+        // A step taller than asked for gets none.
+        let tall = Surfaces {
+            lip: 1.,
+            ..Default::default()
+        }
+        .fit(&map);
+        assert_eq!(finish(&map, &tall).triangles.len(), plain.triangles.len());
     }
 
     #[test]
