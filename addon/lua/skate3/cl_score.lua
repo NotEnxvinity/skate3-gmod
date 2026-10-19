@@ -207,14 +207,23 @@ local function MeatView(now)
 	}
 end
 
--- Rolling backwards along the board on the ground (Skate 3 calls it FAKIE).
--- The engine doesn't say which stance the skater is in, so SWITCH isn't shown.
-local function Fakie(pose)
+-- The stance label: the engine's own riding-switch and riding-fakie flags when
+-- the native module reports them (SWITCH wins over FAKIE). Without them, a
+-- guess for FAKIE alone: rolling backwards along the skater's forward on the
+-- ground. That forward is the skeleton's own, which points the other way for
+-- a goofy skater, so the test flips with the stance setting.
+local function Stance(pose, score)
+	if score.fakie ~= nil then
+		return score.switch and "SWITCH" or score.fakie and "FAKIE" or nil
+	end
 	local v, f = pose.velocity, pose.forward
-	if not v or not f or not pose.state or not pose.state:find("^Physics") or pose.state:find("Air") then return false end
+	if not v or not f or not pose.state or not pose.state:find("^Physics") or pose.state:find("Air") then return nil end
 	local horizontal = math.sqrt(v[1] * v[1] + v[2] * v[2])
-	if horizontal < 40 then return false end
-	return (v[1] * f[1] + v[2] * f[2]) < -0.6 * horizontal
+	if horizontal < 40 then return nil end
+	local along = v[1] * f[1] + v[2] * f[2]
+	local want = GetConVar("skate3_stance")
+	if not want or want:GetString() ~= "regular" then along = -along end
+	return along < -0.6 * horizontal and "FAKIE" or nil
 end
 
 -- Watches the jump and the manual for how far they went.
@@ -339,7 +348,7 @@ local function Update(pose)
 		tierAt = tierAt,
 		sequence = Points(lastSeq > 0 and lastSeq or shown),
 		line = Points(shown),
-		stance = Fakie(pose) and "FAKIE" or nil,
+		stance = Stance(pose, sc),
 		readouts = ReadoutRows(),
 	}
 end

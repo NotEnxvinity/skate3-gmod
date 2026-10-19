@@ -1,0 +1,49 @@
+Lets skate-host report whether the skater is riding fakie (rolling backwards
+along the board) or switch (opposite foot forward from the natural stance), the
+animation's own flags, with the score so the addon's HUD can label them. Applied
+on top of skate-host-hud.patch (it adds fields to that patch's Score). Same
+license as the files it changes (Apache-2.0).
+
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 00a4169..93e9b5d 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -36,6 +36,10 @@ pub struct Score {
+     pub line_timer: f32,
+     /// Whether a trick sequence is still being built.
+     pub active: bool,
++    /// Rolling backwards along the board (the animation's riding-fakie flag).
++    pub fakie: bool,
++    /// Riding with the opposite foot forward from the natural stance.
++    pub switch: bool,
+ }
+ pub struct Pose {
+     pub root: Mat4,
+@@ -176,7 +180,12 @@ impl Session {
+         self.advance_published()
+     }
+     pub fn score(&self) -> Score {
+-        self.skater.scoring.hud()
++        let packet = &self.skater.animation.packet;
++        Score {
++            fakie: packet.riding_fakie,
++            switch: packet.riding_switch,
++            ..self.skater.scoring.hud()
++        }
+     }
+     /// The skater's natural stance, as Skate 3's profile sets it: regular or
+     /// goofy. The current relative stance and trick state carry over.
+diff --git a/skate/crates/skate-host/src/scoring_runtime.rs b/skate/crates/skate-host/src/scoring_runtime.rs
+index 28f4a3d..18303f7 100644
+--- a/skate/crates/skate-host/src/scoring_runtime.rs
++++ b/skate/crates/skate-host/src/scoring_runtime.rs
+@@ -324,6 +324,9 @@ impl Runtime {
+                 0.
+             },
+             active: self.sequence_active,
++            // The animation owns these two; Session::score fills them in.
++            fakie: false,
++            switch: false,
+         }
+     }
+     pub fn advance(&mut self, f: Frame) -> Result<(), String> {

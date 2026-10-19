@@ -392,6 +392,10 @@ lua_fn!(get_pose, |lua| {
     }
     lua.push_bool(score.active);
     lua.set_field(-2, c"active");
+    lua.push_bool(score.fakie);
+    lua.set_field(-2, c"fakie");
+    lua.push_bool(score.switch);
+    lua.set_field(-2, c"switch");
     lua.set_field(-2, c"score");
     if let Some(c) = p.camera {
         lua.new_table();
