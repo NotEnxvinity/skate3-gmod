@@ -31,6 +31,13 @@ def make(pid, name, category, n):
             'groups': [group], 'collision': collision}
 
 
+def joined(values):
+    """An array as the Lua side reads it: long ones are stored in pieces."""
+    if values and isinstance(values[0], list):
+        return [v for part in values for v in part]
+    return values
+
+
 class WriteAllTest(unittest.TestCase):
     def test_pieces_and_tiles(self):
         with tempfile.TemporaryDirectory() as gmod:
@@ -48,8 +55,9 @@ class WriteAllTest(unittest.TestCase):
             total = 0
             for t in tiles:
                 piece = json.loads((out / f'{t}.json').read_text())
-                self.assertLessEqual(len(piece['collision']) // 9, park.park_tiles.MAX_COLLISION)
-                total += len(piece['collision']) // 9
+                flat = joined(piece['collision'])
+                self.assertLessEqual(len(flat) // 9, park.park_tiles.MAX_COLLISION)
+                total += len(flat) // 9
             self.assertEqual(total, 120 * 120 * 2)
             self.assertTrue((out / 'aa.json').is_file())
             self.assertFalse((out / 'bb.json').exists(), 'a park is only its tiles')
@@ -66,6 +74,23 @@ class WriteAllTest(unittest.TestCase):
             self.assertFalse((out.parent / 'park.partial').exists())
             self.assertFalse((Path(gmod) / 'materials/skate3/park.partial').exists())
 
+
+class ChunkTest(unittest.TestCase):
+    def test_long_arrays_are_written_in_short_pieces(self):
+        import json, tempfile
+        from pathlib import Path
+        import park
+        piece = {'id': 'x', 'name': 'X', 'category': 'Tiles', 'bounds': [[0, 0, 0], [1, 1, 1]],
+                 'collision': list(range(40000)),
+                 'groups': [{'tex': None, 'pos': list(range(20000)), 'uv': [1, 2], 'idx': list(range(16000))}]}
+        with tempfile.TemporaryDirectory() as tmp:
+            park.write_piece(Path(tmp), piece)
+            back = json.loads((Path(tmp) / 'x.json').read_text())
+        # Garry's Mod keeps 15,000 entries of an array: nothing longer may be written.
+        for arr in (back['collision'], back['groups'][0]['pos'], back['groups'][0]['idx']):
+            self.assertTrue(all(isinstance(part, list) and len(part) <= 15000 for part in arr))
+        self.assertEqual([v for part in back['collision'] for v in part], piece['collision'])
+        self.assertEqual(back['groups'][0]['uv'], [1, 2])
 
 if __name__ == '__main__':
     unittest.main()

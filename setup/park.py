@@ -244,10 +244,25 @@ def world(path, pid, name, textures):
     return made
 
 
+# Garry's Mod's util.JSONToTable keeps only the first 15,000 entries of any
+# array, silently: a tile's collision and big render groups lost most of
+# their triangles. Long arrays are written as a list of shorter ones, which
+# sh_park.lua joins again when it reads the piece.
+CHUNK = 9000
+
+
+def chunked(values):
+    if len(values) <= CHUNK:
+        return values
+    return [values[i:i + CHUNK] for i in range(0, len(values), CHUNK)]
+
+
 def write_piece(folder, piece):
     # Gmod's file.Read only reaches data/ files with whitelisted
     # extensions; .json is one.
-    (folder / f'{piece["id"]}.json').write_text(json.dumps(piece, separators=(',', ':')))
+    out = dict(piece, collision=chunked(piece['collision']),
+               groups=[dict(g, **{k: chunked(g[k]) for k in ('pos', 'uv', 'idx') if k in g}) for g in piece['groups']])
+    (folder / f'{piece["id"]}.json').write_text(json.dumps(out, separators=(',', ':')))
 
 
 def install(game, gmod, report=print):

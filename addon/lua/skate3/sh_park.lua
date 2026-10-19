@@ -100,10 +100,31 @@ end
 
 -- A piece's whole data, read once. A park's tiles are big and only read by
 -- whoever is building them, so callers let those go again (Park.Forget).
+-- util.JSONToTable keeps only the first 15,000 entries of an array, so
+-- setup writes a long one as a list of shorter ones: join them again.
+local function Join(list)
+	if not istable(list) or not istable(list[1]) then return list end
+	local flat, n = {}, 0
+	for _, part in ipairs(list) do
+		for i = 1, #part do
+			n = n + 1
+			flat[n] = part[i]
+		end
+	end
+	return flat
+end
+
 function Park.Get(id)
 	if cache[id] == nil then
 		local text = isstring(id) and id:match("^[%w_]+$") and file.Read("skate3/park/" .. id .. ".json", "DATA")
-		cache[id] = text and util.JSONToTable(text) or false
+		local piece = text and util.JSONToTable(text)
+		if piece then
+			piece.collision = Join(piece.collision)
+			for _, g in ipairs(piece.groups or {}) do
+				g.pos, g.uv, g.idx = Join(g.pos), Join(g.uv), Join(g.idx)
+			end
+		end
+		cache[id] = piece or false
 	end
 	return cache[id] or nil
 end
