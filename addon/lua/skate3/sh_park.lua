@@ -119,7 +119,7 @@ function Park.Soup(piece)
 	local soup = {}
 	local c = piece.collision
 	if c and #c >= 9 then
-		for i = 1, #c - 8, 3 do soup[#soup + 1] = Vector(c[i], c[i + 1], c[i + 2]) end
+		for i = 1, #c - 2, 3 do soup[#soup + 1] = Vector(c[i], c[i + 1], c[i + 2]) end
 	else
 		for _, g in ipairs(piece.groups or {}) do
 			for _, k in ipairs(g.idx) do

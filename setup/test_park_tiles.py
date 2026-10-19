@@ -141,6 +141,12 @@ class FillCoverageTest(unittest.TestCase):
         added, _ = park_tiles.fill_coverage([self.group([self.UP])], self.flat([under]))
         self.assertEqual(added, [])
 
+    def test_collision_facing_down_does_not_cover(self):
+        # The same surface wound the other way: the board would fall through.
+        flipped = tuple(reversed(self.UP))
+        added, _ = park_tiles.fill_coverage([self.group([self.UP])], self.flat([flipped]))
+        self.assertEqual(len(added) // 9, 1)
+
     def test_collision_far_below_does_not_count(self):
         far = tuple((x, y, z - 500) for x, y, z in self.UP)
         added, _ = park_tiles.fill_coverage([self.group([self.UP])], self.flat([far]))

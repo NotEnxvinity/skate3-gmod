@@ -92,6 +92,7 @@ FILL_CELL = 96.0
 FILL_REACH = 24.0
 FILL_FACING = 0.35
 FILL_MIN_AREA = 4.0
+FILL_COVER_FACING = 0.2
 
 
 def _cells(lo, hi):
@@ -118,12 +119,18 @@ def fill_coverage(groups, flat):
     from its own collision assets; where one is missing or unreadable, the
     board and the player fall through a surface that is plainly there. Each
     upward facing drawn triangle (cutouts like leaves and fences aside) with
-    no collision under or over its middle is added, wound the way Skate 3
+    no upward facing collision under or over its middle is added, wound the way Skate 3
     winds its collision. Returns (flat list to add, drawn triangles checked)."""
     grid, big = {}, []
     for i in range(0, len(flat) - 8, 9):
         tri = ((flat[i], flat[i + 1], flat[i + 2]), (flat[i + 3], flat[i + 4], flat[i + 5]),
                (flat[i + 6], flat[i + 7], flat[i + 8]))
+        n = _cross(_sub(tri[2], tri[0]), _sub(tri[1], tri[0]))
+        size = _length(n)
+        # Only collision that faces up covers a surface that faces up: the
+        # board's module only catches things from the side a triangle faces.
+        if size == 0 or n[2] / size < FILL_COVER_FACING:
+            continue
         xs, ys = [t[0] for t in tri], [t[1] for t in tri]
         cx, cy = _cells(min(xs), max(xs)), _cells(min(ys), max(ys))
         if len(cx) * len(cy) > 400:
