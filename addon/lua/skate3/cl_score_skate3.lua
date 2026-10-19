@@ -67,6 +67,11 @@ end
 
 local function Lerp(k, from, to) return from + (to - from) * k end
 
+-- The stance labels' pictures (shapes 28 and 31 of the movie) and how long they take to fade in.
+local STANCE_ART = { SWITCH = "28", FAKIE = "31" }
+local STANCE_IN = 5 * FRAME
+local stanceNow, stanceAt
+
 -- What happens when the multiplier reaches x2 or x3 (the movie's multiplier
 -- labels, counted in frames since the tier came in): the glow behind the disc
 -- fades in over 19 frames, a white flash goes off (in three or four quick
@@ -187,11 +192,22 @@ function S3.Draw(v)
 		UI.Futura(v.trick, TRICK_X, TRICK_Y, TRICK_H, TRICK, a * 0.8, TEXT_ALIGN_LEFT)
 	end
 
-	-- FAKIE reads bottom to top beside the disc.
+	-- FAKIE and SWITCH: the movie's curved labels on their dark arc left of
+	-- the disc (the movie's stance clip sits 73 left and 34 above the disc's
+	-- centre; the label fades in over 5 frames). Plain turned text without the art.
+	if v.stance ~= stanceNow then stanceNow, stanceAt = v.stance, now end
 	if v.stance then
-		UI.Rotate(106, CY, -90)
-		UI.Futura(v.stance, 106, CY - 9, 17, OLDER, a * 0.8, TEXT_ALIGN_CENTER)
-		UI.Rotate()
+		local art = UI.Art()
+		local label = STANCE_ART[v.stance]
+		if art and label and art.shapes[label] and art.shapes["26"] then
+			local k = Ease((now - stanceAt) / STANCE_IN)
+			UI.Shape("26", CX - 73, CY - 34, 1, 255, 255, 255, 255 * a)
+			UI.Shape(label, CX - 73, CY - 34, 1, 255, 255, 255, 255 * a * k)
+		else
+			UI.Rotate(106, CY, -90)
+			UI.Futura(v.stance, 106, CY - 9, 17, OLDER, a * 0.8, TEXT_ALIGN_CENTER)
+			UI.Rotate()
+		end
 	end
 end
 

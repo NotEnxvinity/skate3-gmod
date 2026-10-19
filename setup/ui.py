@@ -20,7 +20,7 @@ BUTTONS = ('A', 'B', 'X', 'Y', 'L_Bumper', 'R_Bumper', 'L_Trigger', 'R_Trigger',
 # FontManager's APT names for the two atlases the HUD text uses.
 FONTS = {'heavy': 'Futura Std Medium', 'shadow': 'Futura Shadow'}
 # Shapes of the trickdisplay2 movie the score widget is built from.
-SHAPES = ('36', '38', '40', '43', '45', '46', '47', '51', '54', '57', '61', '64', '68', '72', '81')
+SHAPES = ('26', '28', '31', '36', '38', '40', '43', '45', '46', '47', '51', '54', '57', '61', '64', '68', '72', '81')
 # Where an upscaled copy of a texture sits in the HD pack: the same names and
 # folders as the exported UI textures (ui/screens/hud2/trickdisplay2/35.png).
 HD_SCORE = 'ui/screens/hud2/trickdisplay2/%s.png'
