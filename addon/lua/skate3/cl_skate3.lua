@@ -19,6 +19,7 @@ local Pose = include("skate3/sh_pose.lua")
 local Others = include("skate3/cl_others.lua")(Skater, Perf)
 local Players = include("skate3/cl_players.lua")(Skater, Others, Score)
 include("skate3/cl_collision_report.lua")
+local Surfaces = include("skate3/cl_surfaces.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OSX" and "gmcl_skate3_osx64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -125,6 +126,9 @@ local function Load()
 		Say("Couldn't read this map's .bsp.")
 		return
 	end
+	-- The player's surface flags for this map go first, so the collision is
+	-- built with them.
+	Surfaces.Push()
 	local started, loadErr = skate3.LoadMap(bsp, ExtraTriangles(bsp), LiveBrushes())
 	if not started then
 		Say(loadErr)

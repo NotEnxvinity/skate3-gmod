@@ -198,6 +198,35 @@ lua_fn!(set_brushes, |lua| {
     }
 });
 
+// The player's surface fixes for this map (the Skate 3 Surface tool), as two
+// flat lists: regions {kind (1 flat, 2 smooth, 3 ignore), x, y, z, nx, ny, nz,
+// radius, band, ...} and grind rails {points, x, y, z, x, y, z, ..., points, ...}.
+// Replaces the last set. Send them before LoadMap or any time after; the map's
+// collision is built again with them and swapped in.
+lua_fn!(set_surfaces, |lua| {
+    let regions = lua.numbers(1).unwrap_or_default();
+    let rails = lua.numbers(2).unwrap_or_default();
+    match with_runtime(|r| r.send(Job::Surfaces { regions, rails })) {
+        Some(()) => {
+            lua.push_bool(true);
+            1
+        }
+        None => lua.fail("call skate3.Init first"),
+    }
+});
+
+// What each surface fix did when the module fitted it, one string apiece.
+lua_fn!(surface_notes, |lua| {
+    let notes = with_runtime(|r| r.shared.lock().map(|s| s.surface_notes.clone()).unwrap_or_default())
+        .unwrap_or_default();
+    lua.new_table();
+    for (i, note) in notes.iter().enumerate() {
+        lua.push_str(note);
+        lua.set_index(-2, i as c_int + 1);
+    }
+    1
+});
+
 lua_fn!(status, |lua| {
     lua.new_table();
     let pad = input::poll().ok().and_then(|p| p.name);
@@ -640,6 +669,8 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"LoadMap", load_map),
         (c"SetProps", set_props),
         (c"SetBrushes", set_brushes),
+        (c"SetSurfaces", set_surfaces),
+        (c"SurfaceNotes", surface_notes),
         (c"Unlzma", unlzma),
         (c"SetHallOfMeat", set_hall_of_meat),
         (c"BrokenBone", broken_bone),

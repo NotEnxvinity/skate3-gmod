@@ -7,6 +7,7 @@ use std::sync::{Arc, Mutex, mpsc};
 use glam::{Mat3, Mat4, Vec3};
 use skate_bridge::bridge::{Controls, Session};
 use skate_bridge::repro::{Driver, Event, Recording};
+use skate_bridge::surfaces::{Fitted, Surfaces};
 use skate_bridge::{collision, world};
 
 /// Recordings of glitched rides kept in data/skate3/rides.
@@ -35,6 +36,10 @@ pub enum Job {
     Props { extra: Vec<[Vec3; 3]> },
     /// Where the map's moving brush entities (doors...) stand now.
     Doors { live: Vec<crate::bsp::Live> },
+    /// The player's surface fixes for this map (see `skate_bridge::surfaces`),
+    /// as the flat lists Lua sends. Replaces the last set; the map's collision
+    /// is built again with them and swapped in.
+    Surfaces { regions: Vec<f32>, rails: Vec<f32> },
 }
 
 #[derive(Clone, Default)]
@@ -99,6 +104,8 @@ pub struct Shared {
     /// brushes were laid over the map by the last update.
     pub movers: usize,
     pub doors: usize,
+    /// What each surface fix did when it was fitted, a line apiece.
+    pub surface_notes: Vec<String>,
 }
 
 pub struct Runtime {
@@ -158,9 +165,25 @@ struct MapWorld {
     /// The map plus whatever props are in it now.
     triangles: Vec<[[f32; 3]; 3]>,
     rails: Vec<Vec<[f32; 3]>>,
-    /// The map alone, which prop collision is built on top of.
+    /// The map alone, which prop collision is built on top of, with the
+    /// player's surface fixes in it.
     base_triangles: Arc<Vec<[[f32; 3]; 3]>>,
     base_rails: Arc<Vec<Vec<[f32; 3]>>>,
+    /// The map's faces as compiled (Source units), before any fix: what the
+    /// fixes are fitted to and laid over again when they change.
+    raw: Arc<Vec<[Vec3; 3]>>,
+    /// The fixes as fitted to `raw`, which props get laid over by too.
+    fitted: Arc<Fitted>,
+    /// Which set of fixes `base_*` was built with.
+    base_gen: u64,
+}
+
+/// A map rebuilt for new surface fixes.
+struct Rebuilt {
+    triangles: Arc<Vec<[[f32; 3]; 3]>>,
+    rails: Arc<Vec<Vec<[f32; 3]>>>,
+    fitted: Arc<Fitted>,
+    generation: u64,
 }
 
 /// Collision with props built off the simulation thread, ready to swap in.
@@ -170,6 +193,8 @@ struct Built {
     triangles: Vec<[[f32; 3]; 3]>,
     rails: Vec<Vec<[f32; 3]>>,
     props: usize,
+    /// Set when the build also redid the map for new surface fixes.
+    rebuilt: Option<Rebuilt>,
 }
 
 /// The triangles of the moving brush entities where `live` has them now.
@@ -196,17 +221,39 @@ fn build_props(
     map: &MapWorld,
     map_id: u64,
     extra: Vec<[Vec3; 3]>,
+    surfaces: Surfaces,
+    surfaces_gen: u64,
     done: mpsc::Sender<Built>,
 ) -> Option<std::thread::JoinHandle<()>> {
-    let base_triangles = Arc::clone(&map.base_triangles);
-    let base_rails = Arc::clone(&map.base_rails);
+    let mut base_triangles = Arc::clone(&map.base_triangles);
+    let mut base_rails = Arc::clone(&map.base_rails);
+    let mut fitted = Arc::clone(&map.fitted);
+    let stale = map.base_gen != surfaces_gen;
+    let raw = Arc::clone(&map.raw);
     std::thread::Builder::new()
         .name("skate3-props".into())
         .stack_size(32 * 1024 * 1024)
         .spawn(move || {
             skate_bridge::float_mode::pc();
             let built = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                let added = world::extra(&base_triangles, &extra);
+                // New surface fixes: the map's faces are fitted and moved
+                // again from the compiled ones, rails and all.
+                let rebuilt = stale.then(|| {
+                    let again = surfaces.fit(&raw);
+                    let world = world::finish(&raw, &again);
+                    Rebuilt {
+                        triangles: Arc::new(world.triangles),
+                        rails: Arc::new(world.rails),
+                        fitted: Arc::new(again),
+                        generation: surfaces_gen,
+                    }
+                });
+                if let Some(r) = &rebuilt {
+                    base_triangles = Arc::clone(&r.triangles);
+                    base_rails = Arc::clone(&r.rails);
+                    fitted = Arc::clone(&r.fitted);
+                }
+                let added = world::extra(&base_triangles, &extra, &fitted);
                 let props = added.triangles.len();
                 let mut triangles = base_triangles.to_vec();
                 triangles.extend(added.triangles);
@@ -221,6 +268,7 @@ fn build_props(
                     triangles,
                     rails,
                     props,
+                    rebuilt,
                 }
             }))
             .unwrap_or_else(|panic| Built {
@@ -232,6 +280,7 @@ fn build_props(
                 triangles: Vec::new(),
                 rails: Vec::new(),
                 props: 0,
+                rebuilt: None,
             });
             let _ = done.send(built);
         })
@@ -275,6 +324,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let mut props_extra: Vec<[Vec3; 3]> = Vec::new();
     let mut movers: Vec<(usize, Vec<Vec<[f32; 4]>>)> = Vec::new();
     let mut door_extra: Vec<[Vec3; 3]> = Vec::new();
+    // The player's fixes to this map's surfaces, and a counter that moves
+    // whenever they change.
+    let mut surfaces = Surfaces::default();
+    let mut surfaces_gen: u64 = 0;
     let mut map_id: u64 = 0;
     loop {
         let job = match jobs.recv_timeout(std::time::Duration::from_millis(50)) {
@@ -316,7 +369,14 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         })
                         .collect();
                     let count = done.triangles.len();
+                    let notes = done.rebuilt.as_ref().map(|r| r.fitted.notes.clone());
                     if let Some(map) = map.as_mut() {
+                        if let Some(r) = done.rebuilt {
+                            map.base_triangles = r.triangles;
+                            map.base_rails = r.rails;
+                            map.fitted = r.fitted;
+                            map.base_gen = r.generation;
+                        }
                         // A ride recorded from here replays on the new collision.
                         recording = Some(Recording::new(done.triangles.clone(), done.rails.clone()));
                         recording_full = false;
@@ -327,6 +387,9 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         s.triangles = count;
                         s.rails = rails.clone();
                         s.props = done.props;
+                        if let Some(notes) = &notes {
+                            s.surface_notes = notes.clone();
+                        }
                         s.revision = s.revision.wrapping_add(1);
                     });
                 }
@@ -338,7 +401,15 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
             && let (Some(s), Some(m)) = (session.as_ref(), map.as_ref())
             && let Some(extra) = pending.take()
         {
-            building = build_props(s.collision_builder(), m, map_id, extra, built_tx.clone());
+            building = build_props(
+                s.collision_builder(),
+                m,
+                map_id,
+                extra,
+                surfaces.clone(),
+                surfaces_gen,
+                built_tx.clone(),
+            );
         }
         let Some(job) = job else { continue };
         let job = match job {
@@ -354,6 +425,17 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                 set(&|s| s.doors = pieces);
                 pending = Some([props_extra.as_slice(), door_extra.as_slice()].concat());
                 pending_at = std::time::Instant::now();
+                None
+            }
+            Job::Surfaces { regions, rails } => {
+                surfaces = Surfaces::from_flat(&regions, &rails);
+                surfaces_gen = surfaces_gen.wrapping_add(1);
+                // Before a map is loaded there is nothing to redo: the load
+                // reads the new fixes itself.
+                if map.is_some() {
+                    pending = Some([props_extra.as_slice(), door_extra.as_slice()].concat());
+                    pending_at = std::time::Instant::now();
+                }
                 None
             }
             other => Some(other),
@@ -391,8 +473,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         let mut triangles = solids.triangles;
                         triangles.extend(extra);
                         stage("finding grind rails");
-                        let built = world::build(&triangles, &solids.brushes);
+                        let collected = world::collect(&triangles, &solids.brushes);
                         drop(triangles);
+                        let fitted = surfaces.fit(&collected);
+                        let built = world::finish(&collected, &fitted);
                         let rails: Vec<Vec<Vec3>> = built
                             .rails
                             .iter()
@@ -409,6 +493,9 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             rails: built.rails.clone(),
                             base_triangles: Arc::new(built.triangles.clone()),
                             base_rails: Arc::new(built.rails.clone()),
+                            raw: Arc::new(collected),
+                            fitted: Arc::new(fitted),
+                            base_gen: surfaces_gen,
                         });
                         // A fresh session for every map, even one already
                         // running: a replay starts from a new session, so one
@@ -437,6 +524,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             s.props = 0;
                             s.movers = mover_count;
                             s.doors = 0;
+                            s.surface_notes = map.as_ref().map(|m| m.fitted.notes.clone()).unwrap_or_default();
                             s.revision = s.revision.wrapping_add(1);
                         });
                     }
@@ -520,7 +608,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             set(&|s| s.pose = Some(pose.clone()));
                         }
                     }
-                    Job::Props { .. } | Job::Doors { .. } => {}
+                    Job::Props { .. } | Job::Doors { .. } | Job::Surfaces { .. } => {}
                     Job::Suspend => {
                         if let Some(session) = session.as_mut().filter(|_| !broken) {
                             record(&mut recording, &mut recording_full, Event::Suspend);

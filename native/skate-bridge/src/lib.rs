@@ -4,6 +4,7 @@
 pub mod collision;
 pub mod float_mode;
 pub mod rails;
+pub mod surfaces;
 pub mod repro;
 pub mod world;
 

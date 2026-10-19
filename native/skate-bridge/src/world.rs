@@ -5,6 +5,7 @@ use std::collections::HashSet;
 
 use glam::Vec3;
 
+use crate::surfaces::Fitted;
 use crate::{collision, rails};
 
 /// Collision ready for `Session::new` or `CollisionBuilder::build`.
@@ -19,6 +20,13 @@ pub struct World {
 /// wound counterclockwise seen from outside; degenerate and duplicate faces
 /// are dropped.
 pub fn build(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> World {
+    finish(&collect(triangles, brushes), &Fitted::default())
+}
+
+/// The map's solid faces as triangles (Source units), brushes cut into
+/// faces, slivers and duplicates dropped: what the players' surface fixes
+/// are fitted to and applied over.
+pub fn collect(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> Vec<[Vec3; 3]> {
     let mut out = Vec::<[Vec3; 3]>::new();
     let mut push = |p: [Vec3; 3]| {
         if usable(&p) {
@@ -35,26 +43,54 @@ pub fn build(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> World {
             }
         }
     }
+    dedupe(&mut out);
+    out
+}
+
+fn dedupe(out: &mut Vec<[Vec3; 3]>) {
     let mut seen = HashSet::new();
     out.retain(|p| {
         let mut k = p.map(|v| v.to_array().map(|x| (x * 8.).round() as i32));
         k.sort();
         seen.insert(k)
     });
-    let (found, census) = rails::find(&out);
+}
+
+/// `collect`'s triangles with the players' surface fixes applied, and the
+/// rails found on the result.
+pub fn finish(collected: &[[Vec3; 3]], fixes: &Fitted) -> World {
+    let mut fixed;
+    let out: &[[Vec3; 3]] = if fixes.edits_triangles() {
+        fixed = collected.to_vec();
+        fixes.apply(&mut fixed);
+        fixed.retain(usable);
+        dedupe(&mut fixed);
+        &fixed
+    } else {
+        collected
+    };
+    let (found, census) = rails::find(out);
+    let mut all_rails: Vec<Vec<[f32; 3]>> = fixes
+        .grinds()
+        .iter()
+        .map(|rail| {
+            rail.iter()
+                .map(|p| collision::to_skate(*p).to_array())
+                .collect()
+        })
+        .collect();
+    let room = u16::MAX as usize - all_rails.len().min(u16::MAX as usize);
+    all_rails.extend(found.into_iter().take(room).map(|rail| {
+        rail.into_iter()
+            .map(|p| collision::to_skate(p).to_array())
+            .collect()
+    }));
     World {
         triangles: out
-            .into_iter()
+            .iter()
             .map(|p| p.map(|v| collision::to_skate(v).to_array()))
             .collect(),
-        rails: found
-            .into_iter()
-            .map(|rail| {
-                rail.into_iter()
-                    .map(|p| collision::to_skate(p).to_array())
-                    .collect()
-            })
-            .collect(),
+        rails: all_rails,
         census,
     }
 }
@@ -81,8 +117,12 @@ pub struct Extra {
 /// triangles of a built [`World`]. Rails grow only on the extra objects; the
 /// map is there so a prop standing on the floor doesn't count its bottom
 /// edges as lips.
-pub fn extra(map: &[[[f32; 3]; 3]], extra: &[[Vec3; 3]]) -> Extra {
+pub fn extra(map: &[[[f32; 3]; 3]], extra: &[[Vec3; 3]], fixes: &Fitted) -> Extra {
     let mut tris: Vec<[Vec3; 3]> = extra.iter().copied().filter(usable).collect();
+    if fixes.edits_triangles() {
+        fixes.apply(&mut tris);
+        tris.retain(usable);
+    }
     let own = tris.len();
     if own == 0 {
         return Extra {
@@ -127,6 +167,7 @@ pub fn box_brush(min: Vec3, max: Vec3) -> Vec<[f32; 4]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::surfaces::{Kind, Region, Surfaces};
 
     #[test]
     fn ledge_on_a_floor_grows_rails_on_its_top_edges() {
@@ -145,6 +186,66 @@ mod tests {
             .filter(|r| r.iter().all(|p| (p[1] - 16. * 0.0254).abs() < 1e-3))
             .count();
         assert!(ledge_rails >= 2, "found {} ledge rails", ledge_rails);
+    }
+
+    fn ledge_map() -> Vec<[Vec3; 3]> {
+        collect(
+            &[],
+            &[
+                box_brush(Vec3::new(-1024., -1024., -16.), Vec3::new(1024., 1024., 0.)),
+                box_brush(Vec3::new(-40., -16., 0.), Vec3::new(40., 16., 4.)),
+            ],
+        )
+    }
+
+    fn ledge_rails(world: &World) -> usize {
+        world
+            .rails
+            .iter()
+            .filter(|r| r.iter().all(|p| (p[1] - 4. * 0.0254).abs() < 1e-3))
+            .count()
+    }
+
+    #[test]
+    fn a_four_unit_lip_is_a_rail_until_the_player_flattens_it() {
+        let map = ledge_map();
+        assert!(ledge_rails(&finish(&map, &Fitted::default())) >= 2);
+        let fixes = Surfaces {
+            regions: vec![Region {
+                kind: Kind::Flat,
+                center: Vec3::new(0., 0., 1.),
+                normal: Vec3::Z,
+                radius: 200.,
+                band: 6.,
+            }],
+            rails: vec![],
+        }
+        .fit(&map);
+        let world = finish(&map, &fixes);
+        assert_eq!(ledge_rails(&world), 0);
+        // The floor is still there, now with no step in it.
+        assert!(!world.triangles.is_empty());
+    }
+
+    #[test]
+    fn ignoring_the_ledge_removes_it_and_a_drawn_rail_is_added() {
+        let map = ledge_map();
+        let fixes = Surfaces {
+            regions: vec![Region {
+                kind: Kind::Ignore,
+                center: Vec3::new(0., 0., 1.),
+                normal: Vec3::Z,
+                radius: 60.,
+                band: 6.,
+            }],
+            rails: vec![vec![Vec3::new(0., 100., 5.), Vec3::new(100., 100., 5.)]],
+        }
+        .fit(&map);
+        let world = finish(&map, &fixes);
+        assert_eq!(ledge_rails(&world), 0);
+        // The drawn rail comes first.
+        assert_eq!(world.rails[0].len(), 2);
+        assert!((world.rails[0][0][1] - 5. * 0.0254).abs() < 1e-5);
     }
 
     #[test]
@@ -181,7 +282,7 @@ mod tests {
             )],
         );
         let crate_ = box_tris(Vec3::new(-64., -16., 0.), Vec3::new(64., 16., 32.));
-        let extra = extra(&map.triangles, &crate_);
+        let extra = extra(&map.triangles, &crate_, &Fitted::default());
         assert_eq!(extra.triangles.len(), crate_.len());
         assert!(extra.rails.len() >= 2, "found {} rails", extra.rails.len());
         for rail in &extra.rails {
@@ -193,7 +294,7 @@ mod tests {
 
     #[test]
     fn nothing_extra_is_nothing() {
-        let extra = extra(&[], &[]);
+        let extra = extra(&[], &[], &Fitted::default());
         assert!(extra.triangles.is_empty() && extra.rails.is_empty());
     }
 

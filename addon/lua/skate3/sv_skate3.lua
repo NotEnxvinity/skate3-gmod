@@ -1,3 +1,4 @@
+util.AddNetworkString("skate3_surface_do")
 util.AddNetworkString("skate3_state")
 util.AddNetworkString("skate3_move")
 util.AddNetworkString("skate3_pose")
