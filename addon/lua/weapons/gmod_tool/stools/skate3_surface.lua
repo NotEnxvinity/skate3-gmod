@@ -17,7 +17,15 @@ TOOL.Information = {
 	{ name = "reload" },
 }
 
-local MODES = { flat = true, smooth = true, ignore = true, grind = true }
+local MODES = { flat = true, smooth = true, ignore = true, grind = true, prop = true }
+
+-- The model of a spawned prop under the crosshair. A map's own static props
+-- aren't entities, so the client finds those by where they stand.
+local function PropModel(tr)
+	local ent = tr.Entity
+	if IsValid(ent) and not ent:IsWorld() then return ent:GetModel() or "" end
+	return ""
+end
 
 -- Asks the player's own client to do it: the flags and the skate module live
 -- there.
@@ -41,13 +49,17 @@ function TOOL:LeftClick(tr)
 		net.WriteVector(tr.HitNormal)
 		net.WriteFloat(radius)
 		net.WriteFloat(band)
+		net.WriteString(PropModel(tr))
 	end)
 	return true
 end
 
 function TOOL:RightClick(tr)
 	if CLIENT then return true end
-	Tell(self:GetOwner(), 2, function() net.WriteVector(tr.HitPos) end)
+	Tell(self:GetOwner(), 2, function()
+		net.WriteVector(tr.HitPos)
+		net.WriteString(PropModel(tr))
+	end)
 	return true
 end
 
@@ -60,7 +72,7 @@ end
 if SERVER then return end
 
 language.Add("tool.skate3_surface.name", "Skate 3 Surface")
-language.Add("tool.skate3_surface.desc", "Fix a map's collision for skating: flatten a bumpy floor, smooth a ramp, ignore clutter, draw a rail")
+language.Add("tool.skate3_surface.desc", "Fix a map's collision for skating: flatten a bumpy floor, smooth a ramp, ignore clutter, draw a rail, use a prop's visible shape")
 language.Add("tool.skate3_surface.left", "Flag the spot (grind mode: add a rail point)")
 language.Add("tool.skate3_surface.right", "Take a flag away (grind mode: finish the rail)")
 language.Add("tool.skate3_surface.reload", "Take back the last flag")
@@ -70,17 +82,18 @@ local HINTS = {
 	smooth = "Smooth: the circle's surface keeps its curve and loses its bumps.",
 	ignore = "Ignore: pieces of collision inside the circle aren't solid for skating.",
 	grind = "Grind: click along an edge, right click to finish the rail.",
+	prop = "Prop shape: this prop's board collision follows its visible shape (a ramp, a pipe). Applies on the next map load.",
 }
 
 function TOOL:DrawHUD()
 	local mode = self:GetClientInfo("mode")
 	local Surf = Skate3Surfaces
-	local flags, rails = 0, 0
-	if Surf then flags, rails = Surf.Count() end
+	local flags, rails, props = 0, 0, 0
+	if Surf then flags, rails, props = Surf.Count() end
 	local c = Surf and Surf.COLORS[mode] or color_white
 	draw.SimpleTextOutlined(HINTS[mode] or "", "DermaDefaultBold", ScrW() / 2, ScrH() * 0.62, c,
 		TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 2, color_black)
-	draw.SimpleTextOutlined(("%d flags, %d rails on this map"):format(flags, rails), "DermaDefault", ScrW() / 2,
+	draw.SimpleTextOutlined(("%d flags, %d rails, %d prop shapes on this map"):format(flags, rails, props), "DermaDefault", ScrW() / 2,
 		ScrH() * 0.62 + 18, color_white, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER, 1, color_black)
 end
 
@@ -93,6 +106,7 @@ function TOOL.BuildCPanel(panel)
 	combo:AddChoice("Smooth ramp (keeps the curve)", "smooth")
 	combo:AddChoice("Ignore (not solid for skating)", "ignore")
 	combo:AddChoice("Grind rail (click along an edge)", "grind")
+	combo:AddChoice("Prop shape (a ramp prop uses its visible shape)", "prop")
 	panel:NumSlider("Circle size", "skate3_surface_radius", 16, 512, 0)
 	panel:NumSlider("Reach (keep under the floor's thickness)", "skate3_surface_band", 1, 24, 1)
 	panel:NumSlider("Forgive small steps up to (0 = off, experimental)", "skate3_lip_forgive", 0, 3.5, 1)

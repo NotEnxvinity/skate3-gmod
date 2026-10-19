@@ -3,6 +3,7 @@
 -- so the module never sees them; their physics hulls are read here instead.
 
 local Props = {}
+Skate3Props = Props
 
 local cv_props = CreateClientConVar("skate3_prop_collision", "1", true, false, "Let the board hit the map's props (railings, benches...); applies on the next map load")
 local cv_shape = CreateClientConVar("skate3_ramp_shape", "1", true, false, "Ramps, bowls and rails use their smooth visible shape instead of their blocky physics one; applies on the next map load")
@@ -139,6 +140,9 @@ local SMOOTH = { "ramp", "skate", "bowl", "quarter", "pipe", "funbox", "kicker",
 local MAX_SHAPE = 6000
 
 local function Smooth(model)
+	-- A prop the player flagged with the Skate 3 Surface tool (Prop shape).
+	local Flags = Skate3Surfaces
+	if Flags and Flags.PropShape and Flags.PropShape(model) then return true end
 	local name = model:lower():match("([^/]+)$") or ""
 	for _, word in ipairs(SMOOTH) do
 		if name:find(word, 1, true) then return true end
@@ -218,6 +222,54 @@ local function Shape(model)
 	return shapes[model]
 end
 
+-- Whether a model's visible shape can be used for it (named like a ramp, or
+-- flagged with the tool): false when its mesh is too big or doesn't line up.
+function Props.CanUseShape(model)
+	return Shape(model) ~= false
+end
+
+local statics = { map = nil, list = nil }
+
+-- The map's own static prop whose physics bounds hold `pos` (the spot the
+-- tool gun aimed at), by model name: they aren't entities to trace.
+local boundsOf = {}
+function Props.StaticAt(pos)
+	if statics.map ~= game.GetMap() then
+		statics.map, statics.list = game.GetMap(), nil
+		local f = file.Open("maps/" .. game.GetMap() .. ".bsp", "rb", "GAME")
+		local bsp = f and f:Read(f:Size())
+		if f then f:Close() end
+		if bsp then statics.list = Props.Parse(bsp) end
+	end
+	local best, bestVolume
+	for _, prop in ipairs(statics.list or {}) do
+		if prop.pos:DistToSqr(pos) < 2048 * 2048 then
+			if boundsOf[prop.model] == nil then
+				boundsOf[prop.model] = false
+				local hs = Hulls(prop.model)
+				if hs then
+					local lo, hi = Bounds(hs)
+					boundsOf[prop.model] = { lo, hi }
+				end
+			end
+			local b = boundsOf[prop.model]
+			if b then
+				local local_ = WorldToLocal(pos, Angle(), prop.pos, prop.ang)
+				local margin = 6
+				local lo, hi = b[1], b[2]
+				if local_.x >= lo.x - margin and local_.x <= hi.x + margin
+					and local_.y >= lo.y - margin and local_.y <= hi.y + margin
+					and local_.z >= lo.z - margin and local_.z <= hi.z + margin then
+					local size = hi - lo
+					local volume = size.x * size.y * size.z
+					if not best or volume < bestVolume then best, bestVolume = prop.model, volume end
+				end
+			end
+		end
+	end
+	return best
+end
+
 -- What the board collides with for a model: its visible shape for ramps,
 -- otherwise its physics hulls. Second result is true for a visible shape.
 function Props.Solid(model)
@@ -263,6 +315,14 @@ function Props.AppendHulls(out, n, hs, m)
 end
 
 local cache = { map = nil, tris = {}, stream = nil }
+
+-- Forgets the shapes picked so far and the map's collected props, so the
+-- next map load picks them again (a prop was flagged or unflagged).
+function Props.Invalidate()
+	shapes = {}
+	statics.map, statics.list = nil, nil
+	cache.map = nil
+end
 
 -- A map with more props than this many triangles can't have them all in the
 -- collision at once (the game stalls building it), so the module is handed

@@ -6,6 +6,8 @@
 --   smooth  one gentle curve (ramps, banks, pipes keep their shape)
 --   ignore  pieces of collision inside the circle aren't solid for skating
 --   grind   a rail drawn point by point
+--   prop    a prop whose board collision follows its visible shape, not its
+--           blocky physics one (applies on the next map load)
 -- The flags are kept per map in data/skate3/surfaces/<map>.json. Send the
 -- file to someone and they drop it in the same folder. Only this player's
 -- skating changes: nothing on the server or in other players' games.
@@ -20,13 +22,16 @@ local MAX_REGIONS, MAX_RAILS, MAX_POINTS = 4096, 1024, 64
 Surf.COLORS = {
 	flat = Color(80, 200, 255),
 	smooth = Color(120, 255, 140),
+	prop = Color(255, 150, 255),
 	ignore = Color(255, 90, 90),
 	grind = Color(255, 210, 60),
 }
 
 local regions = {} -- { k = "flat", p = Vector, n = Vector, r = radius, b = band }
 local rails = {} -- { Vector, Vector, ... }
-local history = {} -- "region" or "rail", in the order they were added
+local propModels = {} -- model path (lower case) -> true: props to skate by their visible shape
+local propOrder = {} -- those, in the order they were added
+local history = {} -- "region", "rail" or "prop", in the order they were added
 local pending = {} -- the rail being drawn
 
 local function Path()
@@ -55,9 +60,18 @@ end
 -- Reads the map's file (or one an addon ships in data_static).
 function Surf.Load()
 	regions, rails, history, pending = {}, {}, {}, {}
+	propModels, propOrder = {}, {}
 	local raw = file.Read(Path(), "DATA") or file.Read("data_static/" .. Path(), "GAME")
 	local data = raw and util.JSONToTable(raw)
 	if type(data) ~= "table" then return end
+	for _, m in ipairs(data.props or {}) do
+		m = type(m) == "string" and m:lower() or ""
+		if m ~= "" and not propModels[m] and #propOrder < MAX_REGIONS then
+			propModels[m] = true
+			propOrder[#propOrder + 1] = m
+			history[#history + 1] = "prop"
+		end
+	end
 	for _, r in ipairs(data.regions or {}) do
 		local p, n = Vec(r.p), Vec(r.n)
 		if p and n and KINDS[r.k] and #regions < MAX_REGIONS then
@@ -93,13 +107,13 @@ local function Save()
 		for i, v in ipairs(line) do out[i] = Arr(v) end
 		lines[#lines + 1] = out
 	end
-	if #list == 0 and #lines == 0 then
+	if #list == 0 and #lines == 0 and #propOrder == 0 then
 		if file.Exists(Path(), "DATA") then file.Delete(Path()) end
 		return
 	end
 	file.CreateDir("skate3")
 	file.CreateDir(DIR)
-	file.Write(Path(), util.TableToJSON({ version = 1, map = game.GetMap(), regions = list, rails = lines }, true))
+	file.Write(Path(), util.TableToJSON({ version = 1, map = game.GetMap(), regions = list, rails = lines, props = propOrder }, true))
 end
 
 -- Experimental and off by default: ramps laid at steps this many units tall or
@@ -147,12 +161,52 @@ local function Changed(report)
 end
 
 function Surf.Count()
-	return #regions, #rails
+	return #regions, #rails, #propOrder
+end
+
+-- Whether a model is one of the props flagged to be skated by its visible
+-- shape (cl_props.lua asks when it picks a prop's collision).
+function Surf.PropShape(model)
+	return propModels[(model or ""):lower()] == true
+end
+
+-- The model of the prop at a spot: the spawned one the tool gun aimed at, or
+-- else the map's own static prop standing there.
+local function PropAt(pos, model)
+	if model and model ~= "" then return model:lower() end
+	local Props = Skate3Props
+	local found = Props and Props.StaticAt and Props.StaticAt(pos)
+	return found and found:lower() or nil
+end
+
+local function PropsChanged()
+	if Skate3Props and Skate3Props.Invalidate then Skate3Props.Invalidate() end
 end
 
 -- A click with a flag mode: a circle at the aimed spot (flat, smooth,
 -- ignore) or the next point of a rail (grind).
-function Surf.Add(kind, pos, normal, radius, band)
+function Surf.Add(kind, pos, normal, radius, band, model)
+	if kind == "prop" then
+		local m = PropAt(pos, model)
+		if not m then
+			Say("No prop there. Aim at the prop itself (a ramp, a pipe) and click.")
+		elseif propModels[m] then
+			Say(m .. " already uses its visible shape. Right click it to take that back.")
+		else
+			propModels[m] = true
+			propOrder[#propOrder + 1] = m
+			history[#history + 1] = "prop"
+			Changed(false)
+			PropsChanged()
+			local usable = Skate3Props and Skate3Props.CanUseShape and Skate3Props.CanUseShape(m)
+			if usable == false then
+				Say(m .. ": can't use its visible shape (over 6000 triangles, or it doesn't line up with its physics model), so it keeps its physics hulls.")
+			else
+				Say(m .. " will be skated by its visible shape from the next time this map loads.")
+			end
+		end
+		return
+	end
 	if kind == "grind" then
 		if #pending >= MAX_POINTS then
 			Say("That rail has enough points: right click to finish it.")
@@ -184,7 +238,7 @@ end
 
 -- Right click: finishes the rail being drawn, or takes away the flag at the
 -- aimed spot.
-function Surf.Secondary(pos)
+function Surf.Secondary(pos, model)
 	if #pending >= 2 then
 		rails[#rails + 1] = pending
 		history[#history + 1] = "rail"
@@ -209,6 +263,20 @@ function Surf.Secondary(pos)
 		end
 	end
 	if not bestKind then
+		local m = #propOrder > 0 and PropAt(pos, model)
+		if m and propModels[m] then
+			propModels[m] = nil
+			for i = #propOrder, 1, -1 do
+				if propOrder[i] == m then table.remove(propOrder, i) break end
+			end
+			for i = #history, 1, -1 do
+				if history[i] == "prop" then table.remove(history, i) break end
+			end
+			Changed(false)
+			PropsChanged()
+			Say(m .. " goes back to its physics shape from the next map load.")
+			return
+		end
 		Say("Nothing flagged there.")
 		return
 	end
@@ -238,6 +306,14 @@ function Surf.Undo()
 		Say("Nothing to take back.")
 		return
 	end
+	if last == "prop" then
+		local m = table.remove(propOrder)
+		if m then propModels[m] = nil end
+		Changed(false)
+		PropsChanged()
+		Say("Last prop shape taken back, from the next map load.")
+		return
+	end
 	if last == "region" then table.remove(regions) else table.remove(rails) end
 	Changed(false)
 	Say("Last flag taken back.")
@@ -245,7 +321,9 @@ end
 
 function Surf.Clear()
 	regions, rails, history, pending = {}, {}, {}, {}
+	propModels, propOrder = {}, {}
 	Changed(false)
+	PropsChanged()
 end
 
 local function ToolHeld()
@@ -284,7 +362,9 @@ local function Draw(tool, tr)
 	if tool and tr and tr.Hit then
 		local mode = tool:GetClientInfo("mode")
 		local c = Surf.COLORS[mode] or color_white
-		if mode == "grind" then
+		if mode == "prop" then
+			render.DrawWireframeSphere(tr.HitPos, 6, 6, 6, c, true)
+		elseif mode == "grind" then
 			if #pending > 0 then render.DrawLine(pending[#pending], tr.HitPos, c, true) end
 			render.DrawWireframeSphere(tr.HitPos, 2.5, 4, 4, c, true)
 		else
@@ -309,17 +389,19 @@ net.Receive("skate3_surface_do", function()
 		local kind = net.ReadString()
 		local pos, normal = net.ReadVector(), net.ReadVector()
 		local radius, band = net.ReadFloat(), net.ReadFloat()
-		Surf.Add(kind, pos, normal, radius, band)
+		Surf.Add(kind, pos, normal, radius, band, net.ReadString())
 	elseif op == 2 then
-		Surf.Secondary(net.ReadVector())
+		local pos = net.ReadVector()
+		Surf.Secondary(pos, net.ReadString())
 	elseif op == 3 then
 		Surf.Undo()
 	end
 end)
 
 concommand.Add("skate3_surface_list", function()
-	local f, s = Surf.Count()
-	print(("[skate3] %d surface flags and %d rails on %s (file data/%s)"):format(f, s, game.GetMap(), Path()))
+	local f, s, p = Surf.Count()
+	print(("[skate3] %d surface flags, %d rails and %d prop shapes on %s (file data/%s)"):format(f, s, p, game.GetMap(), Path()))
+	for i, m in ipairs(propOrder) do print(("  prop shape %d: %s"):format(i, m)) end
 	for i, r in ipairs(regions) do
 		print(("  %d: %s at (%.0f %.0f %.0f), radius %.0f, band %.1f"):format(i, r.k, r.p.x, r.p.y, r.p.z, r.r, r.b))
 	end
@@ -340,8 +422,9 @@ concommand.Add("skate3_surface_undo", function() Surf.Undo() end, nil, "Take bac
 concommand.Add("skate3_surface_reload", function()
 	Surf.Load()
 	Surf.Push()
-	local f, s = Surf.Count()
-	Say(("Read %d surface flags and %d rails for this map."):format(f, s))
+	PropsChanged()
+	local f, s, p = Surf.Count()
+	Say(("Read %d surface flags, %d rails and %d prop shapes for this map."):format(f, s, p))
 end, nil, "Read this map's skate surface flags from their file again")
 
 Surf.Load()
