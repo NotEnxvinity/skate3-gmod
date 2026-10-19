@@ -26,6 +26,14 @@ local SWAP_EVERY = 1
 local PARK_SWAP_EVERY = 5
 -- Grinds aren't interrupted by a swap for longer than this.
 local GRIND_HOLD = 3
+-- A prop that shifts less than this (units, degrees) from where the module
+-- has it hasn't moved: resting props still creep a hair, and that is no
+-- reason to build them again.
+local HAIR_MOVE, HAIR_TURN = 1, 1
+-- One knocked, rocking or settling by less than this keeps its old copy in
+-- the collision until it has come to rest, so there is no gap to fall
+-- through meanwhile. Further than that it has gone somewhere else.
+local SETTLE_MOVE, SETTLE_TURN = 8, 12
 -- Nearest props first past this many triangles.
 local MAX_TRIANGLES = 150000
 -- On a map with too many props: how many triangles of the static ones around
@@ -98,12 +106,27 @@ local function Wanted(ent)
 	return true
 end
 
+-- Which model it is, at what size: what a move doesn't change.
+local function Tag(ent)
+	local gen = IsPiece(ent) and Skate3Park.generation or 0
+	return ("%s|%.2f|%d"):format(ent:GetModel(), ent:GetModelScale() or 1, gen)
+end
+
 -- Where it is, coarse enough that a resting prop's jitter doesn't count.
 local function Place(ent)
 	local p, a = ent:GetPos(), ent:GetAngles()
 	local gen = IsPiece(ent) and Skate3Park.generation or 0
 	return ("%s|%.0f %.0f %.0f|%.0f %.0f %.0f|%.2f|%d"):format(ent:GetModel(), p.x * 2, p.y * 2, p.z * 2,
 		a.p * 2, a.y * 2, a.r * 2, ent:GetModelScale() or 1, gen)
+end
+
+-- Whether the entity is still the same one `ref` ({ pos, ang, tag }, as
+-- built) saw, give or take `move` units and `turn` degrees.
+local function Near(ent, ref, move, turn)
+	if ref.tag ~= Tag(ent) or ent:GetPos():DistToSqr(ref.pos) > move * move then return false end
+	local a, b = ent:GetAngles(), ref.ang
+	return math.abs(math.AngleDifference(a.p, b.p)) <= turn and math.abs(math.AngleDifference(a.y, b.y)) <= turn
+		and math.abs(math.AngleDifference(a.r, b.r)) <= turn
 end
 
 -- The same for a brush entity, and whether it is solid.
@@ -143,7 +166,10 @@ local grindingSince
 local wanted = {}
 -- Each prop's triangles where it stands, kept until it moves: a swap only
 -- works out the props that changed, not every prop again.
-local built = {} -- key -> { place, tris (flat), count }
+local built = {} -- key -> { place, tris (flat), count, pos, ang, tag }
+-- What each solid entity looked like when its triangles were built, for the
+-- ones in the module's collision now.
+local anchored = {} -- ent -> built
 
 -- Brush entities, as last sent to the module.
 local brushSeen = {} -- ent -> { place, since }
@@ -164,6 +190,7 @@ local function BuildEntity(ent, place)
 	end
 	local hs = ent:GetSolid() == SOLID_VPHYSICS and Props.Solid(ent:GetModel()) or BoxHull(ent)
 	local tris, n = {}, 0
+	local pos, ang = ent:GetPos(), ent:GetAngles()
 	if hs then
 		local m = Matrix()
 		m:Translate(ent:GetPos())
@@ -172,7 +199,7 @@ local function BuildEntity(ent, place)
 		if scale ~= 1 and ent:GetSolid() == SOLID_VPHYSICS then m:Scale(Vector(scale, scale, scale)) end
 		n = Props.AppendHulls(tris, 0, hs, m)
 	end
-	b = { place = place, tris = tris, count = n }
+	b = { place = place, tris = tris, count = n, pos = pos, ang = ang, tag = Tag(ent) }
 	built[ent] = b
 	return b
 end
@@ -315,12 +342,19 @@ local function Scan(now)
 				end
 			elseif Wanted(ent) then
 				local place = Place(ent)
+				local held, ref = current[ent], anchored[ent]
+				-- A hair off where the module has it is still there.
+				if held and ref and place ~= held and Near(ent, ref, HAIR_MOVE, HAIR_TURN) then place = held end
 				local s = seen[ent]
 				if not s or s.place ~= place then
 					s = { place = place, since = now }
 				elseif now - s.since >= STILL_FOR then
 					still[ent] = place
 				end
+				-- Knocked a little or still settling: the old copy stays until
+				-- it is built in the new place (without it the skater would
+				-- fall through a prop that is merely rocking).
+				if not still[ent] and held and ref and Near(ent, ref, SETTLE_MOVE, SETTLE_TURN) then still[ent] = held end
 				fresh[ent] = s
 			end
 		end
@@ -457,6 +491,11 @@ function Live.Think(now, state)
 		local tris, count = Triangles(wanted)
 		skate3.SetProps(tris)
 		current, dirty = wanted, false
+		anchored = {}
+		for key in pairs(wanted) do
+			local b = built[key]
+			if b and b.pos then anchored[key] = b end
+		end
 		local ms = (SysTime() - started) * 1000
 		Perf.Note(("prop swap: %d props, %d triangles, %.0f ms"):format(props, count, ms))
 		print(("[skate3] props solid for skating: %d (%d triangles, last frame's share %.0f ms)"):format(props, count, ms))

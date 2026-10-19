@@ -40,6 +40,39 @@ local function SetSkating(ply, on)
 	ply:CollisionRulesChanged()
 end
 
+-- The skater's Garry's Mod body is put wherever the simulation says every
+-- update, which to the engine is a teleport into whatever is there. A prop
+-- that is frozen doesn't mind; one with free physics is hit by that body and
+-- sent off, and a prop that is moving isn't solid for skating (cl_live_props
+-- takes it over once it stops). So a riding skater's body passes through
+-- props like the park pieces (sh_park.lua) and only the skate collision
+-- touches them. It has to be on the prop's side: ShouldCollide is only asked
+-- about entities that opted in.
+local cv_props = GetConVar("skate3_spawned_props")
+
+local function FlagProp(ent)
+	if not IsValid(ent) or ent.skate3Prop then return end
+	if ent:IsPlayer() or ent:IsNPC() or ent:IsNextBot() or ent:IsWeapon() or ent:IsRagdoll() then return end
+	if ent:GetMoveType() ~= MOVETYPE_VPHYSICS then return end
+	ent.skate3Prop = true
+	ent:SetCustomCollisionCheck(true)
+	ent:CollisionRulesChanged()
+end
+
+-- Its model and physics are set up only after it exists.
+hook.Add("OnEntityCreated", "skate3_props", function(ent)
+	timer.Simple(0, function() FlagProp(ent) end)
+end)
+
+hook.Add("InitPostEntity", "skate3_props", function()
+	for _, ent in ipairs(ents.GetAll()) do FlagProp(ent) end
+end)
+
+hook.Add("ShouldCollide", "skate3_props", function(a, b)
+	if not a:IsPlayer() then a, b = b, a end
+	if a:IsPlayer() and b.skate3Prop and a:GetNW2Bool("skate3_riding") and cv_props:GetBool() then return false end
+end)
+
 local function ForceStop(ply)
 	if not ply.Skate3 then return end
 	SetSkating(ply, false)
