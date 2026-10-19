@@ -1,5 +1,6 @@
--- Other players: skaters crash into each other, and on foot with the board in
--- hand you can punch (B, F on a keyboard) or swing the board (R1, Ctrl).
+-- Other players: skaters crash into each other, and on foot you can attack
+-- (B or R1; F or Ctrl on a keyboard): with the board in a hand it's a smack
+-- with the board, without one it's punches, one hand then the other.
 --
 -- Every skater's simulation runs on their own computer, so nobody else's
 -- skater is in it: two skaters ride straight through each other. Each game
@@ -10,7 +11,7 @@
 -- player can't be bailed, so the server shoves them (and hurts them, if the
 -- server wants that).
 --
--- Punches and board swings are the same idea the other way round: the game
+-- Punches and board smacks are the same idea the other way round: the game
 -- of whoever swings finds who got hit and tells the server, which checks it
 -- and tells the one who was hit (a skater's game bails them; a walking
 -- player is shoved by the server). The swing itself is drawn by the arm
@@ -23,7 +24,7 @@
 -- skate3_player_collision_speed, skate3_player_hits, skate3_hit_damage.
 
 local cv_melee = CreateClientConVar("skate3_melee", "1", true, false,
-	"Punch (B, F on a keyboard) and swing the board (R1, Ctrl) at other players while on foot with the board")
+	"Punch (or, with the board in hand, smack with it) at other players on foot: B or R1 (F or Ctrl on a keyboard)")
 local cv_debug = CreateClientConVar("skate3_debug_players", "0", false, false,
 	"Show how close other players are and how fast you'd crash into them")
 
@@ -44,7 +45,7 @@ local BAIL_HOLD = 0.25
 -- angle off the way the skater faces that still gets hit. count: how many
 -- people one hit can reach.
 local HITS = {
-	[0] = { name = "punch", reach = 52, cone = 0.5, count = 1, gap = 0.4 },
+	[0] = { name = "punch", reach = 52, cone = 0.5, count = 1, gap = 0.3 },
 	[1] = { name = "board", reach = 84, cone = 0.17, count = 3, gap = 0.8 },
 }
 local HIT_HEIGHT = 64
@@ -65,6 +66,7 @@ return function(Skater, Others, Score)
 
 	local strike -- { kind, at, hit } while a punch or swing is under way
 	local nextStrike = 0
+	local punchHand = "L" -- the hand that threw the last punch
 	local lastButtons = 0
 	local bailUntil = 0
 	local nextCrash = 0
@@ -212,11 +214,14 @@ return function(Skater, Others, Score)
 		if bit.band(buttons, PAD_L1) ~= 0 then return end
 		local state = pose.state
 		if not Biped(state) or state:find("Air") then return end
-		local kind = bit.band(pressed, PAD_B) ~= 0 and 0 or bit.band(pressed, PAD_R1) ~= 0 and 1 or nil
-		if not kind then return end
+		if bit.band(pressed, bit.bor(PAD_B, PAD_R1)) == 0 then return end
+		-- With the board in a hand it's a smack with the board; without one,
+		-- punches with both hands, one then the other.
+		local kind = Anim.Carrying() and 1 or 0
 		strike = { kind = kind, at = now }
 		nextStrike = now + HITS[kind].gap
-		Anim.Strike(kind, now)
+		punchHand = punchHand == "R" and "L" or "R"
+		Anim.Strike(kind, now, punchHand)
 		LocalPlayer():EmitSound(SWING[math.random(#SWING)], 60, kind == 1 and 80 or 110)
 	end
 

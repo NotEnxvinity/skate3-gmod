@@ -277,6 +277,7 @@ function Anim.Setup(ent, rest, skater, stand)
 	local info = {
 		rest = rest,
 		pelvisBone = Bone(ent, "Pelvis"),
+		spineBone = Bone(ent, "Spine"),
 		below = Below(ent),
 		hands = {},
 		legs = {},
@@ -472,6 +473,13 @@ end
 -- which left the carried board hanging below it: on foot, the board moves by
 -- whatever gap is left so it stays in the hand. pose.boardShift carries it to
 -- the board drawing.
+local carried, carrying, carryAt = false, false, -math.huge
+
+-- True while the skater stands with the board in a hand.
+function Anim.Carrying()
+	return carrying and RealTime() - carryAt < 0.5
+end
+
 local function Arms(info, world, pose)
 	local want = vector_origin
 	if cv_hands_ik:GetBool() then
@@ -483,6 +491,7 @@ local function Arms(info, world, pose)
 			deckA, deckB = m * info.deck.a, m * info.deck.b
 		end
 		local best
+		carried = false
 		for _, arm in pairs(info.arms or {}) do
 			local skate = arm and pose.bones[arm.skateHand]
 			if skate and world[arm.foot] then
@@ -508,6 +517,7 @@ local function Arms(info, world, pose)
 				local near = deckA and target:Distance(Closest(target, deckA, deckB))
 				if near and near < GRIP_DISTANCE and (not best or near < best) then
 					best = near
+					carried = true
 					want = world[arm.foot]:GetTranslation() - target
 					if want:Length() > CARRY_GAP then want = want:GetNormalized() * CARRY_GAP end
 				end
@@ -520,6 +530,9 @@ local function Arms(info, world, pose)
 		info.boardShift = LerpVector(k, info.boardShift or vector_origin, want)
 	end
 	pose.boardShift = info.boardShift:LengthSqr() > 1e-4 and info.boardShift or nil
+	-- Whether the board is in a hand, for punching (no board) or swinging it.
+	local onFoot = pose.state and pose.state:find("^Biped") ~= nil
+	carrying, carryAt = onFoot and carried or false, RealTime()
 end
 
 -- Degrees per finger joint, base to tip: relaxed, gripping the board, and
@@ -592,7 +605,8 @@ end
 
 -- Seconds from the start to the moment it lands, and to the arm being back.
 Anim.STRIKES = {
-	[0] = { hit = 0.11, total = 0.42 }, -- punch
+	[0] = { hit = 0.10, total = 0.34 }, -- punch, one hand then the other
+	-- (the board swing below is the one with the board in a hand)
 	[1] = { hit = 0.34, total = 0.8 }, -- board swing
 }
 
@@ -600,11 +614,11 @@ Anim.STRIKES = {
 -- right, how much of the way it is there instead of where the usual pose has it }.
 local KEYS = {
 	[0] = {
-		{ 0, 0.3, -0.1, 0, 0 },
-		{ 0.05, 0.3, -0.15, 0.05, 1 },
-		{ 0.11, 0.98, 0, 0, 1 },
-		{ 0.18, 0.95, 0, 0, 1 },
-		{ 0.42, 0.5, -0.3, 0, 0 },
+		{ 0, 0.3, -0.25, -0.05, 0 },
+		{ 0.04, 0.3, -0.15, -0.08, 1 },
+		{ 0.10, 1, 0, -0.15, 1 },
+		{ 0.16, 0.98, 0, -0.15, 1 },
+		{ 0.34, 0.4, -0.3, -0.05, 0 },
 	},
 	[1] = {
 		{ 0, -0.1, -0.3, 0.1, 0 },
@@ -660,9 +674,10 @@ function Anim.Facing()
 	return nil
 end
 
-function Anim.Strike(kind, at)
+-- side: which hand throws a punch ("R" or "L"); the swing uses whichever hand has the board.
+function Anim.Strike(kind, at, side)
 	if not Anim.STRIKES[kind] then return end
-	strike = { kind = kind, at = at or RealTime() }
+	strike = { kind = kind, at = at or RealTime(), side = side == "L" and "L" or "R" }
 end
 
 -- The side whose hand has the board.
@@ -701,7 +716,7 @@ local function Strike(info, world, pose)
 		forward:Normalize()
 	end
 	strike.holder = strike.holder or Holder(info, pose)
-	local side = strike.kind == 1 and strike.holder or (strike.holder == "R" and "L" or "R")
+	local side = strike.kind == 1 and strike.holder or strike.side
 	local arm = info.arms and info.arms[side]
 	if not (arm and world[arm.thigh] and world[arm.calf] and world[arm.foot]) then return end
 	local shoulder, elbow, hand = world[arm.thigh]:GetTranslation(), world[arm.calf]:GetTranslation(), world[arm.foot]:GetTranslation()
@@ -731,10 +746,28 @@ local function Strike(info, world, pose)
 	end
 end
 
+-- A punch turns the body into it: the chest comes round behind the fist.
+local TWIST = 22 -- degrees at the most
+local function Twist(info, world)
+	if not strike or strike.kind ~= 0 then return end
+	local bone = info.spineBone
+	local at = bone and world[bone] and world[bone]:GetTranslation()
+	if not at then return end
+	local t = RealTime() - strike.at
+	if t < 0 or t >= Anim.STRIKES[0].total then return end
+	local _, _, _, w = KeyAt(KEYS[0], t)
+	if w <= 0 then return end
+	local r = AxisAngle(Vector(0, 0, 1), math.rad((strike.side == "L" and -TWIST or TWIST) * w))
+	for _, i in ipairs(info.below(bone)) do
+		if world[i] then world[i] = TurnAbout(world[i], r, at) end
+	end
+end
+
 function Anim.PostPose(ent, world, pose)
 	local info = per[ent]
 	if not info or not pose or not pose.bones then return end
 	Feet(info, world, pose)
+	if not strikeFailed then pcall(Twist, info, world) end
 	Arms(info, world, pose)
 	local face = FacingOf(info, world)
 	if face then facing, facingAt = face, RealTime() end

@@ -154,8 +154,8 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:CheckBox("Hall of Meat", "skate3_hall_of_meat")
 		panel:ControlHelp("Bails score points and break bones, shown in red, with the skeleton showing through your skater. Bail on purpose: hold both triggers and click both sticks.")
 
-		panel:CheckBox("Punch and swing the board at other players", "skate3_melee")
-		panel:ControlHelp("On foot with the board: B (F) punches, R1 (Ctrl) swings the board. Skaters who run into each other bail.")
+		panel:CheckBox("Punch and smack other players", "skate3_melee")
+		panel:ControlHelp("On foot, B or R1 (F or Ctrl): punches, or a smack with the board when you hold it. Skaters who run into each other bail.")
 		-- Server settings: the host's to change (a dedicated server sets them in its config).
 		if game.SinglePlayer() or LocalPlayer():IsListenServerHost() then
 			panel:CheckBox("Server: skaters crash into other players", "skate3_player_collision")
