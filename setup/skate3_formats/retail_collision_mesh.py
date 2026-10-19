@@ -145,10 +145,17 @@ def _triangulate_unit(
             (indices[0], indices[1], indices[2]),
             (indices[3], indices[2], indices[1]),
         ]
-    raise ValueError(
-        "RenderWare triangle-list units require a separately verified "
-        "triangulation path"
-    )
+    if unit_type == 3:
+        # S3GM: n triangles over n + 2 indices, read as a strip. Its winding
+        # alternates the way the quad split above does (3-2-1 after 0-1-2).
+        # Not checked against a retail unit of this type.
+        return [
+            (indices[i], indices[i + 1], indices[i + 2])
+            if i % 2 == 0
+            else (indices[i + 1], indices[i], indices[i + 2])
+            for i in range(len(indices) - 2)
+        ]
+    raise ValueError(f"unsupported collision unit type {unit_type}")
 
 
 def _decode_cluster(
@@ -156,6 +163,7 @@ def _decode_cluster(
     granularity: float,
     group_id_width: int,
     surface_id_width: int,
+    problems: list[str] | None = None,
 ) -> tuple[list[CollisionTriangle], int, int, int]:
     _require(
         len(cluster) >= CLUSTER_HEADER_SIZE,
@@ -187,107 +195,123 @@ def _decode_cluster(
 
     triangles: list[CollisionTriangle] = []
     cursor = unit_offset
-    for _unit_index in range(unit_count):
-        _require(cursor < unit_end, "collision unit stream ends prematurely")
-        flags = cluster[cursor]
-        cursor += 1
-        unit_type = flags & 0x0F
-        if unit_type == 1:
-            output_triangle_count = 1
-        elif unit_type == 2:
-            output_triangle_count = 2
-        elif unit_type == 3:
-            _require(
-                cursor < unit_end,
-                "collision triangle-list unit omits its triangle count",
-            )
-            output_triangle_count = cluster[cursor]
+    try:
+        for _unit_index in range(unit_count):
+            _require(cursor < unit_end, "collision unit stream ends prematurely")
+            flags = cluster[cursor]
             cursor += 1
-        else:
-            raise ValueError(f"unsupported collision unit type {unit_type}")
+            unit_type = flags & 0x0F
+            if unit_type == 1:
+                output_triangle_count = 1
+            elif unit_type == 2:
+                output_triangle_count = 2
+            elif unit_type == 3:
+                _require(
+                    cursor < unit_end,
+                    "collision triangle-list unit omits its triangle count",
+                )
+                output_triangle_count = cluster[cursor]
+                cursor += 1
+            else:
+                raise ValueError(f"unsupported collision unit type {unit_type}")
 
-        index_count = output_triangle_count + 2
-        indices_end = cursor + index_count
-        _require(
-            indices_end <= unit_end,
-            "collision unit vertex indices extend beyond the unit stream",
-        )
-        indices = list(cluster[cursor:indices_end])
-        cursor = indices_end
-        _require(
-            all(index < vertex_count for index in indices),
-            "collision unit references a missing cluster vertex",
-        )
-        edge_codes: tuple[int, ...] | None = None
-        if flags & 0x20:
-            edge_codes = tuple(cluster[cursor : cursor + index_count])
-            cursor += index_count
+            index_count = output_triangle_count + 2
+            indices_end = cursor + index_count
             _require(
-                cursor <= unit_end,
-                "collision unit edge codes extend beyond the unit stream",
+                indices_end <= unit_end,
+                "collision unit vertex indices extend beyond the unit stream",
             )
-        group_id: int | None = None
-        if flags & 0x40:
-            group_id, cursor = _read_variable_id(
-                cluster,
-                cursor,
-                group_id_width,
+            indices = list(cluster[cursor:indices_end])
+            cursor = indices_end
+            _require(
+                all(index < vertex_count for index in indices),
+                "collision unit references a missing cluster vertex",
             )
-        surface = 0
-        if flags & 0x80:
-            surface, cursor = _read_variable_id(
-                cluster,
-                cursor,
-                surface_id_width,
-            )
-        for triangle_index, (a, b, c) in enumerate(
-            _triangulate_unit(unit_type, indices)
-        ):
-            triangle_edge_codes: tuple[int, int, int] | None = None
-            if edge_codes is not None:
-                if unit_type == 1:
-                    triangle_edge_codes = (
-                        edge_codes[0],
-                        edge_codes[1],
-                        edge_codes[2],
-                    )
-                else:
-                    # Quad units split as 0-1-2 and 3-2-1. The generated
-                    # diagonal is smooth; boundary codes retain their native
-                    # corner association. University uses triangle units, but
-                    # decoding this correctly keeps the general RX2 reader
-                    # lossless enough for other districts.
-                    triangle_edge_codes = (
-                        (
+            edge_codes: tuple[int, ...] | None = None
+            if flags & 0x20:
+                edge_codes = tuple(cluster[cursor : cursor + index_count])
+                cursor += index_count
+                _require(
+                    cursor <= unit_end,
+                    "collision unit edge codes extend beyond the unit stream",
+                )
+            group_id: int | None = None
+            if flags & 0x40:
+                group_id, cursor = _read_variable_id(
+                    cluster,
+                    cursor,
+                    group_id_width,
+                )
+            surface = 0
+            if flags & 0x80:
+                surface, cursor = _read_variable_id(
+                    cluster,
+                    cursor,
+                    surface_id_width,
+                )
+            for triangle_index, (a, b, c) in enumerate(
+                _triangulate_unit(unit_type, indices)
+            ):
+                triangle_edge_codes: tuple[int, int, int] | None = None
+                if edge_codes is not None:
+                    if unit_type == 1:
+                        triangle_edge_codes = (
                             edge_codes[0],
                             edge_codes[1],
-                            0x1A,
-                        )
-                        if triangle_index == 0
-                        else (
-                            edge_codes[3],
                             edge_codes[2],
-                            0x1A,
                         )
+                    elif unit_type == 2:
+                        # Quad units split as 0-1-2 and 3-2-1. The generated
+                        # diagonal is smooth; boundary codes retain their native
+                        # corner association. University uses triangle units, but
+                        # decoding this correctly keeps the general RX2 reader
+                        # lossless enough for other districts.
+                        triangle_edge_codes = (
+                            (
+                                edge_codes[0],
+                                edge_codes[1],
+                                0x1A,
+                            )
+                            if triangle_index == 0
+                            else (
+                                edge_codes[3],
+                                edge_codes[2],
+                                0x1A,
+                            )
+                        )
+                triangles.append(
+                    CollisionTriangle(
+                        vertices[a],
+                        vertices[b],
+                        vertices[c],
+                        surface,
+                        triangle_edge_codes,
+                        group_id,
+                        flags,
                     )
-            triangles.append(
-                CollisionTriangle(
-                    vertices[a],
-                    vertices[b],
-                    vertices[c],
-                    surface,
-                    triangle_edge_codes,
-                    group_id,
-                    flags,
                 )
-            )
+    except ValueError as error:
+        # Units are variable length, so a bad one ends the cluster: the
+        # triangles before it are good.
+        if problems is None:
+            raise
+        problems.append(str(error))
+        return triangles, vertex_count, unit_count, compression
 
     _require(cursor == unit_end, "collision unit stream has trailing bytes")
     return triangles, vertex_count, unit_count, compression
 
 
-def decode_clustered_mesh(data: bytes) -> ClusteredMesh:
-    """Decode one big-endian serialized rw::collision::ClusteredMesh."""
+def decode_clustered_mesh(
+    data: bytes,
+    problems: list[str] | None = None,
+) -> ClusteredMesh:
+    """Decode one big-endian serialized rw::collision::ClusteredMesh.
+
+    With `problems` (a list), a cluster that can't be read is skipped and
+    described there, and a bad unit keeps the cluster's triangles before it,
+    instead of the whole mesh failing. S3GM's change, so a park keeps what it
+    can read of its collision."""
 
     _require(len(data) >= MESH_HEADER_SIZE, "collision mesh is too small")
     bounds_min = _be_vec3(data, 0)
@@ -368,8 +392,12 @@ def decode_clustered_mesh(data: bytes) -> ClusteredMesh:
                 granularity,
                 group_id_width,
                 surface_id_width,
+                problems,
             )
         except ValueError as error:
+            if problems is not None:
+                problems.append(f"cluster {cluster_index}: {error}")
+                continue
             raise ValueError(
                 f"collision cluster {cluster_index} at "
                 f"0x{cluster_offset:X}: {error}"
@@ -382,10 +410,11 @@ def decode_clustered_mesh(data: bytes) -> ClusteredMesh:
             compression_counts.get(compression, 0) + 1
         )
 
-    _require(
-        len(triangles) == expected_triangles,
-        "collision mesh triangle count does not match decoded clusters",
-    )
+    if problems is None:
+        _require(
+            len(triangles) == expected_triangles,
+            "collision mesh triangle count does not match decoded clusters",
+        )
     return ClusteredMesh(
         bounds_min=bounds_min,
         bounds_max=bounds_max,
@@ -401,7 +430,10 @@ def decode_clustered_mesh(data: bytes) -> ClusteredMesh:
     )
 
 
-def decode_rx2_clustered_meshes(data: bytes) -> list[ClusteredMesh]:
+def decode_rx2_clustered_meshes(
+    data: bytes,
+    problems: list[str] | None = None,
+) -> list[ClusteredMesh]:
     """Decode every ClusteredMesh section in one Xbox 360 RW4 RX2."""
 
     _require(
@@ -428,7 +460,8 @@ def decode_rx2_clustered_meshes(data: bytes) -> list[ClusteredMesh]:
         )
         result.append(
             decode_clustered_mesh(
-                data[section_offset : section_offset + section_size]
+                data[section_offset : section_offset + section_size],
+                problems,
             )
         )
     return result

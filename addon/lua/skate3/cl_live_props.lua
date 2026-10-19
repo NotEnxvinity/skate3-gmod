@@ -101,8 +101,9 @@ end
 -- Where it is, coarse enough that a resting prop's jitter doesn't count.
 local function Place(ent)
 	local p, a = ent:GetPos(), ent:GetAngles()
-	return ("%s|%.0f %.0f %.0f|%.0f %.0f %.0f|%.2f"):format(ent:GetModel(), p.x * 2, p.y * 2, p.z * 2,
-		a.p * 2, a.y * 2, a.r * 2, ent:GetModelScale() or 1)
+	local gen = IsPiece(ent) and Skate3Park.generation or 0
+	return ("%s|%.0f %.0f %.0f|%.0f %.0f %.0f|%.2f|%d"):format(ent:GetModel(), p.x * 2, p.y * 2, p.z * 2,
+		a.p * 2, a.y * 2, a.r * 2, ent:GetModelScale() or 1, gen)
 end
 
 -- The same for a brush entity, and whether it is solid.

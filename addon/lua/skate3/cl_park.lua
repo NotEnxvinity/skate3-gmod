@@ -13,6 +13,14 @@ local NAMES = {
 
 CreateClientConVar("skate3_park_piece", "", true, true, "The park piece the Skate 3 Park tool places")
 
+local twoSided = CreateClientConVar("skate3_park_twosided", "0", true, false,
+	"Test: park collision catches the board from both sides (doubles the triangles)")
+Park.TwoSided = twoSided:GetBool()
+cvars.AddChangeCallback("skate3_park_twosided", function(_, _, new)
+	Park.TwoSided = tobool(new)
+	Park.generation = Park.generation + 1
+end, "skate3_park")
+
 local materials = {}
 
 -- Cutout textures (leaves, fences, grates) are alpha tested and drawn from

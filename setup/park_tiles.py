@@ -85,6 +85,77 @@ def ground_height(flat, share=0.01):
             return round(z, 1)
 
 
+# Cells of the grid that finds the collision under a drawn triangle.
+FILL_CELL = 96.0
+# A drawn surface counts as covered when collision lies this far above or
+# below it, and is only filled when it faces up at least this much.
+FILL_REACH = 24.0
+FILL_FACING = 0.35
+FILL_MIN_AREA = 4.0
+
+
+def _cells(lo, hi):
+    return range(int(lo // FILL_CELL), int(hi // FILL_CELL) + 1)
+
+
+def _height_at(tri, x, y):
+    """Height of the triangle's plane at (x, y) if the point lies inside the
+    triangle seen from above, else None."""
+    (ax, ay, az), (bx, by, bz), (cx, cy, cz) = tri
+    d = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+    if abs(d) < 1e-9:
+        return None
+    u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / d
+    v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / d
+    w = 1 - u - v
+    if min(u, v, w) < -1e-6:
+        return None
+    return u * az + v * bz + w * cz
+
+
+def fill_coverage(groups, flat):
+    """Collision for drawn surfaces that have none. A park's collision comes
+    from its own collision assets; where one is missing or unreadable, the
+    board and the player fall through a surface that is plainly there. Each
+    upward facing drawn triangle (cutouts like leaves and fences aside) with
+    no collision under or over its middle is added, wound the way Skate 3
+    winds its collision. Returns (flat list to add, drawn triangles checked)."""
+    grid, big = {}, []
+    for i in range(0, len(flat) - 8, 9):
+        tri = ((flat[i], flat[i + 1], flat[i + 2]), (flat[i + 3], flat[i + 4], flat[i + 5]),
+               (flat[i + 6], flat[i + 7], flat[i + 8]))
+        xs, ys = [t[0] for t in tri], [t[1] for t in tri]
+        cx, cy = _cells(min(xs), max(xs)), _cells(min(ys), max(ys))
+        if len(cx) * len(cy) > 400:
+            big.append(tri)
+            continue
+        for gx in cx:
+            for gy in cy:
+                grid.setdefault((gx, gy), []).append(tri)
+    added, checked = [], 0
+    for g in groups:
+        if g.get('cut'):
+            continue
+        pos, idx = g['pos'], g['idx']
+        for i in range(0, len(idx) - 2, 3):
+            a, b, c = (tuple(pos[k * 3:k * 3 + 3]) for k in idx[i:i + 3])
+            n = _cross(_sub(c, a), _sub(b, a))
+            size = _length(n)
+            # Skate 3's triangles face out clockwise: this normal points out.
+            if size < FILL_MIN_AREA * 2 or n[2] / size < FILL_FACING:
+                continue
+            checked += 1
+            x, y, z = (a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3
+            covered = False
+            for tri in grid.get((int(x // FILL_CELL), int(y // FILL_CELL)), []) + big:
+                h = _height_at(tri, x, y)
+                if h is not None and abs(h - z) <= FILL_REACH:
+                    covered = True
+                    break
+            if not covered:
+                added.extend(a + b + c)
+    return added, checked
+
 def _bounds(points):
     if not points:
         return [[0, 0, 0], [0, 0, 0]]

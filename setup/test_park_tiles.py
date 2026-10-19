@@ -115,3 +115,43 @@ class CleanCollisionTest(unittest.TestCase):
         front = (self.A, self.C, self.B)
         back = (self.A, self.B, self.C)
         self.assertEqual(len(park_tiles.clean_collision(self.flat(front, back))), 18)
+
+
+class FillCoverageTest(unittest.TestCase):
+    # Triangles facing up in Skate 3's winding (clockwise seen from above).
+    UP = ((0, 0, 0), (0, 100, 0), (100, 0, 0))
+
+    def group(self, tris, **extra):
+        pos, idx = [], []
+        for t in tris:
+            for corner in t:
+                idx.append(len(pos) // 3)
+                pos += list(corner)
+        return dict({'tex': 't', 'pos': pos, 'uv': [], 'idx': idx}, **extra)
+
+    def flat(self, tris):
+        return [v for t in tris for corner in t for v in corner]
+
+    def test_uncovered_surface_gets_collision(self):
+        added, checked = park_tiles.fill_coverage([self.group([self.UP])], [])
+        self.assertEqual((len(added) // 9, checked), (1, 1))
+
+    def test_covered_surface_is_left_alone(self):
+        under = tuple((x, y, z + 3) for x, y, z in self.UP)
+        added, _ = park_tiles.fill_coverage([self.group([self.UP])], self.flat([under]))
+        self.assertEqual(added, [])
+
+    def test_collision_far_below_does_not_count(self):
+        far = tuple((x, y, z - 500) for x, y, z in self.UP)
+        added, _ = park_tiles.fill_coverage([self.group([self.UP])], self.flat([far]))
+        self.assertEqual(len(added) // 9, 1)
+
+    def test_cutouts_and_downward_surfaces_are_skipped(self):
+        down = tuple(reversed(self.UP))
+        added, checked = park_tiles.fill_coverage([self.group([self.UP], cut=True), self.group([down])], [])
+        self.assertEqual((added, checked), ([], 0))
+
+    def test_huge_collision_triangle_still_covers(self):
+        huge = ((-90000, -90000, 0), (-90000, 200000, 0), (200000, -90000, 0))
+        added, _ = park_tiles.fill_coverage([self.group([self.UP])], self.flat([huge]))
+        self.assertEqual(added, [])

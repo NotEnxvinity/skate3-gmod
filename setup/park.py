@@ -99,11 +99,13 @@ def mesh(data, offset=(0, 0, 0)):
     return groups
 
 
-def collision(data, offset=(0, 0, 0)):
+def collision(data, offset=(0, 0, 0), problems=None):
     """The piece's own Skate 3 collision as a flat list of triangle corners
-    (Source units), plus each triangle's surface id."""
+    (Source units), plus each triangle's surface id. With `problems`, what
+    can't be read is skipped and described there instead of failing the
+    piece."""
     tris, surfaces = [], []
-    for part in decode_rx2_clustered_meshes(data):
+    for part in decode_rx2_clustered_meshes(data, problems):
         for t in part.triangles:
             for corner in (t.a, t.b, t.c):
                 tris.extend(round(v, 2) for v in source(corner[0] - offset[0], corner[1] - offset[1], corner[2] - offset[2]))
@@ -201,7 +203,9 @@ def world(path, pid, name, textures):
                 for asset in read_sfil(sfil, records, require_all_records=False):
                     assets[asset.record.asset_id] = (asset.record.asset_type, asset.data)
     renders, sims = [], []
+    census = {}
     for kind, data in assets.values():
+        census[kind] = census.get(kind, 0) + 1
         if kind == 0x1000:
             try:
                 meta, png = decode_texture(data)
@@ -219,16 +223,24 @@ def world(path, pid, name, textures):
     groups, tris, surfaces = [], [], []
     for data in renders:
         groups += mesh(data, offset)
+    problems, lost = [], 0
     for data in sims:
         try:
-            t, s = collision(data, offset)
+            t, s = collision(data, offset, problems)
             tris += t
             surfaces += s
-        except ValueError:
-            pass
+        except ValueError as error:
+            lost += 1
+            problems.append(f'whole collision asset: {error}')
     if not groups:
         raise ValueError('no render models in its stream')
-    return piece(pid, name, 'Maps', groups, tris, surfaces)
+    made = piece(pid, name, 'Maps', groups, tris, surfaces)
+    made['stats'] = {
+        'assets': {hex(k): v for k, v in sorted(census.items())},
+        'sims': len(sims), 'sims_lost': lost, 'problems': problems,
+        'collision_tris': len(tris) // 9, 'render_tris': sum(len(g['idx']) for g in groups) // 3,
+    }
+    return made
 
 
 def write_piece(folder, piece):
@@ -244,6 +256,23 @@ def install(game, gmod, report=print):
     if not made:
         raise RuntimeError('no park pieces were found on the disc')
     return write_all(made, textures, gmod, report)
+
+
+def report_stats(p, report):
+    """What a park's collision came to, for a bug report: a gap here is why
+    a board falls through."""
+    st = p.get('stats')
+    if not st:
+        return
+    report(f'  {p["name"]} collision: {st["collision_tris"]} triangles from {st["sims"]} assets'
+           f' ({st["sims_lost"]} unreadable), {st["render_tris"]} drawn triangles;'
+           f' {st.get("filled", 0)} of {st.get("checked", 0)} upward facing drawn ones had none and were given some;'
+           f' assets by type {st["assets"]}')
+    seen = {}
+    for text in st['problems']:
+        seen[text] = seen.get(text, 0) + 1
+    for text, n in list(seen.items())[:8]:
+        report(f'  collision skipped x{n}: {text}')
 
 
 def write_all(made, textures, gmod, report=print):
@@ -269,15 +298,21 @@ def write_all(made, textures, gmod, report=print):
             # A whole park is cut into tiles that share its origin: Garry's
             # Mod can't build one physics mesh for a park, and a tile is only
             # loaded and drawn where it matters.
+            tiles_floor = park_tiles.ground_height(park_tiles.clean_collision(p['collision']))
+            filled, checked = park_tiles.fill_coverage(p['groups'], p['collision'])
+            if p.get('stats') is not None:
+                p['stats']['filled'] = len(filled) // 9
+                p['stats']['checked'] = checked
+            p['collision'] = p['collision'] + filled
             tiles = park_tiles.tile(p)
             for t in tiles:
                 write_piece(data_out, t)
             entry['tiles'] = [t['id'] for t in tiles]
             # Where the ground is, to set the park down on a map's ground.
-            floor = park_tiles.ground_height(park_tiles.clean_collision(p['collision']))
-            if floor is not None:
-                entry['floor'] = floor
+            if tiles_floor is not None:
+                entry['floor'] = tiles_floor
             report(f'{p["name"]}: {len(tiles)} tiles')
+            report_stats(p, report)
         else:
             p['collision'] = park_tiles.clean_collision(p['collision'])
             write_piece(data_out, p)

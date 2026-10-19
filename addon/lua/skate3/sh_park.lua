@@ -138,6 +138,14 @@ end
 -- Source axes; the module wants them counterclockwise, or the board only
 -- collides from inside and falls straight through, so each is turned over.
 local ORDER = { 0, 6, 3 }
+local BACK = { 0, 3, 6 }
+
+-- skate3_park_twosided adds every triangle again the other way up, so the
+-- board catches on a surface whichever side Skate 3 wound it for. It costs
+-- twice the triangles; it is a test for the fall-through bug. `generation`
+-- changes with it, so cl_live_props builds the pieces again.
+Park.TwoSided = false
+Park.generation = 0
 
 function Park.WorldTriangles(ent, piece)
 	local c = piece and piece.collision
@@ -147,15 +155,19 @@ function Park.WorldTriangles(ent, piece)
 	local fx, fy, fz, rx, ry, rz, ux, uy, uz = f.x, f.y, f.z, r.x, r.y, r.z, u.x, u.y, u.z
 	local px, py, pz = pos.x, pos.y, pos.z
 	local out, n = {}, 0
+	local passes = Park.TwoSided and 2 or 1
 	for t = 1, #c - 8, 9 do
-		for k = 1, 3 do
-			local at = t + ORDER[k]
-			local x, y, z = c[at], c[at + 1], c[at + 2]
-			-- Local y is the angle's left: Right() points the other way.
-			out[n + 1] = px + fx * x - rx * y + ux * z
-			out[n + 2] = py + fy * x - ry * y + uy * z
-			out[n + 3] = pz + fz * x - rz * y + uz * z
-			n = n + 3
+		for pass = 1, passes do
+			local order = pass == 1 and ORDER or BACK
+			for k = 1, 3 do
+				local at = t + order[k]
+				local x, y, z = c[at], c[at + 1], c[at + 2]
+				-- Local y is the angle's left: Right() points the other way.
+				out[n + 1] = px + fx * x - rx * y + ux * z
+				out[n + 2] = py + fy * x - ry * y + uy * z
+				out[n + 3] = pz + fz * x - rz * y + uz * z
+				n = n + 3
+			end
 		end
 	end
 	return out, n

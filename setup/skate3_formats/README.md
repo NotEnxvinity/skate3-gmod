@@ -9,5 +9,7 @@ parkassets.big needs.
 
 From SK8-Engine (https://github.com/SK8-ENGINE/SK8-Engine, tree 311cd40, MIT,
 LICENSE-SK8-ENGINE.txt), as vendored by NativeX: skate3_streams.py and
-retail_collision_mesh.py (with NativeX's unsigned 16-bit offset fix).
+retail_collision_mesh.py (with NativeX's unsigned 16-bit offset fix; S3GM
+adds a mode that skips what it can't read instead of failing the whole mesh,
+and reads triangle-list units as strips).
 world_textures.py's Xbox tiling math also follows SK8-Engine.
