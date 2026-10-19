@@ -43,7 +43,10 @@ function ENT:BuildPhysics(piece)
 	end
 	if self:PhysicsFromMesh(soup) == false then return self:NoPhysics() end
 	self:SetSolid(SOLID_VPHYSICS)
-	self:SetMoveType(MOVETYPE_VPHYSICS)
+	-- Not MOVETYPE_VPHYSICS: a player landing on that shoves even a frozen
+	-- piece a fraction down, and pinning it back shoves the player into it,
+	-- stuck. The physgun swaps it in while it holds the piece.
+	self:SetMoveType(MOVETYPE_NONE)
 	self:EnableCustomCollisions(true)
 	self:SetCustomCollisionCheck(true)
 	local phys = self:GetPhysicsObject()

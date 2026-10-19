@@ -112,7 +112,10 @@ hook.Add("PhysgunPickup", "skate3_park", function(_, ent)
 end)
 
 hook.Add("OnPhysgunPickup", "skate3_park_freeze", function(_, ent)
-	if IsValid(ent) and ent:GetClass() == "skate3_piece" then ent.held = true end
+	if IsValid(ent) and ent:GetClass() == "skate3_piece" then
+		ent.held = true
+		ent:SetMoveType(MOVETYPE_VPHYSICS)
+	end
 end)
 
 hook.Add("PhysgunDrop", "skate3_park_freeze", function(_, ent)
@@ -123,6 +126,7 @@ hook.Add("PhysgunDrop", "skate3_park_freeze", function(_, ent)
 			phys:Sleep()
 		end
 		ent.held = nil
+		ent:SetMoveType(MOVETYPE_NONE)
 		ent.home = { ent:GetPos(), ent:GetAngles() }
 	end
 end)
