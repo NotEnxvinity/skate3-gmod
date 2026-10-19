@@ -1,6 +1,6 @@
 """park.write_all writes pieces, tiles and the index the Lua side reads."""
 from pathlib import Path
-import json, tempfile, unittest
+import json, os, tempfile, unittest
 
 import park
 
@@ -53,6 +53,18 @@ class WriteAllTest(unittest.TestCase):
             self.assertEqual(total, 120 * 120 * 2)
             self.assertTrue((out / 'aa.json').is_file())
             self.assertFalse((out / 'bb.json').exists(), 'a park is only its tiles')
+
+    def test_rerun_leaves_unchanged_files_alone(self):
+        with tempfile.TemporaryDirectory() as gmod:
+            out = Path(gmod) / 'data/skate3/park'
+            park.write_all([make('aa', 'Small ramp', 'Vert', 4), make('cc', 'Old ramp', 'Vert', 3)], {}, gmod, lambda _: None)
+            for f in out.glob('*.json'):
+                os.utime(f, (1000, 1000))
+            park.write_all([make('aa', 'Small ramp', 'Vert', 4)], {}, gmod, lambda _: None)
+            self.assertEqual(os.stat(out / 'aa.json').st_mtime, 1000, 'same piece, not rewritten')
+            self.assertFalse((out / 'cc.json').exists(), 'a piece the disc no longer has is removed')
+            self.assertFalse((out.parent / 'park.partial').exists())
+            self.assertFalse((Path(gmod) / 'materials/skate3/park.partial').exists())
 
 
 if __name__ == '__main__':

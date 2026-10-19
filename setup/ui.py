@@ -13,6 +13,8 @@ scales it to the screen.
 from pathlib import Path
 import json, sys, tempfile
 
+from syncdir import write_if_changed
+
 # The retail button icons the menus use (all "_hud" variants, the ones the
 # in-game D-pad menu draws).
 BUTTONS = ('A', 'B', 'X', 'Y', 'L_Bumper', 'R_Bumper', 'L_Trigger', 'R_Trigger', 'DPad', 'DPad_Up', 'DPad_Down',
@@ -405,5 +407,5 @@ def export_fonts(game, folder, report):
         raise ValueError('the disc has no Futura TrueType file')
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
-    (folder / FONT_FILE).write_bytes(rename_ttf(archive.read(entry), FONT_FAMILY))
+    write_if_changed(folder / FONT_FILE, rename_ttf(archive.read(entry), FONT_FAMILY))
     report(f'Futura for the Skate 3 look installed in {folder / FONT_FILE}')

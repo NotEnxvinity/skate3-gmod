@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
 import audio, convert, names, park, ui, xdvdfs  # noqa: E402
+from syncdir import sync_tree, write_if_changed  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -323,23 +324,17 @@ def install_addon(gmod, wanted, report):
     addon = addon_dir()
     if addon is None:
         raise RuntimeError('The Lua addon is missing from this setup.')
-    # Replaced whole, so files an update removed don't linger.
-    shutil.rmtree(local / 'lua', ignore_errors=True)
-    shutil.copytree(addon, local / 'lua')
+    # Each folder is made to match this setup's copy, so files an update
+    # removed don't linger, but a file that hasn't changed isn't rewritten.
+    sync_tree(addon, local / 'lua')
     if (addon.parent / 'addon.json').is_file():
-        shutil.copy2(addon.parent / 'addon.json', local / 'addon.json')
-    # The spawn menu and weapon switcher icons sit beside the Lua.
-    if (addon.parent / 'materials').is_dir():
-        shutil.rmtree(local / 'materials', ignore_errors=True)
-        shutil.copytree(addon.parent / 'materials', local / 'materials')
-    # The fallback font for the minimal look sits beside the Lua.
-    if (addon.parent / 'resource').is_dir():
-        shutil.rmtree(local / 'resource', ignore_errors=True)
-        shutil.copytree(addon.parent / 'resource', local / 'resource')
-    # The skatepark maps (gm_skate3_*.bsp) Gmod lists once the addon is mounted.
-    if (addon.parent / 'maps').is_dir():
-        shutil.rmtree(local / 'maps', ignore_errors=True)
-        shutil.copytree(addon.parent / 'maps', local / 'maps')
+        write_if_changed(local / 'addon.json', (addon.parent / 'addon.json').read_bytes())
+    # The spawn menu and weapon switcher icons sit beside the Lua, the
+    # fallback font for the minimal look, and the skatepark maps
+    # (gm_skate3_*.bsp) Gmod lists once the addon is mounted.
+    for name in ('materials', 'resource', 'maps'):
+        if (addon.parent / name).is_dir():
+            sync_tree(addon.parent / name, local / name)
     report(f'Installed the S3GM {s3gm_version()} addon in {local}'.replace('  ', ' '))
 
 

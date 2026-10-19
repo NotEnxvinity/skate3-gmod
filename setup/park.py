@@ -17,6 +17,7 @@ import argparse, json, re, shutil, struct, sys, tempfile, traceback, zlib
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import park_tiles  # noqa: E402
+from syncdir import sync_tree  # noqa: E402
 from skate3_formats.archive import BigArchive  # noqa: E402
 from skate3_formats.geometry import decode as decode_model  # noqa: E402
 from skate3_formats.world_materials import enrich  # noqa: E402
@@ -279,7 +280,10 @@ def write_all(made, textures, gmod, report=print):
     """Writes converted pieces (and the textures by guid) for the mod."""
     gmod = Path(gmod)
     used = {g['tex'] for p in made for g in p['groups'] if g['tex']}
-    data_out, tex_out = gmod / 'data/skate3/park', gmod / 'materials/skate3/park'
+    data_final, tex_final = gmod / 'data/skate3/park', gmod / 'materials/skate3/park'
+    # Written beside the real folders first, then only what differs is copied
+    # over, so a rerun with the same parks leaves Garry's Mod's files alone.
+    data_out, tex_out = data_final.with_name('park.partial'), tex_final.with_name('park.partial')
     for out in (data_out, tex_out):
         shutil.rmtree(out, ignore_errors=True)
         out.mkdir(parents=True)
@@ -320,7 +324,13 @@ def write_all(made, textures, gmod, report=print):
     order = {c: i for i, c in enumerate(('Maps',) + CATEGORIES)}
     index.sort(key=lambda p: (order.get(p['category'], len(order)), p['name']))
     (data_out / 'index.json').write_text(json.dumps(index, separators=(',', ':')))
-    report(f'Installed {len(made)} park pieces and {len(used & set(textures))} textures in {data_out.parent}')
+    try:
+        sync_tree(data_out, data_final, move=True)
+        sync_tree(tex_out, tex_final, move=True)
+    finally:
+        shutil.rmtree(data_out, ignore_errors=True)
+        shutil.rmtree(tex_out, ignore_errors=True)
+    report(f'Installed {len(made)} park pieces and {len(used & set(textures))} textures in {data_final.parent}')
     return len(made)
 
 

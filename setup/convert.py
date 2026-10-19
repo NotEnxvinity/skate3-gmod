@@ -16,6 +16,7 @@ from pathlib import Path
 import argparse, shutil, sys, tempfile, traceback
 
 import boards
+from syncdir import sync_tree
 
 REQUIRED = [
     'data/big/miscload.big',
@@ -74,8 +75,8 @@ def convert(engine, xex, out, report=None):
     # Swap in only the converted data: the mod keeps its own files (error
     # logs, saved rides) in the same folder.
     out.mkdir(parents=True, exist_ok=True)
-    shutil.rmtree(out / 'assets', ignore_errors=True)
-    assets.rename(out / 'assets')
+    # Only files that changed are written, so a rerun leaves the rest alone.
+    sync_tree(assets, out / 'assets', move=True)
     (out / 'conversion.log').unlink(missing_ok=True)
     (stage / 'conversion.log').rename(out / 'conversion.log')
     shutil.rmtree(stage, ignore_errors=True)

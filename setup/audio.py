@@ -14,6 +14,7 @@ from fractions import Fraction
 import argparse, json, os, shutil, struct, subprocess, sys, tempfile, wave
 
 import audio_tuning
+from syncdir import sync_tree
 
 ARCHIVES = ('audiofiles.big', 'grains.big', 'wheels.big')
 FROM_DISC = tuple('data/audio/' + name for name in ARCHIVES)
@@ -423,9 +424,11 @@ def install(game, out, report=print, collections=None):
                     manifest['frontend'] = frontend
                 manifest['tuning'] = tuning
         (staged / 'sounds.json').write_text(json.dumps(manifest, separators=(',', ':')))
-        shutil.rmtree(out, ignore_errors=True)
-        shutil.move(str(staged), str(out))
-    report(f'Installed {installed} skate sounds in {out}')
+        # Only the sounds that differ are written, so a rerun leaves the
+        # unchanged ones (and Garry's Mod's idea of them) alone.
+        written, kept, removed = sync_tree(staged, out, move=True)
+    report(f'Installed {installed} skate sounds in {out}'
+           + (f' ({written} written, {kept} already there)' if kept else ''))
     return installed
 
 
