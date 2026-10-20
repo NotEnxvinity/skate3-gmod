@@ -137,6 +137,7 @@ Props.Hulls = Hulls
 -- between them, which bounces the board and lets it slip through. These
 -- models get their visible shape instead.
 local SMOOTH = { "ramp", "skate", "bowl", "quarter", "pipe", "funbox", "kicker", "ledge", "rail", "stair", "curb" }
+local THIN = { "rail", "stair", "curb", "ledge" }
 local MAX_SHAPE = 6000
 
 local function Smooth(model)
@@ -178,6 +179,19 @@ local function Shape(model)
 	if shapes[model] ~= nil then return shapes[model] end
 	shapes[model] = false
 	if not Smooth(model) then return false end
+	-- Loading the model through its physics first: a custom model that nothing
+	-- has used yet may give no mesh until then. Railings, stairs and the like
+	-- keep what they did before this (their hulls unless the game already had
+	-- the mesh): grinds on infinity_pools broke when they all went visible.
+	local flagged = Skate3Surfaces and Skate3Surfaces.PropShape and Skate3Surfaces.PropShape(model)
+	local name = model:lower():match("([^/]+)$") or ""
+	local thin = false
+	for _, word in ipairs(THIN) do
+		if name:find(word, 1, true) then thin = true break end
+	end
+	local keepOld = thin and not flagged
+	local hs
+	if not keepOld then hs = Hulls(model) end
 	local meshes = util.GetModelMeshes(model, 0, 0)
 	if not meshes then return false end
 	local verts = { facing = true }
@@ -198,7 +212,7 @@ local function Shape(model)
 	if #verts < 3 then return false end
 	-- A mesh that doesn't sit where the physics does (odd bone setup) would
 	-- put the ramp in the wrong place; keep the hulls then.
-	local hs = Hulls(model)
+	if keepOld then hs = Hulls(model) end
 	if hs then
 		local lo, hi = Bounds({ verts })
 		local hlo, hhi = Bounds(hs)
