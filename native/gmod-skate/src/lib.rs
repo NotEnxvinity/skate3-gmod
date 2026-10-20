@@ -203,17 +203,20 @@ lua_fn!(set_brushes, |lua| {
 // The player's surface fixes for this map (the Skate 3 Surface tool), as two
 // flat lists: regions {kind (1 flat, 2 smooth, 3 ignore), x, y, z, nx, ny, nz,
 // radius, band, ...} and grind rails {points, x, y, z, x, y, z, ..., points, ...},
-// then the tallest small step to lay a ramp at (0 = none, the default).
+// then the tallest small step to lay a ramp at (0 = none, the default), then
+// ramps laid by profile {axis, lo, hi, base, points, a, z, a, z, ..., axis, ...}.
 // Replaces the last set. Send them before LoadMap or any time after; the map's
 // collision is built again with them and swapped in.
 lua_fn!(set_surfaces, |lua| {
     let regions = lua.numbers(1).unwrap_or_default();
     let rails = lua.numbers(2).unwrap_or_default();
     let lip = lua.number(3).unwrap_or(0.) as f32;
+    let ramps = lua.numbers(4).unwrap_or_default();
     match with_runtime(|r| {
         r.send(Job::Surfaces {
             regions,
             rails,
+            ramps,
             lip,
         })
     }) {

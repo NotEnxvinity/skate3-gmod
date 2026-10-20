@@ -123,10 +123,28 @@ local lip = CreateClientConVar("skate3_lip_forgive", "0", true, false,
 	"Lay a small ramp at steps up to this many units tall so the board rolls over them (0 = off, 3 = small lips)", 0, 3.5)
 cvars.AddChangeCallback("skate3_lip_forgive", function() Surf.Push() end, "skate3_surfaces")
 
--- What the skate module is told: two flat lists and the lip height (see skate3.SetSurfaces).
+-- Fixes that ship with the addon for maps whose own collision can't be
+-- skated, added to whatever the player flagged (skate3_map_fixes 0 turns them
+-- off). ignore = { x, y, z, radius }: collision lying wholly inside goes.
+-- ramp = { axis (0 profile runs along x, 1 along y), lo, hi (span of the other
+-- axis), base (floor the sides go down to), then position, height pairs }.
+local FIXES = {
+	-- gumballegal's small quarter pipe is three strips with different curves
+	-- (8, 12 and 4 facets), so the strips stand up to 28 units off each other
+	-- near the top and the board hits a wall crossing one. One smooth profile,
+	-- never lower than any strip, over all three.
+	gm_grasskate_gl_csm = {
+		ignore = { { -4248, -1520, 8, 240 } },
+		ramp = { { 0, -1712, -1328, -40, -4312, -40, -4308, -39.53, -4304, -38.94, -4300, -38.19, -4296, -37.33, -4292, -36.44, -4288, -35.53, -4284, -34.5, -4280, -33.28, -4276, -31.83, -4272, -30.19, -4268, -28.42, -4264, -26.5, -4260, -24.31, -4256, -21.72, -4252, -18.71, -4248, -15.33, -4244, -11.53, -4240, -7.25, -4236, -2.39, -4232, 3.63, -4228, 11.46, -4224, 21.13, -4220, 32, -4216, 56, -4184, 56 } },
+	},
+}
+local cv_fixes = CreateClientConVar("skate3_map_fixes", "1", true, false, "Use the surface fixes that ship with the addon for some maps (0 = only the ones you flagged)", 0, 1)
+cvars.AddChangeCallback("skate3_map_fixes", function() Surf.Push() end, "skate3_surfaces")
+
+-- What the skate module is told: the flat lists and the lip height (see skate3.SetSurfaces).
 function Surf.Push()
 	if not (skate3 and skate3.SetSurfaces) then return end
-	local flat, lines = {}, {}
+	local flat, lines, ramps = {}, {}, {}
 	for _, r in ipairs(regions) do
 		for _, v in ipairs({ KINDS[r.k], r.p.x, r.p.y, r.p.z, r.n.x, r.n.y, r.n.z, r.r, r.b }) do
 			flat[#flat + 1] = v
@@ -140,7 +158,19 @@ function Surf.Push()
 			lines[#lines + 1] = v.z
 		end
 	end
-	skate3.SetSurfaces(flat, lines, lip:GetFloat())
+	local fixes = cv_fixes:GetBool() and FIXES[game.GetMap()]
+	if fixes then
+		-- After the player's own, so the newest flag keeps its place in the notes.
+		for _, g in ipairs(fixes.ignore or {}) do
+			for _, v in ipairs({ KINDS.ignore, g[1], g[2], g[3], 0, 0, 1, g[4], 6 }) do flat[#flat + 1] = v end
+		end
+		for _, ramp in ipairs(fixes.ramp or {}) do
+			for i = 1, 4 do ramps[#ramps + 1] = ramp[i] end
+			ramps[#ramps + 1] = (#ramp - 4) / 2
+			for i = 5, #ramp do ramps[#ramps + 1] = ramp[i] end
+		end
+	end
+	skate3.SetSurfaces(flat, lines, lip:GetFloat(), ramps)
 end
 
 -- Says what the module made of the newest flag once it has built it.

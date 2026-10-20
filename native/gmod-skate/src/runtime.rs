@@ -42,6 +42,8 @@ pub enum Job {
     Surfaces {
         regions: Vec<f32>,
         rails: Vec<f32>,
+        /// Ramps laid by profile, see `Surfaces::from_flat`.
+        ramps: Vec<f32>,
         /// The tallest step that gets a ramp laid in front of it, 0 for none.
         lip: f32,
     },
@@ -437,9 +439,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
             Job::Surfaces {
                 regions,
                 rails,
+                ramps,
                 lip,
             } => {
-                surfaces = Surfaces::from_flat(&regions, &rails);
+                surfaces = Surfaces::from_flat(&regions, &rails, &ramps);
                 surfaces.lip = if lip.is_finite() { lip.clamp(0., 3.5) } else { 0. };
                 surfaces_gen = surfaces_gen.wrapping_add(1);
                 // Before a map is loaded there is nothing to redo: the load

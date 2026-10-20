@@ -175,6 +175,7 @@ pub fn finish(collected: &[[Vec3; 3]], fixes: &Fitted) -> World {
     let out: &[[Vec3; 3]] = if fixes.edits_triangles() {
         fixed = collected.to_vec();
         fixes.apply(&mut fixed);
+        fixes.lay(&mut fixed);
         fixed.retain(usable);
         dedupe(&mut fixed);
         &fixed
@@ -397,6 +398,7 @@ mod tests {
                 band: 6.,
             }],
             rails: vec![],
+            ramps: vec![],
             ..Default::default()
         }
         .fit(&map);

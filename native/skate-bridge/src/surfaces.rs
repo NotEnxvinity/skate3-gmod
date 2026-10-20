@@ -13,6 +13,9 @@
 //!   ledge, a prop's hull) aren't solid for skating. Big surfaces that run
 //!   out of the area stay.
 //! * rails: polylines that are grindable whatever the geometry looks like.
+//! * ramps: a profile (height along one axis) laid across a span of the other,
+//!   for a ramp whose pieces don't line up (a quarter pipe built of strips with
+//!   different curves). Pair one with an `Ignore` over the old pieces.
 //!
 //! A fix moves vertices by a function of where the vertex is, never of the
 //! triangle it belongs to, so triangles that met before still meet after (no
@@ -48,6 +51,65 @@ pub enum Kind {
     Ignore,
 }
 
+/// A ramp as a height profile: `points` are (position along the axis, height),
+/// laid across `lo..hi` of the other axis, with side walls down to `base`.
+#[derive(Clone, Debug)]
+pub struct Ramp {
+    /// 0: the profile runs along X and is laid across Y; 1: the other way.
+    pub axis: u8,
+    pub lo: f32,
+    pub hi: f32,
+    pub base: f32,
+    pub points: Vec<(f32, f32)>,
+}
+
+pub const MAX_RAMPS: usize = 256;
+pub const MAX_RAMP_POINTS: usize = 256;
+
+impl Ramp {
+    /// The ramp's faces, each facing out: the top face by face, and the two
+    /// sides down to the base.
+    pub fn triangles(&self) -> Vec<[Vec3; 3]> {
+        let at = |a: f32, t: f32, z: f32| {
+            if self.axis == 0 {
+                Vec3::new(a, t, z)
+            } else {
+                Vec3::new(t, a, z)
+            }
+        };
+        // `out` is the way the face must look; the winding follows it.
+        let mut face = |tris: &mut Vec<[Vec3; 3]>, quad: [Vec3; 4], out: Vec3| {
+            for tri in [[quad[0], quad[1], quad[2]], [quad[0], quad[2], quad[3]]] {
+                let n = (tri[1] - tri[0]).cross(tri[2] - tri[0]);
+                if n.length_squared() < 1e-6 {
+                    continue;
+                }
+                tris.push(if n.dot(out) >= 0. { tri } else { [tri[0], tri[2], tri[1]] });
+            }
+        };
+        let mut tris = Vec::new();
+        for w in self.points.windows(2) {
+            let ((a0, z0), (a1, z1)) = (w[0], w[1]);
+            face(
+                &mut tris,
+                [at(a0, self.lo, z0), at(a1, self.lo, z1), at(a1, self.hi, z1), at(a0, self.hi, z0)],
+                Vec3::Z,
+            );
+            for (t, out) in [(self.lo, -1.), (self.hi, 1.)] {
+                if z0 > self.base || z1 > self.base {
+                    let side = if self.axis == 0 { Vec3::Y } else { Vec3::X } * out;
+                    face(
+                        &mut tris,
+                        [at(a0, t, self.base), at(a1, t, self.base), at(a1, t, z1.max(self.base)), at(a0, t, z0.max(self.base))],
+                        side,
+                    );
+                }
+            }
+        }
+        tris
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct Region {
     pub kind: Kind,
@@ -65,6 +127,7 @@ pub struct Region {
 pub struct Surfaces {
     pub regions: Vec<Region>,
     pub rails: Vec<Vec<Vec3>>,
+    pub ramps: Vec<Ramp>,
     /// Steps up to this tall get a ramp laid in front of them (0 = none): the
     /// opt-in forgiveness for small lips, see [`lips`].
     pub lip: f32,
@@ -72,14 +135,15 @@ pub struct Surfaces {
 
 impl Surfaces {
     pub fn is_empty(&self) -> bool {
-        self.regions.is_empty() && self.rails.is_empty() && self.lip <= 0.
+        self.regions.is_empty() && self.rails.is_empty() && self.ramps.is_empty() && self.lip <= 0.
     }
 
     /// Reads the flat lists Lua sends. Regions are
     /// `{kind (1 flat, 2 smooth, 3 ignore), x, y, z, nx, ny, nz, radius, band, ...}`,
-    /// rails `{points, x, y, z, x, y, z, ..., points, ...}`. Anything unusable
+    /// rails `{points, x, y, z, x, y, z, ..., points, ...}`, ramps
+    /// `{axis, lo, hi, base, points, a, z, a, z, ..., axis, ...}`. Anything unusable
     /// is skipped.
-    pub fn from_flat(regions: &[f32], rails: &[f32]) -> Self {
+    pub fn from_flat(regions: &[f32], rails: &[f32], ramps: &[f32]) -> Self {
         let regions = regions
             .chunks_exact(9)
             .filter_map(|r| {
@@ -119,9 +183,35 @@ impl Surfaces {
                 out.push(line);
             }
         }
+        let mut laid = Vec::new();
+        let mut at = 0;
+        while at + 5 <= ramps.len() && laid.len() < MAX_RAMPS {
+            let count = ramps[at + 4].max(0.) as usize;
+            let head = &ramps[at..at + 4];
+            let Some(points) = ramps.get(at + 5..at + 5 + count * 2) else {
+                break;
+            };
+            at += 5 + count * 2;
+            let points: Vec<(f32, f32)> = points.chunks_exact(2).map(|p| (p[0], p[1])).collect();
+            if count >= 2
+                && count <= MAX_RAMP_POINTS
+                && head.iter().chain(points.iter().flat_map(|(a, z)| [a, z])).all(|v| v.is_finite())
+                && head[2] > head[1]
+                && points.windows(2).all(|w| w[1].0 > w[0].0)
+            {
+                laid.push(Ramp {
+                    axis: u8::from(head[0] as i32 == 1),
+                    lo: head[1],
+                    hi: head[2],
+                    base: head[3],
+                    points,
+                });
+            }
+        }
         Self {
             regions,
             rails: out,
+            ramps: laid,
             lip: 0.,
         }
     }
@@ -131,6 +221,7 @@ impl Surfaces {
     pub fn fit(&self, tris: &[[Vec3; 3]]) -> Fitted {
         let mut fitted = Fitted {
             grinds: self.rails.clone(),
+            laid: self.ramps.iter().flat_map(Ramp::triangles).collect(),
             lip: self.lip,
             ..Fitted::default()
         };
@@ -162,6 +253,15 @@ impl Surfaces {
                 },
             }
         }
+        for ramp in &self.ramps {
+            fitted.notes.push(format!(
+                "ramp over {} {:.0}..{:.0}, {} points",
+                if ramp.axis == 0 { "y" } else { "x" },
+                ramp.lo,
+                ramp.hi,
+                ramp.points.len()
+            ));
+        }
         fitted
     }
 }
@@ -172,6 +272,8 @@ pub struct Fitted {
     patches: Vec<Patch>,
     ignores: Vec<(Vec3, f32)>,
     grinds: Vec<Vec<Vec3>>,
+    /// Faces of the ramps laid by profile, added after everything else.
+    laid: Vec<[Vec3; 3]>,
     lip: f32,
     /// One line per region, for the console.
     pub notes: Vec<String>,
@@ -200,6 +302,7 @@ impl Fitted {
         self.patches.is_empty()
             && self.ignores.is_empty()
             && self.grinds.is_empty()
+            && self.laid.is_empty()
             && self.lip <= 0.
     }
 
@@ -215,7 +318,7 @@ impl Fitted {
 
     /// Whether the fixes change triangles at all (rails alone don't).
     pub fn edits_triangles(&self) -> bool {
-        !self.patches.is_empty() || !self.ignores.is_empty()
+        !self.patches.is_empty() || !self.ignores.is_empty() || !self.laid.is_empty()
     }
 
     /// Moves `tris` by the flat and smooth regions and drops what the ignore
@@ -238,6 +341,12 @@ impl Fitted {
                     .any(|(c, r)| t.iter().all(|v| v.distance_squared(*c) <= r * r))
             });
         }
+    }
+
+    /// Adds the faces of the ramps laid by profile to the map's own (props
+    /// don't get them: they belong to the map).
+    pub fn lay(&self, tris: &mut Vec<[Vec3; 3]>) {
+        tris.extend_from_slice(&self.laid);
     }
 
     /// Where a vertex ends up. A function of the position alone.
@@ -730,6 +839,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Flat, 96.)],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -790,6 +900,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Flat, 120.)],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -834,6 +945,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Smooth, 100.)],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -880,6 +992,7 @@ mod tests {
                 ..region(Kind::Flat, 64.)
             }],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -934,6 +1047,7 @@ mod tests {
                 ..region(Kind::Ignore, 20.)
             }],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -962,6 +1076,7 @@ mod tests {
                 ..region(Kind::Flat, 60.)
             }],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -990,6 +1105,7 @@ mod tests {
         let fitted = Surfaces {
             regions: vec![region(Kind::Flat, 120.)],
             rails: vec![],
+            ramps: vec![],
             lip: 0.,
         }
         .fit(&map);
@@ -1049,12 +1165,68 @@ mod tests {
             &[
                 3., 0., 0., 0., 1., 0., 0., 2., 0., 0., 1., 5., 5., 5., 1., 1., 1.,
             ],
+            &[],
         );
         assert_eq!(s.regions.len(), 1);
         assert_eq!(s.regions[0].kind, Kind::Flat);
         // One three-point rail; the one-point rail is skipped.
         assert_eq!(s.rails.len(), 1);
         assert_eq!(s.rails[0].len(), 3);
+    }
+
+    /// A ramp over y -10..10 rising 0 -> 10 -> 20 along x: the top faces up,
+    /// the sides face out, and nothing leaks past the span.
+    #[test]
+    fn a_ramp_by_profile_has_an_upward_top_and_outward_sides() {
+        let s = Surfaces::from_flat(
+            &[],
+            &[],
+            &[0., -10., 10., -5., 3., 0., 0., 10., 10., 20., 20.],
+        );
+        assert_eq!(s.ramps.len(), 1);
+        let tris = s.ramps[0].triangles();
+        let normal = |t: &[Vec3; 3]| (t[1] - t[0]).cross(t[2] - t[0]).normalize();
+        let tops: Vec<_> = tris.iter().filter(|t| normal(t).z > 0.5).collect();
+        assert_eq!(tops.len(), 4, "two quads on top");
+        for t in &tris {
+            for v in t {
+                assert!(v.y.abs() <= 10.001 && v.x >= -0.001 && v.x <= 20.001 && v.z >= -5.001);
+            }
+            let n = normal(t);
+            let c = (t[0] + t[1] + t[2]) / 3.;
+            if n.z <= 0.5 {
+                // A side: faces away from the middle of the span.
+                assert!(n.y * c.y > 0., "side {n:?} at {c:?} faces in");
+            }
+        }
+        // The profile is the surface: at x = 5 it is 5 high.
+        let top = tops
+            .iter()
+            .find(|t| t.iter().all(|v| v.x <= 10.001))
+            .unwrap();
+        assert!(top.iter().all(|v| (v.z - v.x).abs() < 1e-3));
+        // A profile that doesn't climb along its axis is dropped.
+        let bad = Surfaces::from_flat(&[], &[], &[0., -10., 10., 0., 2., 5., 0., 5., 1.]);
+        assert!(bad.ramps.is_empty());
+        let flipped = Surfaces::from_flat(&[], &[], &[0., 10., -10., 0., 2., 0., 0., 5., 1.]);
+        assert!(flipped.ramps.is_empty());
+    }
+
+    #[test]
+    fn a_ramp_replaces_what_an_ignore_covers() {
+        let old = [[Vec3::new(1., 1., 5.), Vec3::new(2., 1., 5.), Vec3::new(1., 2., 5.)]];
+        let s = Surfaces::from_flat(
+            &[3., 0., 0., 0., 0., 0., 1., 20., 6.],
+            &[],
+            &[0., -4., 4., 0., 2., 0., 0., 10., 10.],
+        );
+        let fitted = s.fit(&old);
+        assert!(fitted.edits_triangles());
+        let mut tris = old.to_vec();
+        fitted.apply(&mut tris);
+        fitted.lay(&mut tris);
+        assert!(!tris.iter().any(|t| t[0].z == 5.), "the old piece is gone");
+        assert!(tris.len() >= 2, "the ramp is there");
     }
 }
 
