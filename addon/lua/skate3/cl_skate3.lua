@@ -167,6 +167,12 @@ local function WatchBail(now, p)
 	while #recent > 2 and now - recent[1].t > 0.4 do table.remove(recent, 1) end
 	local bailing = p.state and p.state:find("^Wipeout") ~= nil
 	if bailing and not wasBailing then
+		-- Why, for the console (and console.log with -condebug): what the
+		-- engine asked the wipeout for, where, and how fast.
+		if p.bail and p.bail ~= "" then
+			local at = V(p.pos)
+			print(("[skate3] bail: %s | at %.0f %.0f %.0f, %.1f m/s"):format(p.bail, at.x, at.y, at.z, p.speed or 0))
+		end
 		-- Fastest over any stretch of at least 0.05 s, so one odd frame
 		-- doesn't count.
 		local fastest = 0

@@ -1,0 +1,117 @@
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 8707cc6..7126b7a 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -51,6 +51,8 @@ pub struct Pose {
+     pub state: String,
+     /// Seconds of respawn invincibility left.
+     pub invincible: f32,
++    /// What asked for the last wipeout; empty before the first.
++    pub bail: String,
+ }
+ impl Session {
+     pub fn new(
+@@ -220,6 +222,7 @@ impl Session {
+             tick: self.physics.ticks,
+             state: format!("{:?}", self.skater.player_state.current()),
+             invincible: self.skater.wipeout.state.grace,
++            bail: self.skater.wipeout.last.clone(),
+         }
+     }
+ }
+diff --git a/skate/crates/skate-host/src/physics/player_state/selection.rs b/skate/crates/skate-host/src/physics/player_state/selection.rs
+index 8bcf7f7..1290d3a 100644
+--- a/skate/crates/skate-host/src/physics/player_state/selection.rs
++++ b/skate/crates/skate-host/src/physics/player_state/selection.rs
+@@ -52,6 +52,10 @@ pub(super) fn advance(
+         skater.player_input.player.ground_history_frames_1304 = 100;
+         super::transition::set(physics, skater, requested)?;
+     }
++    if skater.wipeout.requests_wipeout(&skater.player_input.processed) {
++        let state = format!("{current:?}");
++        skater.wipeout.note(physics.ticks, &state);
++    }
+     //SystemLogic82DB6000 clears the per-frame Wipeout request accumulator.
+     skater.wipeout.state.clear_after_selection();
+     Ok(())
+diff --git a/skate/crates/skate-host/src/physics/wipeout.rs b/skate/crates/skate-host/src/physics/wipeout.rs
+index 9466a70..f916cac 100644
+--- a/skate/crates/skate-host/src/physics/wipeout.rs
++++ b/skate/crates/skate-host/src/physics/wipeout.rs
+@@ -9,6 +9,8 @@ use skate_core::player::{
+ use skate_data::collections::Collections;
+ pub(crate) struct Wipeout {
+     pub state: Requests,
++    /// What asked for the last wipeout, in words, for the mod's console.
++    pub last: String,
+     settings: Settings,
+     modes: [Mode; 5],
+ }
+@@ -28,6 +30,7 @@ impl Wipeout {
+         state.initialize_player(); //Player82DB3024, after the component ctor.
+         Ok(Self {
+             state,
++            last: String::new(),
+             settings,
+             modes,
+         })
+@@ -54,6 +57,59 @@ impl Wipeout {
+         wipeout::check_air(&mut self.state, &self.settings, &mode, &frame, use_com);
+         Ok(())
+     }
++    /// Notes why a wipeout was just requested: the request flags are cleared
++    /// right after state selection, so this is the last chance to read them.
++    pub(crate) fn note(&mut self, tick: u64, state: &str) {
++        const NAMES: [&str; 34] = [
++            "body or arms hit something too hard",
++            "skeleton pulled too far from the board",
++            "board hit too fast on landing",
++            "deck turned too far from the board",
++            "flipping upside down",
++            "landing at a bad angle",
++            "landed too fast into the surface",
++            "vehicle contact",
++            "landed a grind too hard",
++            "9",
++            "10",
++            "balance ran out",
++            "12",
++            "13",
++            "14",
++            "15",
++            "conflicting contact",
++            "17",
++            "skeleton squashed",
++            "leaning into a steep surface",
++            "opposing contacts",
++            "body flip landing",
++            "22",
++            "23",
++            "24",
++            "25",
++            "26",
++            "27",
++            "28",
++            "29",
++            "30",
++            "31",
++            "32",
++            "33",
++        ];
++        let reasons: Vec<String> = self
++            .state
++            .reasons
++            .iter()
++            .enumerate()
++            .filter_map(|(i, &on)| {
++                on.then(|| {
++                    let v = self.state.values[i];
++                    if v != 0.0 { format!("{} ({:.1})", NAMES[i], v) } else { NAMES[i].to_string() }
++                })
++            })
++            .collect();
++        self.last = format!("tick {tick} in {state}: {}", reasons.join(", "));
++    }
+     pub(crate) fn mode(&self, p: &ProcessedPhysicsInput) -> Result<Mode, String> {
+         self.modes
+             .get(p.state_variant_index_2528 as usize)
