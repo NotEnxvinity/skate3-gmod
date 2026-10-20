@@ -53,8 +53,10 @@ pub fn collect(triangles: &[[Vec3; 3]], brushes: &[Vec<[f32; 4]>]) -> Vec<[Vec3;
 /// the engine's edge logic sees the wall's top edge under every seam and
 /// pushes a rolling wheel back with a sideways normal. A face goes only when
 /// opposite-facing faces on its plane cover all of it: a wall that is only
-/// partly buried stays whole. Floors and ceilings (flatter than about 25
-/// degrees) stay, so ledges still find their lips.
+/// partly buried stays whole. Slab cuts under a curved ramp, tilted only a
+/// little from flat, go too: a wheel near the surface felt them as extra
+/// contacts and the skater's ground normal swung toward them. The rails are
+/// found before this, on the faces as compiled.
 fn drop_internal(tris: &mut Vec<[Vec3; 3]>) {
     const CELL: f32 = 64.;
     const FAR: usize = 4096;
@@ -116,7 +118,7 @@ fn drop_internal(tris: &mut Vec<[Vec3; 3]>) {
     let mut drop = vec![false; tris.len()];
     for i in 0..tris.len() {
         let t = &tris[i];
-        if normals[i] == Vec3::ZERO || normals[i].z.abs() > 0.9 {
+        if normals[i] == Vec3::ZERO {
             continue;
         }
         let (a, b) = span(t);
