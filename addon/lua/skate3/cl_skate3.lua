@@ -161,6 +161,7 @@ hook.Add("InitPostEntity", "skate3_load", Load)
 -- moments rather than the speedometer, so drops count too.
 local recent, wasBailing = {}, false
 local UNITS = 39.37 -- map units per metre
+local lastState = ""
 local function WatchBail(now, p)
 	if not p then return end
 	recent[#recent + 1] = { t = now, pos = V(p.pos) }
@@ -190,6 +191,14 @@ local function WatchBail(now, p)
 		net.SendToServer()
 	end
 	wasBailing = bailing
+	-- Off the board by any road (a knock off that never counts as a bail).
+	local state = p.state or ""
+	if lastState:find("^Physics") and not state:find("^Physics") and not state:find("^Grind") then
+		local at = V(p.pos)
+		print(("[skate3] off the board: %s -> %s%s | at %.0f %.0f %.0f, %.1f m/s"):format(
+			lastState, state, (p.bail and p.bail ~= "") and (" (last bail reason: " .. p.bail .. ")") or "", at.x, at.y, at.z, p.speed or 0))
+	end
+	lastState = state
 end
 
 local function SetActive(on)
