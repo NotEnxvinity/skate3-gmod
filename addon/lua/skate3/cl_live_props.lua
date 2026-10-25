@@ -373,7 +373,9 @@ local function Scan(now)
 			local from = me:GetPos()
 			if not streamAt or from:DistToSqr(streamAt) > streamRadius * streamRadius then
 				streamAt = from
+				local t = SysTime()
 				streamPicked = PickStatic(from)
+				Perf.Note(("stream pick: %.0f ms"):format((SysTime() - t) * 1000))
 			end
 		end
 		if streamPicked then

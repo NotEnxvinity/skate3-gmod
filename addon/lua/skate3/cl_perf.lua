@@ -7,7 +7,7 @@ local Perf = {}
 
 local cv = CreateClientConVar("skate3_debug_hitches", "1", true, false,
 	"Print what the mod was doing in each frame that hitched (longer than skate3_debug_hitch_ms)")
-local cv_ms = CreateClientConVar("skate3_debug_hitch_ms", "70", true, false,
+local cv_ms = CreateClientConVar("skate3_debug_hitch_ms", "30", true, false,
 	"How long a frame must take, in ms, to count as a hitch for skate3_debug_hitches")
 
 -- At most one hitch line this often, so a run of them doesn't flood the console.
@@ -18,6 +18,9 @@ local notes = {} -- what happened this frame, such as a prop swap
 local last, lastNotes = {}, {}
 local starts = {}
 local nextPrint = 0
+-- Lua's heap at the last frame: a drop since then means the collector ran in
+-- the frame that just finished.
+local lastKB = collectgarbage("count")
 
 function Perf.Begin(part)
 	starts[part] = SysTime()
@@ -46,6 +49,9 @@ end
 -- so it's checked against what was timed in it.
 function Perf.Frame()
 	local dt = FrameTime()
+	local kb = collectgarbage("count")
+	local freed = lastKB - kb
+	lastKB = kb
 	last, lastNotes = frame, notes
 	frame, notes = {}, {}
 	if not cv:GetBool() or dt * 1000 < cv_ms:GetFloat() then return end
@@ -63,9 +69,17 @@ function Perf.Frame()
 		if i > 5 then break end
 		list[#list + 1] = ("%s %.0f ms"):format(p[1], p[2] * 1000)
 	end
-	print(("[skate3] hitch: frame took %.0f ms, the mod's own work %.0f ms%s%s"):format(dt * 1000, ours * 1000,
+	-- Where the skater was and how fast, and whether Lua's collector ran.
+	local me = LocalPlayer()
+	local where = ""
+	if IsValid(me) then
+		local p = me:GetPos()
+		where = (" at %.0f %.0f %.0f, %.0f u/s"):format(p.x, p.y, p.z, me:GetVelocity():Length())
+	end
+	print(("[skate3] hitch: frame took %.0f ms, the mod's own work %.0f ms%s%s%s%s"):format(dt * 1000, ours * 1000,
 		#list > 0 and " (" .. table.concat(list, ", ") .. ")" or "",
-		#lastNotes > 0 and "; " .. table.concat(lastNotes, "; ") or ""))
+		#lastNotes > 0 and "; " .. table.concat(lastNotes, "; ") or "",
+		freed > 2048 and ("; lua collector freed %.0f MB"):format(freed / 1024) or "", where))
 end
 
 -- Bytes the mod sent and got, for the health line.
