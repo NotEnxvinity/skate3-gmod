@@ -18,6 +18,7 @@ import argparse, os, shutil, subprocess, sys, tempfile
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
+from native_tools import ARM_TOOLS  # noqa: E402
 from skate3_setup import MODULES, converter_modules  # noqa: E402
 
 KEEP = {'.py', '.json', '.txt', '.md', '.toml', '.rs'}
@@ -62,6 +63,9 @@ def stage_folder(modules, out):
         for name in (tool, tool + '.exe'):
             if (modules / name).is_file():
                 shutil.copy2(modules / name, out / 'bin' / name)
+    # An Apple-silicon Mac's setup Python can't load the Intel module: it loads this.
+    if (modules / ARM_TOOLS).is_file():
+        shutil.copy2(modules / ARM_TOOLS, out / 'bin' / ARM_TOOLS)
     shutil.copytree(HERE.parent / 'addon/lua', out / 'addon/lua')
     shutil.copytree(HERE.parent / 'addon/materials', out / 'addon/materials')
     shutil.copytree(HERE.parent / 'addon/resource', out / 'addon/resource')

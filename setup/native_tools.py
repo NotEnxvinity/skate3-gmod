@@ -4,13 +4,25 @@ They live in the skate module every download already carries (gmcl_skate3_*,
 exported as plain C functions: native/gmod-skate/src/tools.rs), so setup loads
 the module for its own platform and calls them. Stand-alone programs built
 from the same code (skate-xma, skate-xex) work too, when given or found."""
-import ctypes, os, shutil, subprocess, sys
+import ctypes, os, platform, shutil, subprocess, sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+# Why the last module wouldn't load, for the message setup shows.
+LOAD_ERROR = ''
+# An Apple-silicon Mac runs Garry's Mod, and so the skate module, as Intel code
+# under Rosetta, but setup's Python is native and can't load Intel code: it
+# loads this small arm64 build of just the decoder instead.
+ARM_TOOLS = 's3gm_tools_osx_arm64.dylib'
+
+
+def native_mac_python():
+    return sys.platform == 'darwin' and platform.machine() == 'arm64'
 
 
 def module_name():
+    if native_mac_python():
+        return ARM_TOOLS
     if os.name == 'nt':
         return 'gmcl_skate3_win64.dll'
     return 'gmcl_skate3_osx64.dll' if sys.platform == 'darwin' else 'gmcl_skate3_linux64.dll'
@@ -107,6 +119,16 @@ class Module:
         return self._call(self.lib.s3gm_xex_image, xex, out)
 
 
+def _open(path):
+    global LOAD_ERROR
+    try:
+        return Module(path)
+    except (OSError, AttributeError) as error:
+        # A module from before the tools were put in it, or one that won't load.
+        LOAD_ERROR = f'{Path(path).name} would not load: {error}'
+        return None
+
+
 def load(xma=None, xex=None, module=None):
     """Whatever can decode on this computer, the given or found programs first,
     then the module. None when nothing can."""
@@ -116,11 +138,7 @@ def load(xma=None, xex=None, module=None):
     path = find_module(module)
     if path is None:
         return None
-    try:
-        return Module(path)
-    except (OSError, AttributeError):
-        # A module from before the tools were put in it, or one that won't load.
-        return None
+    return _open(path)
 
 
 def xex_reader(xex=None, module=None):
@@ -131,7 +149,4 @@ def xex_reader(xex=None, module=None):
     path = find_module(module)
     if path is None:
         return None
-    try:
-        return Module(path)
-    except (OSError, AttributeError):
-        return None
+    return _open(path)

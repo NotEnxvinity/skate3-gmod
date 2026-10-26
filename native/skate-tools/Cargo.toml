@@ -1,0 +1,15 @@
+[package]
+name = "skate-tools"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+description = "The audio decoder and executable reader as a small library of their own, for setup on an Apple-silicon Mac (whose Python can't load the Intel skate module)"
+
+[lib]
+name = "s3gm_tools"
+crate-type = ["cdylib"]
+
+[dependencies]
+skate-xma = { path = "../skate-xma" }
+skate-xex = { path = "../skate-xex" }

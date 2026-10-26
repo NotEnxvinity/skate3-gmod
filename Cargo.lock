@@ -2910,6 +2910,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "skate-tools"
+version = "0.1.0"
+dependencies = [
+ "skate-xex",
+ "skate-xma",
+]
+
+[[package]]
 name = "skate-xex"
 version = "0.1.0"
 dependencies = [

@@ -192,8 +192,8 @@ def build(game, out, report=print, decoder=None, force=False):
         raise RuntimeError(f'{game} has no data/audio/audiofiles.big')
     tools = native_tools.load(decoder)
     if tools is None:
-        raise RuntimeError('the audio decoder is missing from this setup (it lives in the skate module, '
-                           + native_tools.module_name() + ')')
+        raise RuntimeError(native_tools.LOAD_ERROR or 'the audio decoder is missing from this setup (it lives in '
+                           + native_tools.module_name() + ' in the bin folder beside setup)')
     sources = {}
     inputs = {}
     for name in (*ARCHIVES, MIX_MAP):

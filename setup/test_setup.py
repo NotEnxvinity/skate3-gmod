@@ -103,3 +103,26 @@ class ModuleCopyTest(unittest.TestCase):
             with self.assertRaises(RuntimeError) as caught:
                 skate3_setup.put_module(self.src, self.dst)
         self.assertIn('Close Garry', str(caught.exception))
+
+
+class MacDecoderTest(unittest.TestCase):
+    """Setup's Python on an Apple-silicon Mac is native and can't load the
+    Intel skate module; it must look for the arm64 decoder library instead."""
+
+    def test_native_mac_python_wants_the_arm64_library(self):
+        import native_tools
+        from unittest import mock
+        with mock.patch.object(native_tools.sys, 'platform', 'darwin'), \
+                mock.patch.object(native_tools.platform, 'machine', return_value='arm64'):
+            self.assertEqual(native_tools.module_name(), native_tools.ARM_TOOLS)
+        with mock.patch.object(native_tools.sys, 'platform', 'darwin'), \
+                mock.patch.object(native_tools.platform, 'machine', return_value='x86_64'):
+            self.assertEqual(native_tools.module_name(), 'gmcl_skate3_osx64.dll')
+
+    def test_a_library_that_will_not_load_says_why(self):
+        import native_tools
+        with tempfile.TemporaryDirectory() as tmp:
+            bad = Path(tmp) / 'gmcl_skate3_osx64.dll'
+            bad.write_bytes(b'not a library')
+            self.assertIsNone(native_tools.xex_reader(module=bad))
+        self.assertIn('would not load', native_tools.LOAD_ERROR)
