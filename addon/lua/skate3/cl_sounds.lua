@@ -967,7 +967,7 @@ end
 -- The audio engine (native/skate-aems, a port of retail's): while it is up it
 -- plays everything below, so this file goes quiet. Until it has loaded, and
 -- when it can't start, this file's sounds play as before.
-local retail = { tried = false, volume = nil, checkedAt = 0, cache = false, muted = false }
+local retail = { tried = false, volume = nil, checkedAt = 0, cache = false, muted = false, row = nil }
 
 local function Retail()
 	if not skate3 or not skate3.AudioReady then return false end
@@ -1275,6 +1275,12 @@ function Sounds.Update(ent, pose)
 		if not retail.muted then
 			retail.muted = true
 			Sounds.Stop()
+		end
+		-- The material under the board, from Source's surface property.
+		Ground(ent)
+		if groundRow ~= retail.row then
+			retail.row = groundRow
+			skate3.AudioGround(groundRow)
 		end
 		return
 	end

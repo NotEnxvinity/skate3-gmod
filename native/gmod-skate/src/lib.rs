@@ -415,6 +415,13 @@ lua_fn!(audio_stop, |lua| {
     0
 });
 
+// AudioGround(row): Skate 3's material under the board, from Source's surface
+// property; nothing clears it.
+lua_fn!(audio_ground, |lua| {
+    audio::set_ground(lua.number(1).filter(|r| *r >= 0.).map(|r| r as u32));
+    0
+});
+
 lua_fn!(audio_volume, |lua| {
     audio::set_volume(lua.number(1).unwrap_or(1.) as f32);
     0
@@ -752,6 +759,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Suspend", suspend),
         (c"AudioStart", audio_start),
         (c"AudioStop", audio_stop),
+        (c"AudioGround", audio_ground),
         (c"AudioVolume", audio_volume),
         (c"AudioReady", audio_ready),
         (c"AudioStatus", audio_status),

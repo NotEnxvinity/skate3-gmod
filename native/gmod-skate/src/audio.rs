@@ -27,6 +27,7 @@ use std::time::Duration;
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, SampleFormat, SizedSample, StreamConfig};
+use skate_aems::live::frame::Field;
 use skate_aems::live::{self, EMITTERS};
 
 use crate::audio_map as map;
@@ -117,13 +118,41 @@ pub fn ready() -> bool {
     current().is_some_and(|s| s.state.load(Ordering::Relaxed) == STATE_READY)
 }
 
+/// Skate 3 material (a row of its AudioSurfaceMap) under the board, as Lua
+/// found it from Source's surface; `NO_GROUND` until it says.
+static GROUND: AtomicU32 = AtomicU32::new(NO_GROUND);
+const NO_GROUND: u32 = u32::MAX;
+
+/// Sets the material the skater's wheels, board and feet stand on. Retail
+/// reads it per triangle from the collision map; Source maps carry no such
+/// tag, so Lua names it from the surface property under the board.
+pub fn set_ground(row: Option<u32>) {
+    GROUND.store(row.unwrap_or(NO_GROUND), Ordering::Relaxed);
+}
+
+/// Puts the ground material into the skater-state fields that name a surface:
+/// each wheel (620), the board's other parts (652), the feet (728, 732) and the
+/// grind (692). Zero-based table indexes, as the handlers read them.
+fn apply_ground(frame: &mut live::Frame) {
+    let row = GROUND.load(Ordering::Relaxed);
+    if row == NO_GROUND {
+        return;
+    }
+    let wheels = (0..4).map(|i| 620 + 4 * i);
+    let parts = (0..3).map(|i| 652 + 4 * i);
+    for offset in wheels.chain(parts).chain([692, 728, 732]) {
+        frame.fields.push((offset, Field::U32(row)));
+    }
+}
+
 /// Called after every simulation tick: reads the session's audio state
 /// (read-only) and queues it for the audio thread.
 pub fn on_tick(session: &skate_bridge::bridge::Session, state: &mut map::State) {
     let Some(s) = current().filter(|s| s.state.load(Ordering::Relaxed) != STATE_ERROR) else {
         return;
     };
-    let frame = state.frame(session);
+    let mut frame = state.frame(session);
+    apply_ground(&mut frame);
     if let Ok(mut g) = s.published.lock() {
         g.push(Published {
             active: true,
@@ -507,6 +536,22 @@ mod tests {
         block[0][2] = -3.0;
         assert!(mix(&block, 2, 1.0) >= -1.0);
         assert!(mix(&block, 0, 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_ground_material_overrides_every_surface_field() {
+        let mut frame = live::Frame::default();
+        frame.fields.push((620, Field::U32(143)));
+        set_ground(Some(9));
+        apply_ground(&mut frame);
+        set_ground(None);
+        let image = live::frame::SkaterImage::from_frame(&frame);
+        for offset in [620, 624, 628, 632, 652, 656, 660, 692, 728, 732] {
+            assert_eq!(image.r32(offset), 9, "offset {offset}");
+        }
+        let mut untouched = live::Frame::default();
+        apply_ground(&mut untouched);
+        assert!(untouched.fields.is_empty());
     }
 
     #[test]
