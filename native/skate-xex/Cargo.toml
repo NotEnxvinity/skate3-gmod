@@ -1,0 +1,17 @@
+[package]
+name = "skate-xex"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+description = "Decodes the player's own Xbox 360 default.xex to its in-memory image so setup can read two tuning tables out of it"
+
+[[bin]]
+name = "skate-xex"
+path = "src/main.rs"
+
+[dependencies]
+aes = "0.8"
+anyhow = "1"
+lzxd = "0.2"
+sha1 = "0.10"

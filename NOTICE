@@ -45,6 +45,14 @@ Skate 3's sounds in GTA V; its notes on retail's field keys and rules are read,
 no code is taken. setup/audio_tuning.py reads those fields from the player's own
 disc.
 
+native/skate-xma is SK8V's EA-XMA decoder (https://github.com/becaring/SK8V,
+rust/skate-xma, LGPL-2.1-or-later, a port of FFmpeg 4.4's XMA path; its licence
+text is native/skate-xma/COPYING.LGPL). native/skate-xex is SK8V's XEX reader
+(rust/ped-export, Apache-2.0). setup/audio_cache.py and setup/audio_blobs.py
+port SK8V's tools/prepare-skate-audio.py and tools/prepare-audio-tuning.py
+(Apache-2.0): they unpack and decode the player's own Skate 3 audio into a local
+cache for the retail-sound engine. Nothing from the disc is shipped.
+
 setup/skate3_formats/ reads the park pieces and the Mega Park stadium off the
 player's own disc. archive.py, arena.py, geometry.py, world_materials.py and
 world_textures.py come from NativeX World Studio

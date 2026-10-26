@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, convert, names, park, ui, xdvdfs  # noqa: E402
+import audio, audio_cache, convert, names, park, ui, xdvdfs  # noqa: E402
 from syncdir import sync_tree, write_if_changed  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
@@ -338,7 +338,7 @@ def install_addon(gmod, wanted, report):
     report(f'Installed the S3GM {s3gm_version()} addon in {local}'.replace('  ', ' '))
 
 
-def install(selected, gmod, report, with_addon=True):
+def install(selected, gmod, report, with_addon=True, audio_engine=False):
     found = garrysmod_in(gmod)
     if found is None:
         raise RuntimeError(f"There's no Garry's Mod in {gmod}. Pick the garrysmod folder inside GarrysMod.")
@@ -418,6 +418,15 @@ def install(selected, gmod, report, with_addon=True):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
+        # The unpacked and decoded audio the retail-sound engine plays from
+        # (beta, a few GB). The sounds above stay the fallback.
+        if audio_engine or os.environ.get('S3GM_AUDIO_ENGINE'):
+            try:
+                audio_cache.install(xex.parent, data / 'audio-cache',
+                                    data / 'assets/private/stock/skater-collections.json', report)
+            except Exception as error:
+                traceback.print_exc()
+                report(f'Couldn\'t prepare the audio cache ({error}); the mod will use the sounds above.')
         # The park pieces and skateparks for the Skate 3 spawn tab; the rest
         # works without them.
         try:
@@ -587,6 +596,8 @@ def main():
                         help='don\'t install the Lua addon (removes an old copy, so the Workshop one loads)')
     # The addon is always installed now; kept so old command lines still work.
     parser.add_argument('--with-addon', action='store_true', help=argparse.SUPPRESS)
+    parser.add_argument('--audio-engine', action='store_true',
+                        help='BETA: also prepare the audio cache the retail-sound engine plays from (a few GB)')
     parser.add_argument('--self-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.self_test:
@@ -608,7 +619,7 @@ def main():
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
         return 2
     try:
-        install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon)
+        install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon, args.audio_engine)
     except Exception as error:
         traceback.print_exc()
         print(f'error: {error}', file=sys.stderr)

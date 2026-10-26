@@ -90,6 +90,11 @@ def main():
         bin_dir.mkdir()
         for m in MODULES:
             shutil.copy2(args.modules / m, bin_dir / m)
+        # The audio cache's decoder and executable reader, when built.
+        for tool in ('skate-xma', 'skate-xex'):
+            for name in (tool, tool + '.exe'):
+                if (args.modules / name).is_file():
+                    shutil.copy2(args.modules / name, bin_dir / name)
         sep = os.pathsep
         command = [
             sys.executable, '-m', 'PyInstaller', '--noconfirm', '--clean', '--onefile',
