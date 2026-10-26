@@ -122,6 +122,14 @@ pub fn ready() -> bool {
 /// found it from Source's surface; `NO_GROUND` until it says.
 static GROUND: AtomicU32 = AtomicU32::new(NO_GROUND);
 const NO_GROUND: u32 = u32::MAX;
+/// The material of what is being ground, when Lua found one apart from the
+/// ground under it (a metal rail on concrete).
+static GRIND: AtomicU32 = AtomicU32::new(NO_GROUND);
+
+/// Sets the material of the rail or ledge under the board while grinding.
+pub fn set_grind(row: Option<u32>) {
+    GRIND.store(row.unwrap_or(NO_GROUND), Ordering::Relaxed);
+}
 
 /// Sets the material the skater's wheels, board and feet stand on. Retail
 /// reads it per triangle from the collision map; Source maps carry no such
@@ -140,9 +148,14 @@ fn apply_ground(frame: &mut live::Frame) {
     }
     let wheels = (0..4).map(|i| 620 + 4 * i);
     let parts = (0..3).map(|i| 652 + 4 * i);
-    for offset in wheels.chain(parts).chain([692, 728, 732]) {
+    for offset in wheels.chain(parts).chain([728, 732]) {
         frame.fields.push((offset, Field::U32(row)));
     }
+    let grind = GRIND.load(Ordering::Relaxed);
+    frame.fields.push((
+        692,
+        Field::U32(if grind == NO_GROUND { row } else { grind }),
+    ));
 }
 
 /// Called after every simulation tick: reads the session's audio state
@@ -543,7 +556,14 @@ mod tests {
         let mut frame = live::Frame::default();
         frame.fields.push((620, Field::U32(143)));
         set_ground(Some(9));
+        set_grind(None);
         apply_ground(&mut frame);
+        set_grind(Some(8));
+        let mut rail = live::Frame::default();
+        apply_ground(&mut rail);
+        assert_eq!(live::frame::SkaterImage::from_frame(&rail).r32(692), 8);
+        assert_eq!(live::frame::SkaterImage::from_frame(&rail).r32(620), 9);
+        set_grind(None);
         set_ground(None);
         let image = live::frame::SkaterImage::from_frame(&frame);
         for offset in [620, 624, 628, 632, 652, 656, 660, 692, 728, 732] {

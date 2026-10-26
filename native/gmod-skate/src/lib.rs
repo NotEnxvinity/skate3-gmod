@@ -422,6 +422,12 @@ lua_fn!(audio_ground, |lua| {
     0
 });
 
+// AudioGrind(row): the material of the rail or ledge being ground; nothing clears it.
+lua_fn!(audio_grind, |lua| {
+    audio::set_grind(lua.number(1).filter(|r| *r >= 0.).map(|r| r as u32));
+    0
+});
+
 lua_fn!(audio_volume, |lua| {
     audio::set_volume(lua.number(1).unwrap_or(1.) as f32);
     0
@@ -760,6 +766,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"AudioStart", audio_start),
         (c"AudioStop", audio_stop),
         (c"AudioGround", audio_ground),
+        (c"AudioGrind", audio_grind),
         (c"AudioVolume", audio_volume),
         (c"AudioReady", audio_ready),
         (c"AudioStatus", audio_status),

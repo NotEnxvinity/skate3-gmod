@@ -967,7 +967,7 @@ end
 -- The audio engine (native/skate-aems, a port of retail's): while it is up it
 -- plays everything below, so this file goes quiet. Until it has loaded, and
 -- when it can't start, this file's sounds play as before.
-local retail = { tried = false, volume = nil, checkedAt = 0, cache = false, muted = false, row = nil }
+local retail = { tried = false, volume = nil, checkedAt = 0, cache = false, muted = false, row = nil, grind = nil, grindShown = nil }
 
 local function Retail()
 	if not skate3 or not skate3.AudioReady then return false end
@@ -993,7 +993,13 @@ local function Retail()
 		retail.checkedAt = CurTime() + 5
 		retail.cache = file.Exists("skate3/audio-cache/manifest.json", "DATA")
 	end
-	if not retail.cache then return false end
+	if not retail.cache then
+		if not retail.saidNoCache then
+			retail.saidNoCache = true
+			print("[skate3] retail audio: no cache at garrysmod/data/skate3/audio-cache (run setup again with the sound engine box ticked); using the mod's own sounds")
+		end
+		return false
+	end
 	retail.tried = true
 	retail.volume = cv_volume:GetFloat()
 	local ok, why = skate3.AudioStart("", retail.volume)
@@ -1005,6 +1011,8 @@ concommand.Add("skate3_audio_status", function()
 	if not skate3 or not skate3.AudioStatus then print("[skate3] no audio engine in this module") return end
 	local status, sounding = skate3.AudioStatus()
 	print("[skate3] retail audio: " .. status)
+	print(string.format("[skate3] cache present: %s, skate3_retail_audio: %s, engine ready: %s",
+		tostring(file.Exists("skate3/audio-cache/manifest.json", "DATA")), cv_retail:GetString(), tostring(skate3.AudioReady())))
 	if sounding and sounding ~= "" then print(sounding) end
 end)
 
@@ -1282,6 +1290,23 @@ function Sounds.Update(ent, pose)
 			retail.row = groundRow
 			skate3.AudioGround(groundRow)
 		end
+		-- What is being ground is what the board rests on, not the floor
+		-- under it: a short trace down from the board finds the rail or ledge
+		-- itself, every frame of the grind.
+		local grindRow
+		if Kind(pose.state) == "grind" then
+			local pos = ent:GetPos()
+			local tr = util.TraceLine({ start = pos + Vector(0, 0, 6), endpos = pos - Vector(0, 0, 14), filter = ent })
+			if tr.Hit then grindRow = RowOf(tr) end
+			if cv_debug:GetBool() and grindRow ~= retail.grindShown then
+				Debug("grind: property '%s' -> Skate 3 material %s (ground %d)", lastProp, tostring(grindRow), groundRow)
+			end
+		end
+		if grindRow ~= retail.grind then
+			retail.grind = grindRow
+			skate3.AudioGrind(grindRow or -1)
+		end
+		retail.grindShown = grindRow
 		return
 	end
 	retail.muted = false
