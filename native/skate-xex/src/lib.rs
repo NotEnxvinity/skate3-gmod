@@ -1,7 +1,9 @@
 //! Vendored from SK8V (https://github.com/becaring/SK8V, rust/ped-export/src/bin/xex_image.rs, Apache-2.0).
 //! Decode a Xbox 360 XEX2 executable to its in-memory base image.
 //!
-//!     xex_image <default.xex> <out image.bin>
+//! ```text
+//! xex_image <default.xex> <out image.bin>
+//! ```
 //!
 //! Handles the retail-encrypted (AES-128-CBC, zero IV) payload with "none",
 //! "basic" (zero-fill) or "normal" (chained blocks of 32 KB LZX frames,
