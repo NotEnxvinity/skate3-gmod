@@ -172,7 +172,8 @@ local function SurfaceWords(m)
 	return s[math.min(m, 94) + 1] or s[#s]
 end
 
-local rowOfProp = {}
+local rowOfProp, rowNames = {}, {}
+local lastProp = ""
 
 -- Skate 3's material for the surface a trace hit.
 local function RowOf(tr)
@@ -190,7 +191,9 @@ local function RowOf(tr)
 		end
 		rowOfProp[props] = row or false
 		row = row or false
+		rowNames[props] = name
 	end
+	lastProp = rowNames[props] or ""
 	return row or MAT_ROWS[tr.MatType] or 0
 end
 
@@ -211,6 +214,10 @@ local function Surface(pos, filter)
 end
 
 local ground, groundRow, nextTrace = ROLL_DEFAULT, 0, 0
+-- The rolling surface (AudioSurfaceMap word 1) under the board: 3 smooth
+-- asphalt, 4 smooth concrete, 5 wood, 7 grass, 8 loose ground...
+local groundNumber = 0
+local shownGround
 
 -- The surface under the board, checked a few times a second.
 local function Ground(ent)
@@ -218,6 +225,13 @@ local function Ground(ent)
 		nextTrace = CurTime() + 0.25
 		local name, _, row = Surface(ent:GetPos(), ent)
 		ground, groundRow = name, row
+		local e = SurfaceEntry(row)
+		groundNumber = e and e[1] or 0
+		if cv_debug:GetBool() and shownGround ~= row .. name .. lastProp then
+			shownGround = row .. name .. lastProp
+			Debug("ground: property '%s' -> Skate 3 material %d, rolls on surface %d (%s)", lastProp, row, groundNumber,
+				name)
+		end
 	end
 	return ground
 end
@@ -388,6 +402,48 @@ local function GrindHit(ent, speed, air)
 end
 
 local bands = {}
+
+-- Retail rolls on the grain recordings only on surfaces 1 to 6 and 9; on 7, 8
+-- and 10 to 13 (grass, loose ground, manholes, grilles...) its sound scripts
+-- play the PatchBank_Rolling_Surfaces loops instead, which setup installs as
+-- sound/skate3/surfaces. Six loops for six surfaces: taken in that order.
+-- Which loop is which is a guess until somebody hears them (the debug line
+-- prints the one playing).
+local AEMS_SURFACES = { 7, 8, 10, 11, 12, 13 }
+local aemsRoll = {}
+
+local function AemsRoll(ent, rolling, speed, volume)
+	local want
+	if rolling then
+		local loops = Loops("surfaces")
+		for k, n in ipairs(AEMS_SURFACES) do
+			if n == groundNumber then want = loops[k] end
+		end
+	end
+	local on = aemsRoll
+	if on.patch and (not want or on.name ~= want or on.ent ~= ent) then
+		on.patch:FadeOut(0.2)
+		on.patch = nil
+	end
+	if not want then return false end
+	if not on.patch then
+		on.name, on.ent = want, ent
+		on.patch = CreateSound(ent, string.format("skate3/surfaces/%s.wav", want))
+		on.patch:PlayEx(0, 100)
+		Debug("rolling on surface %d: loop surfaces/%s", groundNumber, want)
+	end
+	on.patch:ChangeVolume(math.Clamp(speed / 6, 0.1, 1) * 0.6 * volume, 0.1)
+	on.patch:ChangePitch(math.Clamp(80 + speed * 4, 80, 125), 0.1)
+	return true
+end
+
+-- Whether the ground is one of the surfaces the loops above cover.
+local function AemsGround()
+	for _, n in ipairs(AEMS_SURFACES) do
+		if n == groundNumber then return #Loops("surfaces") > 0 end
+	end
+	return false
+end
 
 -- The disc's rolling: the two bands either side of the board's speed, blended
 -- at equal power, quiet when barely moving.
@@ -1227,7 +1283,10 @@ function Sounds.Update(ent, pose)
 	local sliding = pose.state == "SlideGround" or pose.state == "RevertGround"
 
 	if disc then
-		RollBands(ent, kind == "ground" and speed > 0.3, speed, volume)
+		Ground(ent)
+		local aems = AemsGround()
+		RollBands(ent, kind == "ground" and speed > 0.3 and not aems, speed, volume)
+		AemsRoll(ent, kind == "ground" and speed > 0.3 and aems, speed, volume)
 		Seams(ent, pose, kind, speed, volume)
 		if loops.roll and loops.roll.on then
 			loops.roll.patch:Stop()
@@ -1295,6 +1354,10 @@ function Sounds.Stop()
 			s.patch:Stop()
 			s.on = false
 		end
+	end
+	if aemsRoll.patch then
+		aemsRoll.patch:Stop()
+		aemsRoll.patch = nil
 	end
 	spin.trigger = nil
 	SpinStop()
