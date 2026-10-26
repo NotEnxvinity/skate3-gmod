@@ -1,7 +1,7 @@
 """Setup installs the addon it carries into garrysmod/addons/skate3, replacing
 an older copy whole; --no-addon removes an old copy instead."""
 from pathlib import Path
-import tempfile, unittest
+import os, tempfile, unittest
 
 import skate3_setup
 
@@ -40,3 +40,66 @@ class AddonTest(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class ModuleCopyTest(unittest.TestCase):
+    """An old skate module that is read-only (a Mac install left one) must not
+    stop setup."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.src = Path(self.dir.name) / 'new.dll'
+        self.src.write_bytes(b'new module')
+        self.dst = Path(self.dir.name) / 'old.dll'
+
+    def tearDown(self):
+        self.dir.cleanup()
+
+    def test_fresh_copy(self):
+        skate3_setup.put_module(self.src, self.dst)
+        self.assertEqual(self.dst.read_bytes(), b'new module')
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX permissions')
+    def test_read_only_old_copy_is_replaced(self):
+        self.dst.write_bytes(b'old module')
+        self.dst.chmod(0o444)
+        skate3_setup.put_module(self.src, self.dst)
+        self.assertEqual(self.dst.read_bytes(), b'new module')
+        self.assertTrue(os.access(self.dst, os.W_OK))
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX permissions')
+    def test_unchanged_read_only_copy_is_left_alone(self):
+        self.dst.write_bytes(b'new module')
+        self.dst.chmod(0o444)
+        skate3_setup.put_module(self.src, self.dst)
+        self.assertEqual(self.dst.read_bytes(), b'new module')
+
+    def test_locked_old_copy_is_removed_then_replaced(self):
+        # As if the old file refuses a write even after chmod: setup deletes it.
+        from unittest import mock
+        self.dst.write_bytes(b'old module')
+        real = skate3_setup.shutil.copyfile
+        calls = []
+
+        def refuse_while_old_exists(a, b, *args, **kwargs):
+            calls.append(Path(b).exists())
+            if Path(b).exists():
+                raise PermissionError(13, 'Permission denied', str(b))
+            return real(a, b, *args, **kwargs)
+
+        with mock.patch.object(skate3_setup.shutil, 'copyfile', refuse_while_old_exists):
+            skate3_setup.put_module(self.src, self.dst)
+        self.assertEqual(self.dst.read_bytes(), b'new module')
+        self.assertEqual(calls, [True, True, False])
+
+    def test_stuck_old_copy_gets_a_plain_message(self):
+        from unittest import mock
+        self.dst.write_bytes(b'old module')
+
+        def always_refuse(a, b, *args, **kwargs):
+            raise PermissionError(13, 'Permission denied', str(b))
+
+        with mock.patch.object(skate3_setup.shutil, 'copyfile', always_refuse):
+            with self.assertRaises(RuntimeError) as caught:
+                skate3_setup.put_module(self.src, self.dst)
+        self.assertIn('Close Garry', str(caught.exception))

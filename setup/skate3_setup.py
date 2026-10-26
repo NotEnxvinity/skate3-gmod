@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
 import audio, audio_cache, convert, names, park, ui, xdvdfs  # noqa: E402
-from syncdir import sync_tree, write_if_changed  # noqa: E402
+from syncdir import same_bytes, sync_tree, write_if_changed  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
 # What the converters read off the disc, so an ISO needs only these copied out.
@@ -309,6 +309,37 @@ def workshop_copy(gmod):
     return (steamapps / 'workshop/content/4000' / WORKSHOP_ID).is_dir()
 
 
+def put_module(src, dst):
+    """Copies a skate module over an older one. An old copy that is read-only
+    or belongs to someone else (it happens on a Mac) is made writable or
+    replaced, and an unchanged one is left alone; a module the game has open
+    (Windows) gets a plain message."""
+    src, dst = Path(src), Path(dst)
+    try:
+        if dst.is_file() and same_bytes(src, dst):
+            return
+    except OSError:
+        pass
+    try:
+        shutil.copyfile(src, dst)
+    except PermissionError as first:
+        try:
+            if os.name != 'nt':
+                dst.chmod(0o644)
+            shutil.copyfile(src, dst)
+        except OSError:
+            try:
+                dst.unlink()
+                shutil.copyfile(src, dst)
+            except OSError as error:
+                raise RuntimeError(
+                    f"Couldn't replace {dst.name} in {dst.parent} ({first}). Close Garry's Mod, then run "
+                    f"setup again. If it still fails, the old file is locked: delete {dst} yourself "
+                    f"(on a Mac, in Terminal: chmod u+w '{dst}') and run setup again.") from error
+    if os.name != 'nt':
+        dst.chmod(0o755)
+
+
 def install_addon(gmod, wanted, report):
     """The addon this setup carries goes in addons/skate3, replacing an older
     copy, and loads instead of the Workshop one. With wanted False an old copy
@@ -355,7 +386,7 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
     bin_dir.mkdir(parents=True, exist_ok=True)
     for m in MODULES:
         if (modules / m).is_file():
-            shutil.copy2(modules / m, bin_dir / m)
+            put_module(modules / m, bin_dir / m)
     report(f'Installed the skate module in {bin_dir}')
     install_addon(gmod, with_addon, report)
 
