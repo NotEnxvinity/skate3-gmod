@@ -38,6 +38,9 @@ def find_module(given=None):
                   HERE.parent / 'garrysmod/lua/bin' / module_name(), HERE.parent / 'target/release' / lib]
     if os.environ.get('CARGO_TARGET_DIR'):
         candidates.append(Path(os.environ['CARGO_TARGET_DIR']) / 'release' / lib)
+    if native_mac_python():
+        # A skate module built for both Mac chips loads here too.
+        candidates.append(root / 'bin' / 'gmcl_skate3_osx64.dll')
     for candidate in candidates:
         if candidate and Path(candidate).is_file():
             return Path(candidate)
