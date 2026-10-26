@@ -648,8 +648,11 @@ def main():
                         help='don\'t install the Lua addon (removes an old copy, so the Workshop one loads)')
     # The addon is always installed now; kept so old command lines still work.
     parser.add_argument('--with-addon', action='store_true', help=argparse.SUPPRESS)
-    parser.add_argument('--audio-engine', action='store_true',
-                        help='BETA: also prepare the audio cache the retail-sound engine plays from (a few GB)')
+    # On by default for the test builds; the old sounds stay as the fallback either way.
+    parser.add_argument('--audio-engine', action='store_true', default=True,
+                        help='BETA: also prepare the audio cache the retail-sound engine plays from (a few GB); on by default')
+    parser.add_argument('--no-audio-engine', action='store_true',
+                        help='skip the audio cache the retail-sound engine plays from')
     parser.add_argument('--self-test', action='store_true', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.self_test:
@@ -671,7 +674,7 @@ def main():
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
         return 2
     try:
-        problems = install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon, args.audio_engine)
+        problems = install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon, not args.no_audio_engine)
         if problems:
             print('\nInstalled, but not everything worked:', file=sys.stderr)
             for problem in problems:

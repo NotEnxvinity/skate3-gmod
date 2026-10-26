@@ -130,7 +130,7 @@ if ($gmod) { $gmod = GarrysmodIn $gmod }
 if (-not $gmod) { try { $gmod = FindGmod } catch { $gmod = $null } }
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $form = New-Object System.Windows.Forms.Form -Property @{
-    Text = ("S3GM $version setup" -replace '  ', ' '); Width = 640; Height = 270; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false
+    Text = ("S3GM $version setup" -replace '  ', ' '); Width = 640; Height = 330; AutoScroll = $true; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false
     MinimizeBox = $false; StartPosition = 'CenterScreen'; TopMost = $true
 }
 function AddRow($y, $label, $value) {
@@ -158,10 +158,16 @@ $gameBrowse.Add_Click({
     $dialog.Filter = 'Skate 3 disc image (*.iso;default.xex)|*.iso;default.xex|All files (*.*)|*.*'
     if ($dialog.ShowDialog($form) -eq 'OK') { $gameBox.Text = $dialog.FileName }
 })
-$ok = New-Object System.Windows.Forms.Button -Property @{ Text = 'Install'; Left = 420; Top = 150; Width = 90; Height = 30 }
-$cancel = New-Object System.Windows.Forms.Button -Property @{ Text = 'Cancel'; Left = 516; Top = 150; Width = 90; Height = 30; DialogResult = 'Cancel' }
+# On for the test builds: the retail-sound engine needs the cache it makes, and
+# the old sounds stay as the fallback either way.
+$engineBox = New-Object System.Windows.Forms.CheckBox -Property @{
+    Text = "Skate 3's own sound engine (beta): also prepare its sounds from your disc. Needs a few GB of free space and a few more minutes."
+    Left = 16; Top = 134; Width = 590; Height = 44; Checked = $true }
+$form.Controls.Add($engineBox)
+$ok = New-Object System.Windows.Forms.Button -Property @{ Text = 'Install'; Left = 420; Top = 200; Width = 90; Height = 30 }
+$cancel = New-Object System.Windows.Forms.Button -Property @{ Text = 'Cancel'; Left = 516; Top = 200; Width = 90; Height = 30; DialogResult = 'Cancel' }
 $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
-    Text = 'Check both, then press Install.'; Left = 16; Top = 156; Width = 380; Height = 20 }))
+    Text = 'Check both, then press Install.'; Left = 16; Top = 206; Width = 380; Height = 20 }))
 $ok.Add_Click({
     $picked = GarrysmodIn $gmodBox.Text.Trim().Trim('"')
     if (-not $picked) {
@@ -181,6 +187,7 @@ $form.AcceptButton = $ok; $form.CancelButton = $cancel
 if ($form.ShowDialog() -ne 'OK') { Die 'Setup cancelled, so nothing was installed.' }
 $gmod = $gmodBox.Text
 $game = $gameBox.Text.Trim().Trim('"')
+$engineArg = if ($engineBox.Checked) { '--audio-engine' } else { '--no-audio-engine' }
 $form.Dispose()
 Write-Host "Garry's Mod: $gmod"
 Write-Host "Skate 3: $game"
@@ -277,7 +284,7 @@ if (-not $ready) {
 $env:SKATE3_ENGINE = $engine
 $env:SKATE3_VGMSTREAM = $vgmstream
 $setup = Join-Path $here 'skate3_setup.py'
-& $venvPython $setup --game $game --gmod $gmod @rest
+& $venvPython $setup --game $game --gmod $gmod $engineArg @rest
 $tries = 0
 while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
     # Garry's Mod wasn't found in any Steam library on any drive, or the picked folder had no Gmod in it.
@@ -288,7 +295,7 @@ while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
     $picked = $dialog.ShowDialog($owner)
     $owner.Dispose()
     if ($picked -ne 'OK') { Die 'No garrysmod folder picked, so nothing was installed.' }
-    & $venvPython $setup --game $game --gmod $dialog.SelectedPath @rest
+    & $venvPython $setup --game $game --gmod $dialog.SelectedPath $engineArg @rest
 }
 if ($LASTEXITCODE -ne 0) { Die 'Setup stopped with an error; the window above says why.' }
 $done = ("All set! S3GM $version is installed." -replace '  ', ' ') + "`n`nStart Garry's Mod, load a map and equip the Skateboard (spawn menu > Weapons > Skate 3)."
