@@ -85,23 +85,6 @@ local FLASHES = {
 	{ { 12.5, 0.5, 1, 2, 20 }, { 10.75, 0, 1, 4, 20 } },
 }
 
--- The glow and flash are kept well under the movie's own opacity: drawn at its
--- values the flash was a blown-out white disc (it's two stacked layers in the
--- movie, and the glow washed the number out), so they're a soft bloom here.
-local GLOW_ALPHA, FLASH_ALPHA = 0.7, 0.35
-
--- The flash picture (shape 64) is four quadrants of a soft starburst, stacked
--- twice in the movie; one layer of it is plenty.
-local function Bloom(k, a)
-	if a <= 0 then return end
-	local art = UI.Art()
-	local shape = art and art.shapes["64"]
-	if not shape then return end
-	for i = 1, math.min(4, #shape) do
-		UI.Quad(shape[i].tex, shape[i].quad, CX, CY, k, 255, 255, 255, a)
-	end
-end
-
 local function Flash(f, first, peak, rise, fall)
 	if f < 0 then return 0 end
 	if f < rise then return Lerp(f / rise, first, peak) end
@@ -152,26 +135,23 @@ function S3.Draw(v)
 	if m >= 1.01 then
 		local f = (now - (v.tierAt or -math.huge)) / FRAME -- frames since x2 or x3 came in
 
-		-- The glow sits behind the disc (over it, it washed the number out).
-		if tier > 1 then
-			local glow = math.Clamp(f / GLOW_IN, 0, 1)
-			UI.Shape(GLOWS[tier], CX, CY, GLOW_SCALE[tier], 255, 255, 255, 255 * a * glow * GLOW_ALPHA)
-		end
 		UI.Shape("51", CX, CY, 1, 255, 255, 255, 255 * a)
 		Track(a)
 		if v.live then
 			UI.Sector(RINGS[tier], CX, CY, 0, math.Clamp(v.timer, 0, 1), 255, 255, 255, 255 * a)
 		end
 		if tier > 1 then
+			local glow = math.Clamp(f / GLOW_IN, 0, 1)
+			UI.Shape(GLOWS[tier], CX, CY, GLOW_SCALE[tier], 255, 255, 255, 255 * a * glow)
+			for _, spec in ipairs(FLASHES[tier]) do
+				UI.Shape("64", CX, CY, spec[1], 255, 255, 255, 255 * a * Flash(f, spec[2], spec[3], spec[4], spec[5]))
+			end
 			if tier == 2 then
 				UI.Shape(MULTIPLIER_ART[2], CX, CY, 1, 255, 255, 255, 255 * a * math.Clamp(f / X2_IN, 0, 1))
 			else
 				local k = math.Clamp(f / X3_IN, 0, 1)
 				local drop = 1 - k * k
 				UI.Shape(MULTIPLIER_ART[3], CX, CY, 1 + 0.5 * drop, 255, 255, 255, 255 * a * Lerp(k * k, 0.4, 1))
-			end
-			for _, spec in ipairs(FLASHES[tier]) do
-				Bloom(spec[1], 255 * a * FLASH_ALPHA * Flash(f, spec[2], spec[3], spec[4], spec[5]))
 			end
 		else
 			-- x1.5 and the like: the number pops when it goes up.
