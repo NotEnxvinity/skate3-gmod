@@ -518,6 +518,13 @@ def window(gmod, game=None):
         target, browse_gmod)
     row('Your Skate 3 disc image (.iso), or default.xex in an extracted copy', disc, browse_disc)
 
+    # On for the test builds: the retail-sound engine needs the cache, and
+    # the old sounds stay as the fallback either way.
+    engine = tk.BooleanVar(value=True)
+    ttk.Checkbutton(frame, variable=engine, text=(
+        'Skate 3\'s own sound engine (beta): also prepare its sounds from your disc. '
+        'Needs a few GB of free space and a few more minutes.')).pack(anchor='w', pady=(12, 0))
+
     # Above the log, so a short window can't push it out of sight.
     button = ttk.Button(frame, text='Install')
     button.pack(anchor='w', pady=(14, 0))
@@ -544,12 +551,13 @@ def window(gmod, game=None):
         if not picked or not Path(picked).exists():
             messagebox.showerror('S3GM setup', 'Press Browse and pick your Skate 3 disc image (.iso) or default.xex.')
             return
+        wants_engine = engine.get()
         button.configure(state='disabled')
         progress.start()
 
         def work():
             try:
-                install(picked, folder, lambda text: messages.put(('log', text)))
+                install(picked, folder, lambda text: messages.put(('log', text)), audio_engine=wants_engine)
                 messages.put(('done', None))
             except Exception as error:
                 traceback.print_exc()
