@@ -14,6 +14,7 @@ mod runtime;
 #[cfg(test)]
 mod scan;
 mod skater;
+mod spatial;
 mod tools;
 
 use std::ffi::c_int;
@@ -429,6 +430,39 @@ lua_fn!(audio_grind, |lua| {
     0
 });
 
+// AudioSpace(lx,ly,lz, rx,ry,rz, bx,by,bz, sx,sy,sz): where the listener, their
+// right ear's direction, the board and the body are, in Source units. No
+// arguments turns placement off.
+lua_fn!(audio_space, |lua| {
+    let mut v = [0f32; 12];
+    for (i, slot) in v.iter_mut().enumerate() {
+        match lua.number(i as i32 + 1) {
+            Some(n) if n.is_finite() => *slot = n as f32,
+            _ => {
+                audio::set_space(None);
+                return 0;
+            }
+        }
+    }
+    let m = 1. / 39.37;
+    let at = |i: usize| [v[i] * m, v[i + 1] * m, v[i + 2] * m];
+    let right = [v[3], v[4], v[5]];
+    let len = (right[0] * right[0] + right[1] * right[1] + right[2] * right[2]).sqrt();
+    let right = if len > 1e-3 { [right[0] / len, right[1] / len, right[2] / len] } else { [1., 0., 0.] };
+    audio::set_space(Some(spatial::Space {
+        listener: at(0),
+        right,
+        emitters: [at(6), at(9)],
+    }));
+    0
+});
+
+// AudioReverb(wet, seconds): how much of the room to mix in and how long it rings.
+lua_fn!(audio_reverb, |lua| {
+    audio::set_room(lua.number(1).unwrap_or(0.) as f32, lua.number(2).unwrap_or(1.) as f32);
+    0
+});
+
 lua_fn!(audio_volume, |lua| {
     audio::set_volume(lua.number(1).unwrap_or(1.) as f32);
     0
@@ -768,6 +802,8 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"AudioStop", audio_stop),
         (c"AudioGround", audio_ground),
         (c"AudioGrind", audio_grind),
+        (c"AudioSpace", audio_space),
+        (c"AudioReverb", audio_reverb),
         (c"AudioVolume", audio_volume),
         (c"AudioReady", audio_ready),
         (c"AudioStatus", audio_status),

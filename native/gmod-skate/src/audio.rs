@@ -31,6 +31,7 @@ use skate_aems::live::frame::Field;
 use skate_aems::live::{self, EMITTERS};
 
 use crate::audio_map as map;
+use crate::spatial::{self, Mover, Placement, Reverb, Space};
 
 pub const SAMPLE_RATE: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -285,15 +286,88 @@ pub fn debug_text() -> String {
         .unwrap_or_default()
 }
 
-/// The three emitters mixed to one centred channel, kept from clipping.
-fn mix(block: &[[f32; BLOCK]; EMITTERS], i: usize, volume: f32) -> f32 {
-    let sum = (block[0][i] + block[1][i] + block[2][i]) * volume;
-    // Linear below 0.9, then bends toward 1.0.
+/// Linear below 0.9, then bends toward 1.0, so nothing clips.
+fn limit(sum: f32) -> f32 {
     let a = sum.abs();
     if a <= 0.9 {
         sum
     } else {
         sum.signum() * (0.9 + 0.1 * ((a - 0.9) / 0.1).tanh())
+    }
+}
+
+/// Where the listener and the sounds are, from Lua; nothing set means every
+/// sound is centred at full level, as before 3D.
+static SPACE: Mutex<Option<Space>> = Mutex::new(None);
+/// The room's reverb: wet level and seconds to decay.
+static ROOM: Mutex<(f32, f32)> = Mutex::new((0.0, 1.0));
+
+/// AudioSpace: `None` turns the placement off.
+pub fn set_space(space: Option<Space>) {
+    if let Ok(mut s) = SPACE.lock() {
+        *s = space;
+    }
+}
+
+pub fn set_room(wet: f32, decay: f32) {
+    if let Ok(mut r) = ROOM.lock() {
+        *r = (
+            if wet.is_finite() { wet.clamp(0.0, 1.0) } else { 0.0 },
+            if decay.is_finite() { decay.clamp(0.1, 8.0) } else { 1.0 },
+        );
+    }
+}
+
+/// What turns the three emitters into stereo: placement of the board and
+/// body, the speed sounds on the listener, then the room.
+struct Mixer {
+    movers: [Mover; EMITTERS],
+    reverb: Reverb,
+}
+
+impl Mixer {
+    fn new() -> Self {
+        Mixer {
+            movers: [Mover::default(); EMITTERS],
+            reverb: Reverb::new(SAMPLE_RATE),
+        }
+    }
+
+    /// Forgets tails (the engine went quiet).
+    fn clear(&mut self) {
+        self.movers = [Mover::default(); EMITTERS];
+        self.reverb.clear();
+    }
+
+    fn mix(
+        &mut self,
+        block: &[[f32; BLOCK]; EMITTERS],
+        volume: f32,
+        space: Option<Space>,
+        wet: f32,
+        decay: f32,
+    ) -> [[f32; 2]; BLOCK] {
+        let mut out = [[0.0f32; 2]; BLOCK];
+        for (e, input) in block.iter().enumerate() {
+            let target = match (&space, e) {
+                (Some(sp), 0 | 1) => spatial::place(sp, e, SAMPLE_RATE as f32),
+                _ => Placement::CENTRED,
+            };
+            let mut scaled = [0.0f32; BLOCK];
+            for (o, x) in scaled.iter_mut().zip(input) {
+                *o = x * volume;
+            }
+            self.movers[e].mix(&scaled, target, &mut out);
+        }
+        if space.is_some() {
+            self.reverb.set_decay(decay);
+            self.reverb.add_to(&mut out, wet);
+        }
+        for frame in out.iter_mut() {
+            frame[0] = limit(frame[0]);
+            frame[1] = limit(frame[1]);
+        }
+        out
     }
 }
 
@@ -317,6 +391,7 @@ fn run(s: &Arc<Shared>, cache: PathBuf) -> Result<(), String> {
     let mut next_game_frame = 0u64;
     let mut published = Published::default();
     let mut block = [[0.0f32; BLOCK]; EMITTERS];
+    let mut mixer = Mixer::new();
     let mut problems_logged = 0usize;
     let mut debug_frames = 0u64;
     while !s.stop.load(Ordering::Relaxed) {
@@ -368,17 +443,20 @@ fn run(s: &Arc<Shared>, cache: PathBuf) -> Result<(), String> {
             next_game_frame = produced;
             s.voices.store(0, Ordering::Relaxed);
             s.sounding.store(false, Ordering::Relaxed);
+            mixer.clear();
             std::thread::sleep(Duration::from_millis(10));
             continue;
         }
         let info = engine.render(&mut block);
         let volume = f32::from_bits(s.volume.load(Ordering::Relaxed));
+        let space = SPACE.lock().ok().and_then(|g| *g);
+        let (wet, decay) = ROOM.lock().map(|g| *g).unwrap_or((0.0, 1.0));
+        let stereo = mixer.mix(&block, volume, space, wet, decay);
         {
             let mut out = s.out.lock().map_err(|_| "the output ring was poisoned")?;
-            for i in 0..BLOCK {
-                let m = mix(&block, i, volume);
-                out.push_back(m);
-                out.push_back(m);
+            for frame in &stereo {
+                out.push_back(frame[0]);
+                out.push_back(frame[1]);
             }
         }
         produced += BLOCK as u64;
@@ -542,13 +620,72 @@ mod tests {
         let mut block = [[0.0f32; BLOCK]; EMITTERS];
         block[0][0] = 0.25;
         block[1][0] = 0.25;
-        assert!((mix(&block, 0, 1.0) - 0.5).abs() < 1e-6);
+        let mut mixer = Mixer::new();
+        let out = mixer.mix(&block, 1.0, None, 0.0, 1.0);
+        assert!((out[0][0] - 0.5).abs() < 1e-6 && (out[0][1] - 0.5).abs() < 1e-6);
         block[0][1] = 3.0;
         block[2][1] = 3.0;
-        assert!(mix(&block, 1, 1.0) <= 1.0);
         block[0][2] = -3.0;
-        assert!(mix(&block, 2, 1.0) >= -1.0);
-        assert!(mix(&block, 0, 0.0).abs() < 1e-9);
+        block[2][2] = -3.0;
+        let out = mixer.mix(&block, 1.0, None, 0.0, 1.0);
+        assert!(out[1][0] <= 1.0 && out[2][0] >= -1.0);
+        let silent = mixer.mix(&block, 0.0, None, 0.0, 1.0);
+        assert!(silent.iter().all(|f| f[0].abs() < 1e-9 && f[1].abs() < 1e-9));
+    }
+
+    fn test_space(board: [f32; 3]) -> Space {
+        Space {
+            listener: [0.0; 3],
+            right: [1.0, 0.0, 0.0],
+            emitters: [board, board],
+        }
+    }
+
+    #[test]
+    fn a_board_next_to_you_sounds_exactly_as_before() {
+        let mut block = [[0.0f32; BLOCK]; EMITTERS];
+        block[0].fill(0.1);
+        block[2].fill(0.05);
+        let plain = Mixer::new().mix(&block, 1.0, None, 0.0, 1.0);
+        let near = Mixer::new().mix(&block, 1.0, Some(test_space([1.0, 0.0, 0.0])), 0.0, 1.0);
+        for (a, b) in plain.iter().zip(&near) {
+            assert!((a[0] - b[0]).abs() < 1e-5 && (a[1] - b[1]).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn a_board_far_off_to_the_right_is_quieter_and_on_the_right() {
+        let mut block = [[0.0f32; BLOCK]; EMITTERS];
+        block[0].fill(0.2);
+        let mut mixer = Mixer::new();
+        let space = Some(test_space([40.0, 0.0, 0.0]));
+        let mut last = [[0.0; 2]; BLOCK];
+        for _ in 0..20 {
+            last = mixer.mix(&block, 1.0, space, 0.0, 1.0);
+        }
+        let end = last[BLOCK - 1];
+        assert!(end[1] > end[0], "right ear louder: {end:?}");
+        assert!(end[1] < 0.2 * 0.5, "far is quieter: {end:?}");
+    }
+
+    #[test]
+    fn the_room_adds_a_tail_after_the_sound_stops() {
+        let mut block = [[0.0f32; BLOCK]; EMITTERS];
+        block[0][0] = 0.8;
+        let space = Some(test_space([1.0, 0.0, 0.0]));
+        let mut mixer = Mixer::new();
+        let first = mixer.mix(&block, 1.0, space, 0.5, 2.0);
+        block[0][0] = 0.0;
+        let mut tail = 0.0f32;
+        for _ in 0..40 {
+            let out = mixer.mix(&block, 1.0, space, 0.5, 2.0);
+            tail = tail.max(out.iter().map(|f| f[0].abs()).fold(0.0, f32::max));
+        }
+        assert!(first[0][0].is_finite());
+        assert!(tail > 1e-5, "reverb tail missing: {tail}");
+        mixer.clear();
+        let after = mixer.mix(&block, 1.0, space, 0.0, 2.0);
+        assert!(after.iter().all(|f| f[0].abs() < 1e-9));
     }
 
     #[test]

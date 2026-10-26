@@ -179,6 +179,20 @@ function Skater.DrawBoard(pose)
 	return drawn > 0
 end
 
+-- Where the board is this frame: its first bone the pose carries. Nil without one.
+function Skater.BoardPos(pose)
+	if not data or not pose or not pose.bones then return nil end
+	for _, p in ipairs(data.parts) do
+		local m = pose.bones[p.bone]
+		if m then
+			local at = Vector(m[4], m[8], m[12])
+			if pose.boardShift then at = at + pose.boardShift end
+			return at
+		end
+	end
+	return nil
+end
+
 -- What the board is made of and where it is, for skate3_board_info.
 function Skater.BoardInfo(pose)
 	if not data then

@@ -52,6 +52,10 @@ local cv_seams = CreateClientConVar("skate3_seam_sounds", "1", true, false,
 	"Wheels click over the joints in the pavement (disc sounds)")
 local cv_retail = CreateClientConVar("skate3_retail_audio", "1", true, false,
 	"Play Skate 3's sounds with the port of its own audio engine, when setup prepared its cache (BETA, setup --audio-engine); 0 keeps this file's sounds")
+local cv_3d = CreateClientConVar("skate3_audio_3d", "1", true, false,
+	"Skate 3 sound engine: sounds from a board or body away from you get quieter, duller and come from their side", 0, 1)
+local cv_reverb = CreateClientConVar("skate3_audio_reverb", "1", true, false,
+	"Skate 3 sound engine: how much the room echoes (0 off, 1 normal, 2 a lot)", 0, 2)
 local cv_debug = CreateClientConVar("skate3_debug_sounds", "0", false, false, "Print each footstep, wheel spin and bail hit")
 
 -- Map units per metre: Source and the simulation are both inches.
@@ -1007,6 +1011,76 @@ local function Retail()
 	return false
 end
 
+
+-- Where the sounds are, for the engine's placement and room. The speed sounds
+-- ride on the listener; the board and the body are placed.
+local DIRS_FLAT, DIRS_UP = {}, {}
+for i = 0, 7 do
+	local a = math.rad(i * 45)
+	DIRS_FLAT[i + 1] = Vector(math.cos(a), math.sin(a), 0)
+end
+for i = 0, 3 do
+	local a = math.rad(i * 90)
+	DIRS_UP[i + 1] = Vector(math.cos(a) * 0.707, math.sin(a) * 0.707, 0.707)
+end
+local ROOM_REACH = 2000
+local room = { at = 0, wet = 0, decay = 1, shownWet = 0 }
+
+-- A guess at the room from a few traces: how closed in it is, and how far off
+-- the walls are. Open ground comes to nothing, so outdoors sounds as it did.
+local function RoomOf(origin)
+	local far, count = 0, 0
+	origin = origin + Vector(0, 0, 24)
+	local function Ray(dir)
+		local tr = util.TraceLine({ start = origin, endpos = origin + dir * ROOM_REACH, mask = MASK_SOLID_BRUSHONLY })
+		if tr.Hit and not tr.HitSky then
+			far = far + origin:Distance(tr.HitPos)
+			count = count + 1
+			return true
+		end
+		return false
+	end
+	local flat, up = 0, 0
+	for _, d in ipairs(DIRS_FLAT) do if Ray(d) then flat = flat + 1 end end
+	for _, d in ipairs(DIRS_UP) do if Ray(d) then up = up + 1 end end
+	if Ray(Vector(0, 0, 1)) then up = up + 1 end
+	-- Walls alone (a street) echo a little; a ceiling as well is a room.
+	local closed = flat / #DIRS_FLAT * 0.4 + up / (#DIRS_UP + 1) * 0.6
+	local mean = count > 0 and (far / count) / 39.37 or 30
+	return closed * closed, math.Clamp(0.25 + mean * 0.12, 0.3, 3.5)
+end
+
+local function PlaceSounds(ent, pose, boardPos)
+	if not skate3.AudioSpace then return end
+	if not cv_3d:GetBool() then
+		skate3.AudioSpace()
+		skate3.AudioReverb(0, 1)
+		return
+	end
+	local view = render and render.GetViewSetup and render.GetViewSetup()
+	local origin = view and view.origin or EyePos()
+	local right = (view and view.angles or EyeAngles()):Right()
+	local board = boardPos or Vector(pose.pos[1], pose.pos[2], pose.pos[3])
+	local body = Vector(pose.pos[1], pose.pos[2], pose.pos[3])
+	skate3.AudioSpace(origin.x, origin.y, origin.z, right.x, right.y, right.z,
+		board.x, board.y, board.z, body.x, body.y, body.z)
+	local now = CurTime()
+	if now >= room.at then
+		room.at = now + 0.25
+		room.targetWet, room.targetDecay = RoomOf(origin)
+	end
+	-- Ease toward the latest guess so walking through a door doesn't jump.
+	local ease = math.min(1, FrameTime() * 3)
+	room.wet = Lerp(ease, room.wet, room.targetWet or 0)
+	room.decay = Lerp(ease, room.decay, room.targetDecay or 1)
+	local scale = cv_reverb:GetFloat()
+	skate3.AudioReverb(math.min(1, room.wet * 0.2 * scale), room.decay)
+	if cv_debug:GetBool() and math.abs(room.wet - room.shownWet) > 0.1 then
+		room.shownWet = room.wet
+		Debug("room: closed %.2f, rings %.1f s; board %.1f m away", room.wet, room.decay, origin:Distance(board) / 39.37)
+	end
+end
+
 concommand.Add("skate3_audio_status", function()
 	if not skate3 or not skate3.AudioStatus then print("[skate3] no audio engine in this module") return end
 	local status, sounding = skate3.AudioStatus()
@@ -1277,13 +1351,14 @@ local function Seams(ent, pose, kind, speed, volume)
 end
 
 -- Called every frame while skating, with the latest pose.
-function Sounds.Update(ent, pose)
+function Sounds.Update(ent, pose, boardPos)
 	if not IsValid(ent) or not pose or cv_pack:GetString() == "off" then return Sounds.Stop() end
 	if Retail() then
 		if not retail.muted then
 			retail.muted = true
 			Sounds.Stop()
 		end
+		PlaceSounds(ent, pose, boardPos)
 		-- The material under the board, from Source's surface property.
 		Ground(ent)
 		if groundRow ~= retail.row then

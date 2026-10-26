@@ -494,7 +494,7 @@ hook.Add("Think", "skate3_step", function()
 	end
 	Perf.Time("body", Skater.UpdateModel, pose)
 	if not skip.net then WatchBail(now, pose) end
-	if skip.sounds then Sounds.Stop() else Perf.Time("sounds", Sounds.Update, LocalPlayer(), pose) end
+	if skip.sounds then Sounds.Stop() else Perf.Time("sounds", Sounds.Update, LocalPlayer(), pose, Skater.BoardPos(pose)) end
 	if pose and now >= nextSend and not skip.net then
 		Perf.Begin("net send")
 		nextSend = now + 0.05
