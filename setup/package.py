@@ -57,6 +57,11 @@ def stage_folder(modules, out):
         # A download can lack one platform's module (no Mac build yet).
         if (modules / m).is_file():
             shutil.copy2(modules / m, out / 'bin' / m)
+    # The audio cache's decoder and executable reader (one per platform), when built.
+    for tool in ('skate-xma', 'skate-xex'):
+        for name in (tool, tool + '.exe'):
+            if (modules / name).is_file():
+                shutil.copy2(modules / name, out / 'bin' / name)
     shutil.copytree(HERE.parent / 'addon/lua', out / 'addon/lua')
     shutil.copytree(HERE.parent / 'addon/materials', out / 'addon/materials')
     shutil.copytree(HERE.parent / 'addon/resource', out / 'addon/resource')
