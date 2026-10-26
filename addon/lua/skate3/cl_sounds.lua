@@ -48,6 +48,8 @@ local cv_mult = CreateClientConVar("skate3_multiplier_sounds", "1", true, false,
 	"Play a sound when the score multiplier goes up (x2, x3...)")
 local cv_steps = CreateClientConVar("skate3_footsteps", "hl2", true, false,
 	"Footsteps with the disc set: disc (Skate 3's own) or hl2 (Garry's Mod's own for the ground underfoot)")
+local cv_seams = CreateClientConVar("skate3_seam_sounds", "1", true, false,
+	"Wheels click over the joints in the pavement (disc sounds)")
 local cv_debug = CreateClientConVar("skate3_debug_sounds", "0", false, false, "Print each footstep, wheel spin and bail hit")
 
 -- Map units per metre: Source and the simulation are both inches.
@@ -67,32 +69,45 @@ end
 local ROLL_BANDS = 8
 -- m/s the end of the recording stands for: flat out is about 10.
 local ROLL_TOP = 11
-local ROLL = {
-	[MAT_WOOD] = "wood_ramp_hard",
-	[MAT_METAL] = "metal_smooth_hard",
-	[MAT_GRATE] = "metal_smooth_hard",
-	[MAT_VENT] = "metal_smooth_hard",
-	[MAT_CONCRETE] = "concrete_smooth_hard",
-	[MAT_TILE] = "concrete_smooth_soft",
-	[MAT_DIRT] = "asphalt_rough_hard",
-	[MAT_SAND] = "asphalt_rough_hard",
-	[MAT_GRASS] = "asphalt_rough_hard",
-	[MAT_SNOW] = "asphalt_rough_hard",
-}
 local ROLL_DEFAULT = "asphalt_smooth_hard"
 
--- The kind of ground each rolling recording stands for, as setup names the
--- disc's materials (audio_tuning.py ROLLING): picks a material's collision
--- and footstep sounds.
-local GROUND = {
-	wood_ramp_hard = "wood",
-	metal_smooth_hard = "metal",
-	concrete_smooth_hard = "concrete_smooth",
-	concrete_smooth_soft = "concrete_smooth",
-	asphalt_rough_hard = "asphalt_rough",
-	asphalt_smooth_hard = "asphalt_smooth",
+-- Skate 3 sorts every surface into one of its materials (the rows of its
+-- AudioSurfaceMap), and that row decides the rolling, the landing, the
+-- footsteps and the collisions. Source's surfaces go onto the rows here, by
+-- the surface property's name first (the first word found wins) and the
+-- trace's material type after. Rows: 0 smooth asphalt, 2 smooth mineral
+-- (concrete, tile), 3 rough mineral (brick, stone), 6 wood, 7 loose ground,
+-- 8 metal, 9 vegetation, 47 plastic, 67 grille.
+local PROP_ROWS = {
+	{ "grate", 67 }, { "chain", 67 }, { "metal", 8 }, { "canister", 8 }, { "wood", 6 },
+	{ "asphalt", 0 }, { "road", 0 },
+	{ "concrete_block", 3 }, { "brick", 3 }, { "cobble", 3 }, { "rock", 3 }, { "boulder", 3 }, { "stone", 3 },
+	{ "concrete", 2 }, { "tile", 2 }, { "ceramic", 2 }, { "glass", 2 }, { "plaster", 2 }, { "ice", 2 },
+	{ "gravel", 7 }, { "dirt", 7 }, { "sand", 7 }, { "mud", 7 }, { "snow", 7 }, { "slime", 7 },
+	{ "grass", 9 }, { "foliage", 9 }, { "plant", 9 },
+	{ "plastic", 47 }, { "rubber", 47 }, { "carpet", 47 },
 }
-
+local MAT_ROWS = {
+	[MAT_CONCRETE] = 2, [MAT_TILE] = 2, [MAT_GLASS] = 2, [MAT_WOOD] = 6,
+	[MAT_METAL] = 8, [MAT_VENT] = 8, [MAT_GRATE] = 67,
+	[MAT_DIRT] = 7, [MAT_SAND] = 7, [MAT_SNOW] = 7, [MAT_GRASS] = 9, [MAT_PLASTIC] = 47,
+}
+-- The recordings each rolling surface of the vault (AudioSurfaceMap word 1)
+-- can use, the first installed one played; and, with no vault, each row's.
+local ROLL_NUMBERS = {
+	[1] = { "asphalt_rough_hard", "asphalt_rough_soft" },
+	[2] = { "concrete_rough_hard", "concrete_rough_soft", "concrete_smooth_hard" },
+	[3] = { "asphalt_smooth_hard", "asphalt_smooth_soft" },
+	[4] = { "concrete_smooth_hard", "concrete_smooth_soft" },
+	[5] = { "wood_ramp_hard", "wood_ramp_soft" },
+	[6] = { "concrete_aggregate_hard", "concrete_rough_hard", "asphalt_rough_hard" },
+	[9] = { "metal_smooth_hard", "metal_smooth_soft" },
+}
+local ROW_ROLL = {
+	[6] = { "wood_ramp_hard" }, [8] = { "metal_smooth_hard" }, [67] = { "metal_smooth_hard" },
+	[2] = { "concrete_smooth_hard" }, [3] = { "concrete_smooth_hard" },
+	[7] = { "asphalt_rough_hard" }, [9] = { "asphalt_rough_hard" },
+}
 -- Asked a few times a frame, and a file.Exists looks through every mounted
 -- addon (hundreds with a big Workshop collection): checked every few seconds.
 local hasDisc, hasDiscAt = nil, -math.huge
@@ -118,24 +133,6 @@ local function Installed(name)
 	return installed[name]
 end
 
--- The rolling recording for the surface under `pos`, and the trace.
-local function Surface(pos, filter)
-	local tr = util.TraceLine({ start = pos + Vector(0, 0, 8), endpos = pos - Vector(0, 0, 40), filter = filter })
-	local name = tr.Hit and ROLL[tr.MatType] or ROLL_DEFAULT
-	return Installed(name) and name or ROLL_DEFAULT, tr
-end
-
-local ground, nextTrace = ROLL_DEFAULT, 0
-
--- The surface under the board, checked a few times a second.
-local function Ground(ent)
-	if CurTime() >= nextTrace then
-		nextTrace = CurTime() + 0.25
-		ground = Surface(ent:GetPos(), ent)
-	end
-	return ground
-end
-
 -- setup's sounds.json: the samples behind the game's sound ids, which of the
 -- disc's sounds loop, and the vault's collision tuning.
 local manifest
@@ -156,6 +153,89 @@ end
 local function Tuning()
 	local m = Manifest()
 	return m and m.tuning
+end
+
+-- AudioSurfaceMap entry of a material, as setup exports it: { rolling,
+-- footstep surface, collision class }; materials 94 and up share entry 94.
+local function SurfaceEntry(m)
+	local t = Tuning()
+	local s = t and t.surfaces
+	if not s or not m then return end
+	return s[math.min(m, 94) + 1] or s[#s]
+end
+
+-- The same entry whole (18 words): 3 is set on a hard surface.
+local function SurfaceWords(m)
+	local t = Tuning()
+	local s = t and t.rows
+	if not s or not m then return end
+	return s[math.min(m, 94) + 1] or s[#s]
+end
+
+local rowOfProp = {}
+
+-- Skate 3's material for the surface a trace hit.
+local function RowOf(tr)
+	if not tr or not tr.Hit then return 0 end
+	local props = tr.SurfaceProps
+	local row = rowOfProp[props]
+	if row == nil then
+		local name = util.GetSurfacePropName(props)
+		name = isstring(name) and name:lower() or ""
+		for _, p in ipairs(PROP_ROWS) do
+			if name:find(p[1], 1, true) then
+				row = p[2]
+				break
+			end
+		end
+		rowOfProp[props] = row or false
+		row = row or false
+	end
+	return row or MAT_ROWS[tr.MatType] or 0
+end
+
+-- The rolling recording for a material.
+local function RollFor(row)
+	local e = SurfaceEntry(row)
+	for _, name in ipairs(e and ROLL_NUMBERS[e[1]] or ROW_ROLL[row] or {}) do
+		if Installed(name) then return name end
+	end
+	return ROLL_DEFAULT
+end
+
+-- The rolling recording and Skate 3 material under `pos`, and the trace.
+local function Surface(pos, filter)
+	local tr = util.TraceLine({ start = pos + Vector(0, 0, 8), endpos = pos - Vector(0, 0, 40), filter = filter })
+	local row = RowOf(tr)
+	return RollFor(row), tr, row
+end
+
+local ground, groundRow, nextTrace = ROLL_DEFAULT, 0, 0
+
+-- The surface under the board, checked a few times a second.
+local function Ground(ent)
+	if CurTime() >= nextTrace then
+		nextTrace = CurTime() + 0.25
+		local name, _, row = Surface(ent:GetPos(), ent)
+		ground, groundRow = name, row
+	end
+	return ground
+end
+
+-- Whether a material is hard underfoot, by the vault (metal and rock on the
+-- disc's own say; before setup has run, by the row alone).
+local function IsHard(row)
+	local w = SurfaceWords(row)
+	if w then return (w[3] or 0) ~= 0 end
+	return row == 8 or row == 67 or row == 2 or row == 3
+end
+
+-- The disc plays metal's own landings and pops on rails and sheet metal.
+local function IsMetal(row)
+	local t = Tuning()
+	local rec = t and t.materials and t.materials[row + 1]
+	if rec then return rec.kind == 1 end
+	return row == 8 or row == 67
 end
 
 -- One take of a retail sound id from a bank folder, played at `pos` when
@@ -213,12 +293,52 @@ local function Pick(name, folder)
 end
 
 local function OnMetal(ent)
-	return Ground(ent) == "metal_smooth_hard"
+	Ground(ent)
+	return IsMetal(groundRow)
 end
 
--- Skate 3's pop: soft, medium or hard by how fast you're going, from the
--- metal set on metal (retail picks it by the wheels' surface category).
+-- Skate 3's board foley tuning from the vault (setup/audio_tuning.py): the pop,
+-- landing and whoosh sounds. Nil before setup has read it; the rules below
+-- then play the ids the first version of this file knew.
+local function Board()
+	local t = Tuning()
+	return t and t.board
+end
+
+-- How hard the last landing was, 0 to 1: retail's landing level, the size of
+-- the velocity change in m/s over 2.65 (a drop of about 0.4 m is already full).
+-- A pop is soft, medium or hard by it.
+local landingLevel = 0
+local LANDING_FULL = 2.65
+
+-- The take-off whoosh by speed (the vault's thresholds, m/s, fastest first).
+local function Whoosh(ent, speed)
+	local b = Board()
+	for _, w in ipairs(b and b.whooshes or {}) do
+		if speed > w[1] then
+			Debug("whoosh: %.1f m/s, id %d", speed, w[2])
+			return PlayId("collisions", w[2], ent, 0.5, 0.35)
+		end
+	end
+end
+
+-- Skate 3's pop. Retail picks its table by the surface (hard or soft) and the
+-- sound in it by how hard the last landing was; before the vault it was by
+-- speed, soft, medium or hard, with the metal set on metal.
 local function Pop(ent, speed)
+	Ground(ent)
+	local b = Board()
+	local hard = IsHard(groundRow)
+	local ids = b and b.pop and b.pop[hard and 2 or 1]
+	if ids and #ids >= 3 then
+		local levels = b.pop_levels
+		local class = 0
+		if levels then class = landingLevel > levels[1] and 2 or landingLevel > levels[2] and 1 or 0 end
+		Debug("pop: %s surface, class %d (landing %.2f), id %d", hard and "hard" or "soft", class, landingLevel, ids[class + 1])
+		local played = PlayId("collisions", ids[class + 1], ent, 0.2 + class * 0.25)
+		Whoosh(ent, speed)
+		return played
+	end
 	local class = speed < 3 and 0 or speed < 6 and 1 or 2
 	local base = OnMetal(ent) and 0x44F or 0x449
 	return PlayId("collisions", base + class, ent, 0.2 + class * 0.25)
@@ -226,12 +346,32 @@ end
 
 -- Under this long in the air it was a bump, not a jump: no landing.
 local BUMP = 0.15
+-- Landing classes by time in the air: hard from here, and a heavy impact on
+-- top from the second (retail's are by the wheels' air time and impact speed,
+-- with tuning we haven't read; these are the first version's guesses).
+local LAND_HARD, LAND_HEAVY = 0.75, 1.5
 
--- Skate 3's landing, by time in the air: a soft or hard layer (0.75 s splits
--- them), and the heavy impact on top only after real air.
+-- Skate 3's landing: the wheels' landing for the surface (a hard or a soft
+-- one) and class, by time in the air, and a heavy layer over it after real
+-- air.
 local function Land(ent, air)
 	if air < BUMP then return true end
+	Ground(ent)
 	local strength = math.Clamp(air / 1.2, 0, 1)
+	local b = Board()
+	local landing = b and b.landing
+	local row = landing and landing[IsHard(groundRow) and 3 or 1]
+	local class = air >= LAND_HARD and 1 or 0
+	if row and row.ids and #row.ids >= 3 and row.ids[class + 1] and row.ids[class + 1] > 0 then
+		local level = row.levels and row.levels[class + 1] or 1
+		Debug("landing: %s surface, class %d, id %d, %.1f s in the air", IsHard(groundRow) and "hard" or "soft", class,
+			row.ids[class + 1], air)
+		local played = PlayId("collisions", row.ids[class + 1], ent, strength, math.Clamp(level, 0, 1) * (0.3 + 0.5 * strength))
+		-- The heavy layer is the first table's third entry, whatever the surface.
+		local heavy = air >= LAND_HEAVY and landing[1] and landing[1].ids and landing[1].ids[3]
+		if heavy and heavy > 0 then played = PlayId("collisions", heavy, ent, strength) or played end
+		return played
+	end
 	local layer = (OnMetal(ent) and 0x35E or 0x35C) + (air >= 0.75 and 1 or 0)
 	local played = PlayId("collisions", layer, ent, strength)
 	if air >= 0.5 then played = PlayId("collisions", 0x447, ent, strength * 0.8) or played end
@@ -320,7 +460,7 @@ local function Play(name, ent, level)
 	ent:EmitSound(list, 75, math.random(95, 105), level * cv_volume:GetFloat())
 end
 
-local airStart
+local airStart, airVelocity
 local landedAt = -math.huge
 
 -- Keeps the loop for `name` playing at `level` while `on`, fading it out
@@ -470,29 +610,15 @@ local function BonePos(pose, name)
 end
 
 -- The disc material standing for a rolling recording's kind of ground, or nil.
-local function GroundMaterial(name)
-	local t = Tuning()
-	return t and t.grounds and t.grounds[GROUND[name] or ""]
-end
-
--- AudioSurfaceMap entry of a material, as setup exports it: { rolling,
--- footstep surface, collision class }; materials 94 and up share entry 94.
-local function SurfaceEntry(m)
-	local t = Tuning()
-	local s = t and t.surfaces
-	if not s or not m then return end
-	return s[math.min(m, 94) + 1] or s[#s]
-end
-
-local function FootstepSurface(name)
-	local e = SurfaceEntry(GroundMaterial(name))
+local function FootstepSurface(row)
+	local e = SurfaceEntry(row)
 	local s = e and e[2] or 1
 	return (s >= 1 and s <= 7) and s or 1
 end
 
-local function Step(foot, pos, comSpeed, uneven, surfaceName)
+local function Step(foot, pos, comSpeed, uneven, row)
 	local run = comSpeed > RUN_SPEED and 2 or 1
-	local surface = FootstepSurface(surfaceName)
+	local surface = FootstepSurface(row)
 	local id = STEP_IDS[run][uneven and 2 or 1][surface]
 	local played = PlayId("foley", id, LocalPlayer(), 0.5, 0.7, 1, pos)
 	if surface == 3 or surface == 4 then
@@ -550,7 +676,7 @@ local function Feet(pose, kind, dt, disc, volume)
 		local down = false
 		if toe and watching then
 			local speed = state.pos and dt > 0 and (toe - state.pos):Length() / dt / UNITS or math.huge
-			local name, tr = Surface(toe, LocalPlayer())
+			local _, tr, row = Surface(toe, LocalPlayer())
 			local height = tr.Hit and toe.z - tr.HitPos.z or math.huge
 			down = height < FOOT_GROUND and speed < FOOT_STILL
 			if down and not state.down then
@@ -560,7 +686,7 @@ local function Feet(pose, kind, dt, disc, volume)
 				local uneven = other and (toe.z - other) / UNITS > STEP_HEIGHT or false
 				state.plantZ = toe.z
 				if disc then
-					Step(i, toe, comSpeed, uneven, name)
+					Step(i, toe, comSpeed, uneven, row)
 				else
 					StepClassic(toe, tr)
 				end
@@ -794,7 +920,7 @@ local function OnBodyHit(ev)
 		local played
 		if DiscBails() then
 			-- What it hit, wall or floor, as the disc's material for it.
-			local ground = GroundMaterial(ROLL[ev.matType] or ROLL_DEFAULT) or NO_MATERIAL
+			local ground = MAT_ROWS[ev.matType] or 0
 			played = BodyHit(region, Impact(region.material, ev.severity), ground, ev.pos, ev.part)
 		end
 		-- Nothing from the disc's side must not mean silence for a hit that scored.
@@ -831,15 +957,15 @@ end
 -- installs the bank as sound/skate3/menu and the records' names, ids and
 -- levels in sounds.json ("frontend": name -> { id, level }).
 --
--- Which record is the x2 chime and which the x3 isn't written down anywhere
--- we've found, so MULTIPLIER names them once somebody's heard them
--- (skate3_menu_names lists the records, skate3_sound_scan menu steps through
--- the sounds). Until then a record named like a multiplier is taken.
+-- Retail's HUD posts the events "multiplyer_2" and "multiplyer_3" (sic) when
+-- the multiplier it shows becomes 2 or 3 (setup finds their records by the
+-- hash of the name). A record named like a multiplier is the fallback, and
+-- skate3_menu_names and skate3_sound_scan menu list what's there.
 ---------------------------------------------------------------------------
 
 -- [multiplier] = the front-end record that plays when it's reached; a record
 -- for the highest one serves above it.
-local MULTIPLIER = {}
+local MULTIPLIER = { [2] = "multiplyer_2", [3] = "multiplyer_3" }
 
 local function Frontend()
 	local m = Manifest()
@@ -861,6 +987,7 @@ local function MenuRecord(n)
 	if not fe then return end
 	if menuFor[n] == nil then
 		local found = MULTIPLIER[n]
+		if found and not fe[found] then found = nil end
 		if not found then
 			local names = table.GetKeys(fe)
 			table.sort(names)
@@ -974,6 +1101,60 @@ end, nil, "List the front-end sound records, optionally only names containing a 
 
 local lastTick, wasDisc
 
+---------------------------------------------------------------------------
+-- Seams (retail Class_Seams, seams.rs): a wheel crossing a joint in the
+-- ground clicks. Retail reads each surface's joint grid from the map (and
+-- SK8V from the ground's own texture); Source maps have none, so the joints
+-- here lie on a world grid whose spacing goes by the surface: slabs on
+-- concrete, small units on brick and stone, planks on wood. Each of the four
+-- wheels counts the cells it enters; two wheels at once is the louder click.
+-- Which of Seams_Bank's sounds is which isn't written down, so any is taken.
+---------------------------------------------------------------------------
+
+-- Metres between joints, by Skate 3 material.
+local SEAM_SPACING = { [2] = 1.4, [3] = 0.6, [6] = 0.3 }
+-- The wheels' places on the board: m along its heading, m across.
+local SEAM_WHEELS = { { 0.19, 0.07 }, { 0.19, -0.07 }, { -0.19, 0.07 }, { -0.19, -0.07 } }
+local SEAM_GAP = 0.05 -- s between clicks
+local seamCells, seamFiles, nextSeam = {}, nil, 0
+
+local function Seams(ent, pose, kind, speed, volume)
+	if not cv_seams:GetBool() or kind ~= "ground" or speed < 0.8 or not pose.pos or not pose.forward then
+		seamCells = {}
+		return
+	end
+	Ground(ent)
+	local spacing = SEAM_SPACING[groundRow]
+	if not spacing then
+		seamCells = {}
+		return
+	end
+	if seamFiles == nil then seamFiles = file.Find("sound/skate3/seams/*.wav", "GAME") or {} end
+	if #seamFiles == 0 then return end
+	spacing = spacing * UNITS
+	local fx, fy = pose.forward[1], pose.forward[2]
+	local length = math.sqrt(fx * fx + fy * fy)
+	if length < 0.1 then return end
+	fx, fy = fx / length, fy / length
+	local crossed = 0
+	for i, w in ipairs(SEAM_WHEELS) do
+		local x = pose.pos[1] + (fx * w[1] + fy * w[2]) * UNITS
+		local y = pose.pos[2] + (fy * w[1] - fx * w[2]) * UNITS
+		local cx, cy = math.floor(x / spacing), math.floor(y / spacing)
+		local cell = seamCells[i]
+		if not cell then
+			seamCells[i] = { cx, cy }
+		else
+			if cell[1] ~= cx or cell[2] ~= cy then crossed = crossed + 1 end
+			cell[1], cell[2] = cx, cy
+		end
+	end
+	if crossed == 0 or CurTime() < nextSeam then return end
+	nextSeam = CurTime() + SEAM_GAP
+	local gain = math.Clamp(speed / 8, 0.15, 1) * (crossed > 1 and 0.4 or 0.3) * volume
+	ent:EmitSound("skate3/seams/" .. seamFiles[math.random(#seamFiles)], 65, math.random(95, 105), gain)
+end
+
 -- Called every frame while skating, with the latest pose.
 function Sounds.Update(ent, pose)
 	if not IsValid(ent) or not pose or cv_pack:GetString() == "off" then return Sounds.Stop() end
@@ -999,12 +1180,24 @@ function Sounds.Update(ent, pose)
 	if last and kind ~= last then
 		if kind == "air" and (last == "ground" or last == "grind") then
 			-- Rough ground flickers in and out of the air; only a takeoff
-			-- after a moment on the ground pops.
-			if CurTime() - landedAt > BUMP * 2 and not (disc and Pop(ent, speed)) then Play("pop", ent, 0.8) end
+			-- after a moment on the ground pops. Retail doesn't pop when the
+			-- jump is off a grind.
+			if CurTime() - landedAt > BUMP * 2 then
+				if not disc then
+					Play("pop", ent, 0.8)
+				elseif last == "ground" and not Pop(ent, speed) then
+					Play("pop", ent, 0.8)
+				end
+			end
 			airStart = CurTime()
 		elseif (kind == "ground" or kind == "grind") and last == "air" then
 			landedAt = CurTime()
 			local air = airStart and CurTime() - airStart or 0
+			if airVelocity and pose.velocity then
+				local v = pose.velocity
+				local dx, dy, dz = v[1] - airVelocity[1], v[2] - airVelocity[2], v[3] - airVelocity[3]
+				landingLevel = math.Clamp(math.sqrt(dx * dx + dy * dy + dz * dz) / UNITS / LANDING_FULL, 0, 1)
+			end
 			-- Dropping onto a rail is the grind's hit, not a landing.
 			local hit = disc and (kind == "grind" and GrindHit(ent, speed, air) or kind == "ground" and Land(ent, air))
 			if not hit and (kind == "grind" or air >= BUMP) then Play("land", ent, math.Clamp(0.5 + speed / 20, 0.5, 1)) end
@@ -1022,6 +1215,11 @@ function Sounds.Update(ent, pose)
 		if kind == "grind" then Pick("grind", "grinds") end
 	end
 	if kind ~= "air" then airStart = nil end
+	-- The velocity going into a landing: the last frame in the air.
+	if kind == "air" and pose.velocity then
+		airVelocity = airVelocity or {}
+		airVelocity[1], airVelocity[2], airVelocity[3] = pose.velocity[1], pose.velocity[2], pose.velocity[3]
+	end
 	last = kind
 
 	local boardPos = pose.pos and Vector(pose.pos[1], pose.pos[2], pose.pos[3]) or ent:GetPos()
@@ -1030,6 +1228,7 @@ function Sounds.Update(ent, pose)
 
 	if disc then
 		RollBands(ent, kind == "ground" and speed > 0.3, speed, volume)
+		Seams(ent, pose, kind, speed, volume)
 		if loops.roll and loops.roll.on then
 			loops.roll.patch:Stop()
 			loops.roll.on = false

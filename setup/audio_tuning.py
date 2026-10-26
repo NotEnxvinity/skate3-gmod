@@ -140,6 +140,29 @@ def _number(field):
     return words[0] if words else 0
 
 
+# The board foley component's tuning (class C26949FCB638A2CA `default`, native
+# root 24): which sound each pop, landing and take-off whoosh plays. Keys and
+# layouts are retail's as SK8V's board_foley.rs (Apache-2.0) documents them;
+# only the vault's own numbers are read, none are written here.
+BOARD = 'Hash_C26949FCB638A2CA'
+# Pop sound ids by category (0 soft, 1 medium, 2 hard) for a soft and a hard
+# surface, and the two landing levels that make a pop medium and hard.
+POP_IDS = ('Hash_3C1E3B965A93594A', 'Hash_84DFABF76D821DEC')
+POP_LEVELS = ('Hash_F2A1E273ABB8E9AB', 'Hash_D7758385CDB8DC26')
+# The take-off whoosh: (speed above which it plays in m/s, its sound id key),
+# fastest first.
+WHOOSHES = (('Hash_58523180E1AD61B4', 'Hash_7A745D81E4BCABC3'),
+            ('Hash_A73073D3A33E35AE', 'Hash_537C97E4F64A0EE2'),
+            ('Hash_FB71DF2C85928859', 'Hash_9C4CDCF0DD84C281'))
+# Wheel landing sound ids and levels, for surface class 0..3 (bit 1 a hard
+# surface, bit 0 soft wheels): index 3 x mode (0 four wheels, 1 two, 2 the
+# last two, 3 one) + class (0 soft, 1 hard, 2 the heavy layer).
+LANDING_IDS = ('Hash_5A93802D11B00173', 'Hash_A0F86FEEA9C2412F', 'Hash_797EC34502499EC3', 'Hash_AB0D92058B4293A7')
+LANDING_LEVELS = ('Hash_CEA5AFA8BA170B07', 'Hash_951AD53718030327', 'Hash_068C8C5EBEC1B45F', 'Hash_6823F4910A1882AD')
+# The score multiplier chimes: the HUD posts these front-end events when the
+# multiplier it shows becomes exactly 2 or 3 (SK8V ui_sounds.rs).
+MULTIPLIER_EVENTS = ('multiplyer_2', 'multiplyer_3')
+
 # The front-end ("fe") records: the interface sounds, each naming a sound in
 # the sk8_menu bank (audio_export.frontend_sounds upstream).
 FE_CLASSES = ('Hash_5831CB95F3E90598', 'fe')
@@ -176,12 +199,68 @@ def frontend(by_class):
             name = key if not key.startswith('Hash_') else next(
                 (_text(f) for n in FE_NAMES if (f := resolve(key, n)) and _text(f)), key)
             out[name] = [sound, round(level, 4)]
+    # Records the vault keys by hash only: name the ones the HUD posts.
+    for name in MULTIPLIER_EVENTS:
+        key = 'Hash_%016X' % hash64(name)
+        if name not in out and key in out:
+            out[name] = out[key]
     return out
 
 
 def _floats(field):
     data = ''.join(field.get('data', '').split())
     return [struct.unpack('>f', bytes.fromhex(data[i:i + 8]))[0] for i in range(0, len(data) - 7, 8)]
+
+
+def _array_words(field):
+    """Every signed word of an array field's items, or of a plain data field."""
+    if field is None:
+        return []
+    if 'array' in field:
+        return _words(field)
+    data = ''.join(field.get('data', '').split())
+    return [struct.unpack('>i', bytes.fromhex(data[i:i + 8]))[0] for i in range(0, len(data) - 7, 8)]
+
+
+def _float(field):
+    """The first big-endian float of a field, whatever type it says it is."""
+    data = ''.join(field.get('data', '').split()) if field else ''
+    return struct.unpack('>f', bytes.fromhex(data[:8]))[0] if len(data) >= 8 else None
+
+
+def _board(resolve):
+    """The pop, take-off whoosh and wheel landing tables, or None when the
+    vault has none of them."""
+    def ids(key):
+        return _array_words(resolve(BOARD, 'default', key))
+
+    def floats(key):
+        data = resolve(BOARD, 'default', key)
+        if data is None:
+            return []
+        if 'array' in data:
+            return [v for v in (_float({'data': item}) for item in data['array']['items']) if v is not None]
+        return _floats(data)
+
+    out = {}
+    pops = [ids(key) for key in POP_IDS]
+    if any(pops):
+        out['pop'] = pops
+    levels = [_float(resolve(BOARD, 'default', key)) for key in POP_LEVELS]
+    if all(v is not None for v in levels):
+        out['pop_levels'] = [round(v, 4) for v in levels]
+    whooshes = []
+    for speed_key, id_key in WHOOSHES:
+        speed, sound = _float(resolve(BOARD, 'default', speed_key)), ids(id_key)
+        if speed is not None and sound and sound[0] > 0:
+            whooshes.append([round(speed, 4), sound[0]])
+    if whooshes:
+        out['whooshes'] = whooshes
+    landing = [{'ids': ids(i), 'levels': [round(v, 4) for v in floats(l)]}
+               for i, l in zip(LANDING_IDS, LANDING_LEVELS)]
+    if any(row['ids'] for row in landing):
+        out['landing'] = landing
+    return out or None
 
 
 def export(collections):
@@ -242,14 +321,18 @@ def export(collections):
         out['frontend'] = fe
     holder = by_class.get(SURFACE_MAP[0], {}).get(SURFACE_MAP[1])
     if holder and SURFACE_MAP[2] in holder['fields']:
-        surfaces = []
+        surfaces, rows = [], []
         for item in holder['fields'][SURFACE_MAP[2]]['array']['items']:
             data = ''.join(item.split())
             words = [struct.unpack('>i', bytes.fromhex(data[i:i + 8]))[0] for i in range(0, min(len(data), 144) - 7, 8)]
             words += [0] * (18 - len(words))
             # Rolling surface, footstep surface, collision class.
             surfaces.append([words[1], words[6], words[7]])
+            rows.append(words)
         out['surfaces'] = surfaces
+        # The whole row, for the words the mod reads by index: 2 a hard
+        # surface (landings and pops), 4 the grind class.
+        out['rows'] = rows
         # A material for each kind of ground the mod tells apart: the first
         # world material (0..93) that rolls on that surface.
         grounds = {}
@@ -258,6 +341,9 @@ def export(collections):
             if name and name not in grounds and materials[m]['kind'] >= 0:
                 grounds[name] = m
         out['grounds'] = grounds
+    board = _board(resolve)
+    if board:
+        out['board'] = board
     cooldown = resolve(BODY, 'default', BODY_COOLDOWN)
     if cooldown is not None:
         out['body_cooldown'] = _number(cooldown)

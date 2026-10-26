@@ -55,6 +55,19 @@ def vault():
                 'fields': {t.FE_NAMES[0]: text('score_multiplier_x3'), t.FE_ID: i32(78)}})
     out.append({'class': t.FE_CLASSES[0], 'key': 'quiet', 'parent': '', 'fields': {t.FE_ID: i32(0), t.FE_LEVEL: f32(1.0)}})
     out.append({'class': t.BODY, 'key': 'default', 'parent': '', 'fields': {t.BODY_COOLDOWN: f32(12.0)}})
+    # The HUD's multiplier events, keyed by their names' hashes.
+    for name, sound in zip(t.MULTIPLIER_EVENTS, (91, 92)):
+        out.append({'class': t.FE_CLASSES[0], 'key': 'Hash_%016X' % t.hash64(name), 'parent': '',
+                    'fields': {t.FE_ID: i32(sound), t.FE_LEVEL: f32(0.75)}})
+    array = lambda values: {'type': 'Attrib::Array', 'array': {'items': [struct.pack('>i', v).hex() for v in values]}}
+    board = {t.POP_IDS[0]: array([0x449, 0x44A, 0x44B]), t.POP_IDS[1]: array([0x44F, 0x450, 0x451]),
+             t.POP_LEVELS[0]: f32(0.9), t.POP_LEVELS[1]: f32(0.4)}
+    for k, (speed, sound) in enumerate(t.WHOOSHES):
+        board[speed], board[sound] = f32(3.0 + 3 * (2 - k)), array([500 + k])
+    for k, (ids, levels) in enumerate(zip(t.LANDING_IDS, t.LANDING_LEVELS)):
+        board[ids] = array([0x35C + 12 * k + j for j in range(12)])
+        board[levels] = {'type': 'Attrib::Array', 'data': ''.join(struct.pack('>f', 0.5 + j / 100).hex() for j in range(12))}
+    out.append({'class': t.BOARD, 'key': 'default', 'parent': '', 'fields': board})
     return {'collections': out}
 
 
@@ -75,7 +88,36 @@ class AudioTuningTest(unittest.TestCase):
         self.assertEqual(table['surfaces'][2], [4, 3, 0])
         self.assertEqual(table['grounds'], {'asphalt_rough': 0, 'concrete_smooth': 2, 'wood': 3, 'metal': 8})
         self.assertEqual(table['body_cooldown'], 12.0)
-        self.assertEqual(table['frontend'], {'score_multiplier_x2': [77, 0.5], 'score_multiplier_x3': [78, 0.5]})
+        fe = table['frontend']
+        self.assertEqual((fe['score_multiplier_x2'], fe['score_multiplier_x3']), ([77, 0.5], [78, 0.5]))
+        self.assertNotIn('quiet', fe)
+
+    def test_surface_rows_keep_every_word(self):
+        table = t.export(vault())
+        self.assertEqual(len(table['rows']), 95)
+        self.assertEqual(len(table['rows'][2]), 18)
+        self.assertEqual(table['rows'][2][1], 4)
+
+    def test_multiplier_events_named_from_their_hashes(self):
+        fe = t.export(vault())['frontend']
+        self.assertEqual(fe['multiplyer_2'], [91, 0.75])
+        self.assertEqual(fe['multiplyer_3'], [92, 0.75])
+
+    def test_board_tables(self):
+        board = t.export(vault())['board']
+        self.assertEqual(board['pop'], [[0x449, 0x44A, 0x44B], [0x44F, 0x450, 0x451]])
+        self.assertEqual(board['pop_levels'], [0.9, 0.4])
+        # Fastest first, as the vault's thresholds are paired.
+        self.assertEqual(board['whooshes'], [[9.0, 500], [6.0, 501], [3.0, 502]])
+        self.assertEqual(len(board['landing']), 4)
+        self.assertEqual(board['landing'][1]['ids'][0], 0x35C + 12)
+        self.assertEqual(len(board['landing'][0]['levels']), 12)
+        self.assertAlmostEqual(board['landing'][0]['levels'][3], 0.53, places=4)
+
+    def test_board_tables_are_optional(self):
+        v = vault()
+        v['collections'] = [c for c in v['collections'] if c['class'] != t.BOARD]
+        self.assertNotIn('board', t.export(v))
 
     def test_without_collision_records(self):
         self.assertIsNone(t.export({'collections': []}))

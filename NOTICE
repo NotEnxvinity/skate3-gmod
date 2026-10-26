@@ -38,6 +38,13 @@ setup/audio_tuning.py ports the part of its tools/asset_pipeline/audio_export.py
 that reads the collision tuning from the player's own disc (GPL-3.0, the same
 licence as this project).
 
+The pop, landing and take-off whoosh rules, the seam clicks, the choice of
+Skate 3's material for a surface and the name of the multiplier chimes in the
+same file follow how SK8V (https://github.com/becaring/SK8V, Apache-2.0) plays
+Skate 3's sounds in GTA V; its notes on retail's field keys and rules are read,
+no code is taken. setup/audio_tuning.py reads those fields from the player's own
+disc.
+
 setup/skate3_formats/ reads the park pieces and the Mega Park stadium off the
 player's own disc. archive.py, arena.py, geometry.py, world_materials.py and
 world_textures.py come from NativeX World Studio
