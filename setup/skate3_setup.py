@@ -380,7 +380,7 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
     modules = module_dir()
     if modules is None:
         if sys.platform == 'darwin':
-            raise RuntimeError('This download has no Mac version of S3GM yet. Stay on the last Mac release for now.')
+            raise RuntimeError('This is the Windows and Linux download. Get the Mac one, S3GM-v2.3.0-Mac.zip, from the same Discord post.')
         raise RuntimeError('The skate modules are missing from this setup.')
     bin_dir = gmod / 'lua/bin'
     bin_dir.mkdir(parents=True, exist_ok=True)

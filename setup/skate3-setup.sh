@@ -48,7 +48,7 @@ fetch() { curl -fsSL --retry 3 -o "$2" "$1"; }
 
 command -v curl >/dev/null || die "curl is required"
 if $mac && [ ! -f "$here/bin/gmcl_skate3_osx64.dll" ]; then
-    die "This download has no Mac version of S3GM yet. Stay on the last Mac release for now."
+    die "This is the Windows and Linux download. Get the Mac one, S3GM-v2.3.0-Mac.zip, from the same Discord post."
 fi
 mkdir -p "$cache"
 

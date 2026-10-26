@@ -33,8 +33,10 @@ Video walkthrough of this whole install: https://youtu.be/oGdIwMNwp14
                        if it asks. If it only opens as text: right-click >
                        Properties > Permissions > Is executable, or run
                        "bash S3GM-setup-Linux.sh" in a terminal)
-     Mac:              S3GM-setup-Mac.command (no Mac version of this
-                       release yet; it will tell you)
+     Mac:              S3GM-setup-Mac.command (use the Mac download. The
+                       first time macOS blocks it: System Settings >
+                       Privacy & Security > Open Anyway, or run
+                       "bash S3GM-setup-Mac.command" in Terminal)
 3. A window shows your garrysmod folder and your Skate 3 disc. Fix either
    with Browse, press Install, and wait for "All set". It shows the S3GM
    version it installed. The first run takes a few minutes.
