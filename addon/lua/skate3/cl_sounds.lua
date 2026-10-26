@@ -50,6 +50,8 @@ local cv_steps = CreateClientConVar("skate3_footsteps", "hl2", true, false,
 	"Footsteps with the disc set: disc (Skate 3's own) or hl2 (Garry's Mod's own for the ground underfoot)")
 local cv_seams = CreateClientConVar("skate3_seam_sounds", "1", true, false,
 	"Wheels click over the joints in the pavement (disc sounds)")
+local cv_retail = CreateClientConVar("skate3_retail_audio", "1", true, false,
+	"Play Skate 3's sounds with the port of its own audio engine, when setup prepared its cache (BETA, setup --audio-engine); 0 keeps this file's sounds")
 local cv_debug = CreateClientConVar("skate3_debug_sounds", "0", false, false, "Print each footstep, wheel spin and bail hit")
 
 -- Map units per metre: Source and the simulation are both inches.
@@ -962,10 +964,65 @@ local function BoneBreak(region, level, pos, label)
 	sound.Play(list[math.random(#list)], pos, 80, math.random(95, 105), (level == 2 and 1 or 0.7) * cv_volume:GetFloat())
 end
 
+-- The audio engine (native/skate-aems, a port of retail's): while it is up it
+-- plays everything below, so this file goes quiet. Until it has loaded, and
+-- when it can't start, this file's sounds play as before.
+local retail = { tried = false, volume = nil, checkedAt = 0, cache = false, muted = false }
+
+local function Retail()
+	if not skate3 or not skate3.AudioReady then return false end
+	if not cv_retail:GetBool() then
+		if retail.tried then
+			skate3.AudioStop()
+			retail.tried, retail.volume = false, nil
+		end
+		return false
+	end
+	if skate3.AudioReady() then
+		local volume = cv_volume:GetFloat()
+		if volume ~= retail.volume then
+			retail.volume = volume
+			skate3.AudioVolume(volume)
+		end
+		return true
+	end
+	if retail.tried then return false end
+	-- Whether setup made the cache is a file lookup through every mounted
+	-- addon: looked up every few seconds, not every frame.
+	if CurTime() > retail.checkedAt then
+		retail.checkedAt = CurTime() + 5
+		retail.cache = file.Exists("skate3/audio-cache/manifest.json", "DATA")
+	end
+	if not retail.cache then return false end
+	retail.tried = true
+	retail.volume = cv_volume:GetFloat()
+	local ok, why = skate3.AudioStart("", retail.volume)
+	if not ok then print("[skate3] retail audio: " .. tostring(why)) end
+	return false
+end
+
+concommand.Add("skate3_audio_status", function()
+	if not skate3 or not skate3.AudioStatus then print("[skate3] no audio engine in this module") return end
+	local status, sounding = skate3.AudioStatus()
+	print("[skate3] retail audio: " .. status)
+	if sounding and sounding ~= "" then print(sounding) end
+end)
+
+concommand.Add("skate3_audio_restart", function()
+	if not skate3 or not skate3.AudioStop then return end
+	skate3.AudioStop()
+	retail.tried, retail.volume, retail.checkedAt = false, nil, 0
+end)
+
 -- A body part hit something (the hook in cl_hall_of_meat.lua).
 local function OnBodyHit(ev)
 	if cv_pack:GetString() == "off" or not ev.pos then return end
 	local region = REGION_OF[ev.part] or TORSO
+	-- The audio engine plays the hits itself; the bone breaks are the mod's.
+	if Retail() then
+		if ev.injury then BoneBreak(region, ev.injury, ev.pos, ev.part) end
+		return
+	end
 	if CurTime() ~= bail.voicesAt then
 		bail.voicesAt, bail.voices = CurTime(), 0
 	end
@@ -1214,6 +1271,14 @@ end
 -- Called every frame while skating, with the latest pose.
 function Sounds.Update(ent, pose)
 	if not IsValid(ent) or not pose or cv_pack:GetString() == "off" then return Sounds.Stop() end
+	if Retail() then
+		if not retail.muted then
+			retail.muted = true
+			Sounds.Stop()
+		end
+		return
+	end
+	retail.muted = false
 	local kind = Kind(pose.state)
 	local volume = cv_volume:GetFloat()
 	-- m/s: a brisk push is about 4, flat out about 10.

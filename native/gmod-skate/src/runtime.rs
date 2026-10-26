@@ -305,6 +305,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let stage = |step: &'static str| set(&|s| s.status = Status::Loading(step));
     let mut session: Option<Session> = None;
     let mut driver = Driver::default();
+    // What the retail-sound engine keeps between ticks (latches, histories).
+    let mut audio_state = crate::audio_map::State::default();
     // Everything the session was fed since it was built, saved when it
     // breaks so skate-headless can replay it.
     let mut recording: Option<Recording> = None;
@@ -528,6 +530,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             0.,
                         )?);
                         driver = Driver::default();
+                        audio_state = crate::audio_map::State::default();
                         recording = map
                             .as_ref()
                             .map(|m| Recording::new(m.triangles.clone(), m.rails.clone()));
@@ -560,6 +563,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                                 0.,
                             )?);
                             driver = Driver::default();
+                        audio_state = crate::audio_map::State::default();
                             recording =
                                 Some(Recording::new(map.triangles.clone(), map.rails.clone()));
                             recording_full = false;
@@ -609,7 +613,9 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                                 aspect,
                             },
                         );
-                        let advanced = driver.step(session, dt, controls, aspect, |_| {})?;
+                        let advanced = driver.step(session, dt, controls, aspect, |s| {
+                            crate::audio::on_tick(s, &mut audio_state)
+                        })?;
                         if advanced {
                             let mut pose = convert(&session.pose())?;
                             last_pos = Some(pose.pos);
@@ -629,6 +635,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             record(&mut recording, &mut recording_full, Event::Suspend);
                             driver.suspend(session);
                         }
+                        crate::audio::deactivate();
                         set(&|s| s.active = false);
                     }
                 }
@@ -673,6 +680,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                     _ => e += "; ride not saved: this session wasn't recorded",
                 }
                 states.clear();
+                crate::audio::deactivate();
                 if let Some(session) = session.as_mut() {
                     driver.suspend(session);
                 }

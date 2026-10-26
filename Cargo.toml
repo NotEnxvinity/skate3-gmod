@@ -1,5 +1,5 @@
 [workspace]
-members = ["native/skate-bridge", "native/skate-headless", "native/gmod-skate", "native/skate-xma", "native/skate-xex"]
+members = ["native/skate-bridge", "native/skate-headless", "native/gmod-skate", "native/skate-aems", "native/skate-xma", "native/skate-xex"]
 resolver = "3"
 
 [workspace.package]

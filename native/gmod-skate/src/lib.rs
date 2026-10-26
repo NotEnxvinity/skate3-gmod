@@ -4,6 +4,8 @@
 //! Everything Lua calls returns immediately: map loading and simulation run on
 //! a worker thread, and Lua reads back the latest state.
 
+mod audio;
+mod audio_map;
 mod bsp;
 mod input;
 mod lua;
@@ -376,6 +378,61 @@ lua_fn!(broken_bone, |lua| {
     0
 });
 
+// The retail-sound engine: AudioStart([cache folder[, volume]]) opens the cache
+// setup prepared and plays it on the default output device. It returns true,
+// or nil and why; Lua keeps its own sounds when it fails.
+lua_fn!(audio_start, |lua| {
+    // No folder given: the one setup makes beside the converted assets.
+    let folder = match lua.string(1).filter(|s| !s.is_empty()) {
+        Some(given) => PathBuf::from(given),
+        None => {
+            let assets = ASSETS
+                .lock()
+                .ok()
+                .and_then(|a| a.clone())
+                .unwrap_or_else(default_assets);
+            assets.parent().unwrap_or(&assets).join("audio-cache")
+        }
+    };
+    for needed in ["manifest.json", "component-tuning.bin", "grain-tuning.bin", "MixMapSK8.mxb"] {
+        if !folder.join(needed).is_file() {
+            return lua.fail(&format!(
+                "the audio cache at {} has no {needed} (run setup with --audio-engine)",
+                folder.display()
+            ));
+        }
+    }
+    if !audio::start(folder, lua.number(2).unwrap_or(1.) as f32) {
+        return lua.fail("couldn't start the audio thread");
+    }
+    lua.push_bool(true);
+    1
+});
+
+lua_fn!(audio_stop, |lua| {
+    audio::stop();
+    let _ = lua;
+    0
+});
+
+lua_fn!(audio_volume, |lua| {
+    audio::set_volume(lua.number(1).unwrap_or(1.) as f32);
+    0
+});
+
+// Whether the engine is loaded and playing, so Lua can keep its own sounds quiet.
+lua_fn!(audio_ready, |lua| {
+    lua.push_bool(audio::ready());
+    1
+});
+
+// One line: state, voices, underruns; and what is sounding, per class.
+lua_fn!(audio_status, |lua| {
+    lua.push_str(&audio::status());
+    lua.push_str(&audio::debug_text());
+    2
+});
+
 lua_fn!(suspend, |lua| {
     with_runtime(|r| r.send(Job::Suspend));
     let _ = lua;
@@ -693,6 +750,11 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Activate", activate),
         (c"Step", step),
         (c"Suspend", suspend),
+        (c"AudioStart", audio_start),
+        (c"AudioStop", audio_stop),
+        (c"AudioVolume", audio_volume),
+        (c"AudioReady", audio_ready),
+        (c"AudioStatus", audio_status),
         (c"GetPose", get_pose),
         (c"GetRails", get_rails),
         (c"GetInput", get_input),
@@ -711,6 +773,8 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
 /// Called by Garry's Mod with a valid Lua state when the Lua state closes.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gmod13_close(state: State) -> c_int {
+    // The audio thread runs this library's code too: it ends before unload.
+    audio::stop();
     // Dropping the runtime closes its job channel; the worker exits on its own.
     if let Ok(mut runtime) = RUNTIME.lock() {
         *runtime = None;

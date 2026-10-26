@@ -53,6 +53,17 @@ port SK8V's tools/prepare-skate-audio.py and tools/prepare-audio-tuning.py
 (Apache-2.0): they unpack and decode the player's own Skate 3 audio into a local
 cache for the retail-sound engine. Nothing from the disc is shipped.
 
+native/skate-aems is SK8V's port of Skate 3's AEMS audio runtime
+(https://github.com/becaring/SK8V, rust/skate-aems, Apache-2.0), itself
+translated from the game's retail executable. native/gmod-skate/src/audio.rs
+and audio_map.rs are adapted from its skatev-runtime (Apache-2.0): the first
+runs the engine on a thread and plays it on the default output device, the
+second turns the session's state into the sound scripts' game variables.
+native/patches/skate-host-zzz-audio.patch is its engine patches 0009 and
+0022 to 0025 (Apache-2.0) fitted to the engine this mod builds on; they publish
+the skater's audio state read-only. The engine plays only from a cache built
+on the player's machine out of their own disc.
+
 setup/skate3_formats/ reads the park pieces and the Mega Park stadium off the
 player's own disc. archive.py, arena.py, geometry.py, world_materials.py and
 world_textures.py come from NativeX World Studio
