@@ -132,13 +132,17 @@ function UI.P(x, y)
 	return T.ox + x * T.s, T.oy + y * T.s
 end
 
+-- The score's soft glows and flash: upscaling them only smears their edges
+-- (blown-out blobs with lines through them), so they stay as they are.
+local SOFT = { hud56 = true, hud60 = true, hud63 = true }
+
 local function Mat(name)
 	local m = UI.mats[name]
 	if m then return m end
 	local path = ART .. name .. ".png"
 	-- An upscaled copy from the optional HD pack, where ui.json says it would be.
 	local info = art and art.textures and art.textures[name]
-	if info and info.hd and file.Exists(HD .. info.hd, "DATA") then path = HD .. info.hd end
+	if info and info.hd and not SOFT[name] and file.Exists(HD .. info.hd, "DATA") then path = HD .. info.hd end
 	m = Material("../data/" .. path, "smooth noclamp")
 	UI.mats[name] = m
 	return m
