@@ -17,7 +17,10 @@ import audio_tuning
 from syncdir import sync_tree
 
 ARCHIVES = ('audiofiles.big', 'grains.big', 'wheels.big')
-FROM_DISC = tuple('data/audio/' + name for name in ARCHIVES)
+# The engine's cache also needs the mix map (paths here are lowercase: the
+# disc's are matched without case).
+MIX_MAP = 'MixMapSK8.mxb'
+FROM_DISC = tuple('data/audio/' + name for name in ARCHIVES) + ('data/audio/' + MIX_MAP.lower(),)
 
 # Output folder: (archive, file in it). Loop folders get a loop cue point.
 BANKS = {

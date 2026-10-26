@@ -69,6 +69,7 @@
     clippy::too_many_arguments
 )]
 
+pub mod cli;
 mod dsptables;
 mod dsptables_baked;
 mod ea;

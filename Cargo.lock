@@ -1720,6 +1720,8 @@ dependencies = [
  "serde_json",
  "skate-aems",
  "skate-bridge",
+ "skate-xex",
+ "skate-xma",
 ]
 
 [[package]]

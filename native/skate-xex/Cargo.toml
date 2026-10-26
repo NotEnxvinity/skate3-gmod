@@ -6,6 +6,10 @@ publish.workspace = true
 license = "Apache-2.0"
 description = "Decodes the player's own Xbox 360 default.xex to its in-memory image so setup can read two tuning tables out of it"
 
+[lib]
+name = "skate_xex"
+path = "src/lib.rs"
+
 [[bin]]
 name = "skate-xex"
 path = "src/main.rs"

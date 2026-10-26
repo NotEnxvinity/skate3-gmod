@@ -14,10 +14,11 @@ this is that importer ported to this setup: hashing from audio_tuning.py, the
 executable decoded by native/skate-xex. The output is the player's own data
 and stays on their machine.
 """
-import hashlib, os, struct, subprocess, sys, tempfile
+import hashlib, struct, tempfile
 from pathlib import Path
 
 import audio_tuning
+import native_tools
 
 HERE = Path(__file__).resolve().parent
 
@@ -96,21 +97,6 @@ XEX_PROFILES = {
 GRIND_TABLE = 0x82249F90
 
 
-def find_xex_tool(given=None):
-    """skate-xex: bundled in the app, from SKATE3_XEX, a cargo build, or on PATH."""
-    name = 'skate-xex.exe' if os.name == 'nt' else 'skate-xex'
-    root = Path(getattr(sys, '_MEIPASS', HERE))
-    candidates = [given, root / 'bin' / name, os.environ.get('SKATE3_XEX')]
-    candidates += [HERE.parent / 'target' / 'release' / name]
-    if os.environ.get('CARGO_TARGET_DIR'):
-        candidates.append(Path(os.environ['CARGO_TARGET_DIR']) / 'release' / name)
-    candidates.append(__import__('shutil').which('skate-xex'))
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            return Path(candidate)
-    raise FileNotFoundError('skate-xex not found (cargo build --release -p skate-xex, or set SKATE3_XEX)')
-
-
 def image_from_xex(xex, tool=None):
     """Decode a known base default.xex and return (canonical-address image, decoded image sha256).
 
@@ -119,9 +105,14 @@ def image_from_xex(xex, tool=None):
     profile = XEX_PROFILES.get(digest)
     if profile is None:
         raise ValueError(f'unsupported Skate 3 executable {digest}')
+    reader = native_tools.xex_reader(tool)
+    if reader is None:
+        raise FileNotFoundError('nothing here can read the disc\'s executable (the skate module is missing)')
     with tempfile.TemporaryDirectory() as temp:
         decoded = Path(temp) / 'image.bin'
-        subprocess.run([str(find_xex_tool(tool)), str(xex), str(decoded)], check=True, capture_output=True)
+        code, why = reader.xex_image(xex, decoded)
+        if code != 0:
+            raise ValueError(f'couldn\'t read the disc\'s executable: {why}')
         base = decoded.read_bytes()
     image = bytearray(MATERIAL_TABLE + MATERIAL_ROWS * 16 - 0x82000000)
     for name, size, target in (('grind', 14 * 8, GRIND_TABLE), ('impact', MATERIAL_ROWS * 16, MATERIAL_TABLE)):

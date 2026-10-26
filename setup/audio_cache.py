@@ -21,12 +21,12 @@ this cache isn't there.
 from pathlib import Path
 import argparse, hashlib, json, os, shutil, struct, subprocess, sys, tempfile
 
-from audio import ARCHIVES, Big
+from audio import ARCHIVES, MIX_MAP, Big
 import audio_blobs
+import native_tools
 
 FORMAT = 'skatev-audio-cache'
 VERSION = 2  # 2: splice (.bnk) bank samples are decoded too
-MIX_MAP = 'MixMapSK8.mxb'
 GRAIN_TUNING = 'grain-tuning.bin'
 COMPONENT_TUNING = 'component-tuning.bin'
 HERE = Path(__file__).resolve().parent
@@ -39,23 +39,6 @@ def digest(path):
         for block in iter(lambda: f.read(1 << 20), b''):
             h.update(block)
     return h.hexdigest()
-
-
-def find_decoder(given=None):
-    """skate-xma: bundled in the app, from SKATE3_XMA, a cargo build, or on PATH."""
-    name = 'skate-xma.exe' if os.name == 'nt' else 'skate-xma'
-    root = Path(getattr(sys, '_MEIPASS', HERE))
-    candidates = [given, root / 'bin' / name, os.environ.get('SKATE3_XMA'), HERE.parent / 'target' / 'release' / name]
-    if os.environ.get('CARGO_TARGET_DIR'):
-        candidates.append(Path(os.environ['CARGO_TARGET_DIR']) / 'release' / name)
-    candidates.append(shutil.which('skate-xma'))
-    for candidate in candidates:
-        if candidate and Path(candidate).is_file():
-            path = Path(candidate)
-            if os.name != 'nt' and not os.access(path, os.X_OK):
-                path.chmod(0o755)
-            return path
-    return None
 
 
 def job(name, offset, h1, h2):
@@ -123,12 +106,7 @@ def unpack(archive, dest):
     return made
 
 
-def run(decoder, *args):
-    flags = {'creationflags': subprocess.CREATE_NO_WINDOW} if os.name == 'nt' else {}
-    return subprocess.run([str(decoder), *map(str, args)], capture_output=True, text=True, **flags)
-
-
-def decode_banks(banks, jobs_for, decoder, out_dir, scratch, problems):
+def decode_banks(banks, jobs_for, tools, out_dir, scratch, problems):
     """Decodes every bank's samples into out_dir; returns how many."""
     out_dir.mkdir(parents=True, exist_ok=True)
     samples = 0
@@ -138,9 +116,9 @@ def decode_banks(banks, jobs_for, decoder, out_dir, scratch, problems):
         if not jobs:
             continue
         scratch.write_text(''.join(jobs))
-        result = run(decoder, '--continuous', bank, scratch, out_dir)
-        if result.returncode != 0:
-            problems.append(f'{bank.name}: decoder exit {result.returncode}: {result.stderr.strip()[-200:]}')
+        code, why = tools.jobs(bank, scratch, out_dir)
+        if code != 0:
+            problems.append(f'{bank.name}: decoder exit {code}: {why[-200:]}')
             continue
         for line in jobs:
             name = line.split()[0]
@@ -152,7 +130,7 @@ def decode_banks(banks, jobs_for, decoder, out_dir, scratch, problems):
     return samples
 
 
-def decode_streams(raw, pcm, decoder, problems):
+def decode_streams(raw, pcm, tools, problems):
     """The standalone SNR streams: the rolling grains (the stream starts at
     the u32 stored at byte 0) and the wheel spins."""
     streams = 0
@@ -161,12 +139,23 @@ def decode_streams(raw, pcm, decoder, problems):
         out.mkdir(parents=True, exist_ok=True)
         for path in sorted((raw / archive).glob(pattern)):
             offset = struct.unpack_from('>I', path.read_bytes(), 0)[0] if path.suffix == '.grain' else 0
-            result = run(decoder, '--snr', path, offset, out / f'{path.stem}.xma16')
-            if result.returncode != 0:
-                problems.append(f'{archive}/{path.name}: decoder exit {result.returncode}: {result.stderr.strip()[-200:]}')
+            code, why = tools.snr(path, offset, out / f'{path.stem}.xma16')
+            if code != 0:
+                problems.append(f'{archive}/{path.name}: decoder exit {code}: {why[-200:]}')
             else:
                 streams += 1
     return streams
+
+
+def find_file(folder, name):
+    """`name` in `folder`, whatever case the disc spelled it in."""
+    exact = Path(folder) / name
+    if exact.is_file():
+        return exact
+    for path in Path(folder).iterdir():
+        if path.name.lower() == name.lower() and path.is_file():
+            return path
+    return exact
 
 
 def audio_folder(game):
@@ -201,16 +190,19 @@ def build(game, out, report=print, decoder=None, force=False):
     audio = audio_folder(game)
     if audio is None:
         raise RuntimeError(f'{game} has no data/audio/audiofiles.big')
-    decoder = find_decoder(decoder)
-    if decoder is None:
-        raise RuntimeError('skate-xma is missing from this setup')
+    tools = native_tools.load(decoder)
+    if tools is None:
+        raise RuntimeError('the audio decoder is missing from this setup (it lives in the skate module, '
+                           + native_tools.module_name() + ')')
+    sources = {}
     inputs = {}
     for name in (*ARCHIVES, MIX_MAP):
-        path = audio / name
+        path = find_file(audio, name)
         if not path.is_file():
-            raise RuntimeError(f'{path} is missing')
+            raise RuntimeError(f'{name} is missing from the disc\'s audio folder ({audio})')
+        sources[name] = path
         inputs[name] = {'bytes': path.stat().st_size, 'sha256': digest(path)}
-    decoder_hash = digest(decoder)
+    decoder_hash = digest(tools.path)
     manifest_path = out / 'manifest.json'
     if manifest_path.is_file() and not force:
         try:
@@ -226,7 +218,7 @@ def build(game, out, report=print, decoder=None, force=False):
     out.mkdir(parents=True, exist_ok=True)
     counts, members = {}, {}
     for name in ARCHIVES:
-        made = unpack(audio / name, out / 'raw' / Path(name).stem)
+        made = unpack(sources[name], out / 'raw' / Path(name).stem)
         counts[name] = len(made)
         members[name] = hashlib.sha256(''.join(f'{n}:{s};' for n, s in made).encode()).hexdigest()
         report(f'Unpacked {name}: {len(made)} files')
@@ -235,11 +227,11 @@ def build(game, out, report=print, decoder=None, force=False):
     banks = out / 'raw' / 'audiofiles'
     pcm = out / 'pcm'
     report('Decoding the banks')
-    samples = decode_banks(sorted(banks.glob('*.abk')), abk_jobs, decoder, pcm / 'audiofiles', scratch, problems)
-    samples += decode_banks(sorted(banks.glob('*.bnk')), bnk_jobs, decoder, pcm / 'audiofiles', scratch, problems)
+    samples = decode_banks(sorted(banks.glob('*.abk')), abk_jobs, tools, pcm / 'audiofiles', scratch, problems)
+    samples += decode_banks(sorted(banks.glob('*.bnk')), bnk_jobs, tools, pcm / 'audiofiles', scratch, problems)
     report('Decoding the rolling and wheel recordings')
-    streams = decode_streams(out / 'raw', pcm, decoder, problems)
-    shutil.copyfile(audio / MIX_MAP, out / MIX_MAP)
+    streams = decode_streams(out / 'raw', pcm, tools, problems)
+    shutil.copyfile(sources[MIX_MAP], out / MIX_MAP)
     if digest(out / MIX_MAP) != inputs[MIX_MAP]['sha256']:
         raise RuntimeError('the mix map changed while the cache was made')
     report(f'Decoded {samples} bank samples and {streams} streams; {len(problems)} problems')

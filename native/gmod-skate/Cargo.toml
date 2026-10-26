@@ -11,6 +11,8 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 skate-bridge = { path = "../skate-bridge" }
 skate-aems = { path = "../skate-aems" }
+skate-xma = { path = "../skate-xma" }
+skate-xex = { path = "../skate-xex" }
 glam.workspace = true
 serde_json = "1"
 # XInput on Windows: what Proton implements best. evdev on Linux either way.

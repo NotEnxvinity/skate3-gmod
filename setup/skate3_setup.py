@@ -339,6 +339,9 @@ def install_addon(gmod, wanted, report):
 
 
 def install(selected, gmod, report, with_addon=True, audio_engine=False):
+    """Installs everything; returns the problems in the optional steps (their
+    text is also reported as they happen), for the caller to show plainly."""
+    warnings = []
     found = garrysmod_in(gmod)
     if found is None:
         raise RuntimeError(f"There's no Garry's Mod in {gmod}. Pick the garrysmod folder inside GarrysMod.")
@@ -418,15 +421,19 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t install the skate sounds ({error}); the mod will use Half-Life 2 sounds.')
+            warnings.append(f'The skate sounds weren\'t installed: {error}')
         # The unpacked and decoded audio the retail-sound engine plays from
         # (beta, a few GB). The sounds above stay the fallback.
         if audio_engine or os.environ.get('S3GM_AUDIO_ENGINE'):
             try:
-                audio_cache.install(xex.parent, data / 'audio-cache',
-                                    data / 'assets/private/stock/skater-collections.json', report)
+                if not audio_cache.install(xex.parent, data / 'audio-cache',
+                                           data / 'assets/private/stock/skater-collections.json', report):
+                    warnings.append('Skate 3\'s sound engine is only partly ready (some sounds or tuning '
+                                    'couldn\'t be prepared); see the setup log above.')
             except Exception as error:
                 traceback.print_exc()
                 report(f'Couldn\'t prepare the audio cache ({error}); the mod will use the sounds above.')
+                warnings.append(f'Skate 3\'s sound engine isn\'t ready: {error}\n(the mod plays its own sounds instead)')
         # The park pieces and skateparks for the Skate 3 spawn tab; the rest
         # works without them.
         try:
@@ -434,9 +441,11 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t read the park pieces ({error}); the Skate 3 spawn tab will be empty.')
+            warnings.append(f'The park pieces weren\'t read: {error}')
     if with_addon and workshop_copy(gmod):
         report(WORKSHOP_NOTE)
     report(f'All set: S3GM {s3gm_version()} is installed. Start Garry\'s Mod, load a map and equip the Skateboard.'.replace('  ', ' '))
+    return warnings
 
 
 def run_task():
@@ -557,8 +566,8 @@ def window(gmod, game=None):
 
         def work():
             try:
-                install(picked, folder, lambda text: messages.put(('log', text)), audio_engine=wants_engine)
-                messages.put(('done', None))
+                problems = install(picked, folder, lambda text: messages.put(('log', text)), audio_engine=wants_engine)
+                messages.put(('done', problems))
             except Exception as error:
                 traceback.print_exc()
                 messages.put(('error', str(error)))
@@ -573,6 +582,10 @@ def window(gmod, game=None):
                 progress.stop()
                 button.configure(state='normal')
                 if kind == 'done':
+                    if text:
+                        # A step that was skipped must not hide in the log.
+                        messagebox.showwarning('S3GM setup', 'Installed, but not everything worked:\n\n'
+                                               + '\n\n'.join(text))
                     note = '\n\n' + WORKSHOP_NOTE if workshop_copy(target.get()) else ''
                     messagebox.showinfo('S3GM setup', f'All set! S3GM {version} is installed.'.replace('  ', ' ') +
                                         '\n\nStart Garry\'s Mod, load a map and equip the Skateboard '
@@ -627,7 +640,11 @@ def main():
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
         return 2
     try:
-        install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon, args.audio_engine)
+        problems = install(args.game, gmod, lambda text: print(text, flush=True), not args.no_addon, args.audio_engine)
+        if problems:
+            print('\nInstalled, but not everything worked:', file=sys.stderr)
+            for problem in problems:
+                print(' - ' + problem, file=sys.stderr)
     except Exception as error:
         traceback.print_exc()
         print(f'error: {error}', file=sys.stderr)

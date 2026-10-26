@@ -122,12 +122,23 @@ class CacheTest(unittest.TestCase):
             old = os.environ.get('SKATE3_XMA'), os.environ.get('PATH')
             try:
                 os.environ.pop('SKATE3_XMA', None)
+                os.environ.pop('SKATE3_MODULE', None)
                 os.environ['PATH'] = empty
-                if cache.find_decoder() is not None:
-                    self.skipTest('a skate-xma is built next to the repo')
+                if cache.native_tools.load() is not None:
+                    self.skipTest('a decoder is built next to the repo')
                 cache.build(self.root / 'game', self.out, lambda *_: None)
             finally:
                 os.environ['PATH'] = old[1]
+
+    def test_the_mix_map_may_be_spelled_in_any_case(self):
+        audio = self.root / 'game/data/audio'
+        (audio / 'MixMapSK8.mxb').rename(audio / 'mixmapsk8.mxb')
+        self.build()
+        self.assertEqual((self.out / 'MixMapSK8.mxb').read_bytes(), b'mix')
+
+    def test_the_mix_map_is_copied_off_an_iso(self):
+        import audio
+        self.assertIn('data/audio/mixmapsk8.mxb', audio.FROM_DISC)
 
     def test_unsafe_archive_member(self):
         audio = self.root / 'game/data/audio'
@@ -201,6 +212,22 @@ class BlobTest(unittest.TestCase):
             xex.write_bytes(b'XEX2' + b'\0' * 64)
             with self.assertRaises(ValueError):
                 blobs.image_from_xex(xex)
+
+
+
+class ModuleToolsTest(unittest.TestCase):
+    def test_the_module_reports_a_missing_bank_with_a_reason(self):
+        import native_tools
+        path = native_tools.find_module()
+        if path is None:
+            self.skipTest('the skate module isn\'t built here')
+        try:
+            tools = native_tools.Module(path)
+        except (OSError, AttributeError):
+            self.skipTest('the built module has no decoder')
+        code, why = tools.jobs('/nowhere/bank.abk', '/nowhere/jobs.txt', '/nowhere')
+        self.assertEqual(code, 1)
+        self.assertIn('bank.abk', why)
 
 
 if __name__ == '__main__':

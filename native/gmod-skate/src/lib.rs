@@ -14,6 +14,7 @@ mod runtime;
 #[cfg(test)]
 mod scan;
 mod skater;
+mod tools;
 
 use std::ffi::c_int;
 use std::path::{Path, PathBuf};
