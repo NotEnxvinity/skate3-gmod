@@ -17,7 +17,7 @@ local Conflicts = include("skate3/cl_conflicts.lua")
 local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
-local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
+local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_retail_audio", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
 	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
@@ -53,6 +53,19 @@ hook.Add("Initialize", "skate3_saved", function()
 		cvars.AddChangeCallback(name, Save, "skate3_saved")
 	end
 end)
+
+-- What Skate 3's own sound engine (the port of retail's audio, in the skate
+-- module) is doing, in a line the player can read.
+local function EngineStatus()
+	if not skate3 or not skate3.AudioReady then return "Not in this version of the skate module." end
+	local cv = GetConVar("skate3_retail_audio")
+	if cv and not cv:GetBool() then return "Off: the sounds chosen below play." end
+	if skate3.AudioReady() then return "Running: everything plays as Skate 3's own sounds." end
+	if not file.Exists("skate3/audio-cache/manifest.json", "DATA") then
+		return "Not set up: run the S3GM setup again with the sound engine box ticked. The sounds chosen below play until then."
+	end
+	return "Starting, or unavailable: " .. tostring((skate3.AudioStatus())) .. ". The sounds chosen below play meanwhile."
+end
 
 -- Keyboard and mouse, still early: the switch, the mouse feel and every key.
 local function KeyboardChoices(panel)
@@ -115,12 +128,20 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "High", "high" },
 		})
 
+		panel:CheckBox("Skate 3's own sound engine (beta)", "skate3_retail_audio")
+		local engine = panel:ControlHelp(EngineStatus())
+		engine.Think = function(self)
+			if CurTime() < (self.nextCheck or 0) then return end
+			self.nextCheck = CurTime() + 1
+			self:SetText(EngineStatus())
+		end
+		panel:ControlHelp("It plays every skate sound the way the game does. The choices below are for when it's off or isn't set up.")
 		Choices(panel, "Sounds", "skate3_sounds", {
 			{ "Skate 3 (from your disc)", "disc" },
 			{ "Half-Life 2 (classic)", "hl2" },
 			{ "Off", "off" },
 		})
-		panel:ControlHelp("Skate 3's own sounds come from your disc: run setup to install them.")
+		panel:ControlHelp("Without the engine: Skate 3's own sounds come from your disc, run setup to install them.")
 		Choices(panel, "Bail sounds", "skate3_bail_sounds", {
 			{ "Skate 3 (from your disc)", "disc" },
 			{ "Half-Life 2", "hl2" },
@@ -129,7 +150,7 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Garry's Mod", "hl2" },
 			{ "Skate 3 (from your disc)", "disc" },
 		})
-		panel:ControlHelp("With the Skate 3 sounds: whose bails and footsteps to play.")
+		panel:ControlHelp("Without the engine, and with the Skate 3 sounds: whose bails and footsteps to play.")
 		panel:NumSlider("Volume", "skate3_volume", 0, 1, 2)
 
 		panel:CheckBox("Show the trick score", "skate3_score_hud")
