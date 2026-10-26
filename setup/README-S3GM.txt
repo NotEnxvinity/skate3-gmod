@@ -1,5 +1,5 @@
-S3GM v2.2.2 (UI test): Skate 3 in Garry's Mod
-=============================================
+S3GM v2.3.0: Skate 3 in Garry's Mod
+===================================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
 grinds, manuals and bails, on any map, with any playermodel.
@@ -30,12 +30,17 @@ Video walkthrough of this whole install: https://youtu.be/oGdIwMNwp14
 2. Open S3GM-setup and double-click the setup for your computer:
      Windows:          S3GM-setup-Windows.bat
      Linux / SteamOS:  S3GM-setup-Linux.sh (Desktop Mode; pick Execute/Run
-                       if it asks)
+                       if it asks. If it only opens as text: right-click >
+                       Properties > Permissions > Is executable, or run
+                       "bash S3GM-setup-Linux.sh" in a terminal)
      Mac:              S3GM-setup-Mac.command (no Mac version of this
                        release yet; it will tell you)
 3. A window shows your garrysmod folder and your Skate 3 disc. Fix either
    with Browse, press Install, and wait for "All set". It shows the S3GM
    version it installed. The first run takes a few minutes.
+   Leave "Skate 3's own sound engine" ticked (beta): setup also prepares
+   the game's own sounds from your disc. It needs a few GB of free space and
+   a few more minutes. If a step gets skipped, a pop-up says which.
    The Gmod folder is the lowercase "garrysmod" folder INSIDE "GarrysMod":
      ...\steamapps\common\GarrysMod\garrysmod
    (picking GarrysMod itself works too, setup uses the garrysmod inside it).
@@ -55,7 +60,8 @@ from their own disc.
 Controls
 --------
 Skate 3's own: A pushes, Y gets on and off the board, the right stick flicks
-tricks, triggers grab. Hold L1 (Shift on keyboard) for the quick menu: D-pad
+tricks, triggers grab. B (R1) is the attack button: a board smack when the
+board is in your hand, punches without it. Hold L1 (Shift on keyboard) for the quick menu: D-pad
 down drops a session marker, hold D-pad up to go back to it, left interacts
 with what you're next to, right opens the games list. Switch weapons to
 leave skate mode.
@@ -63,8 +69,9 @@ leave skate mode.
 
 Settings
 --------
-Spawn menu > Utilities > Skate 3: stance, camera, sounds (Skate 3's from
-your disc, or Half-Life 2's), bail sounds, footsteps, volume, the trick
+Spawn menu > Utilities > Skate 3: stance, camera, Skate 3's own sound engine
+(beta; it shows whether it's running; the older sounds, bail sounds and
+footsteps choices are the fallback), volume, the trick
 score's look (Skate 3's own, minimal, or Half-Life 2's; on screen or in the
 world), the button pictures (Xbox or PlayStation; Automatic goes by your
 controller's name, and Steam Input can hide a PlayStation pad behind an Xbox
@@ -79,6 +86,12 @@ it makes the game's own PlayStation button pictures from it instead.
 Hall of Meat (Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
 score, in red, with a skeleton showing fractured bones yellow and broken ones
 red. Bail on purpose: hold both triggers and click both sticks.
+Fixing a map: the Skate 3 Surface tool (tool gun > Skate 3) flattens a bumpy
+floor, smooths a ramp, ignores clutter, draws a grind rail, or makes a ramp
+prop use its visible shape. Flags are saved per map in
+garrysmod/data/skate3/surfaces/<map>.json.
+Console help: skate3_audio_status says what the sound engine is doing,
+skate3_debug_sounds 1 prints each sound, and every bail prints its reason.
 Servers: skate3_bail_damage turns bail damage on or off (fractures and breaks
 cost extra: skate3_bail_damage_fracture, skate3_bail_damage_break),
 skate3_blood 0 turns off blood splats, skate3_spawned_props 0 makes spawned
@@ -93,8 +106,10 @@ Credits
 - Headless host, collision handoff and grind-rail finder:
   chasmlol/2010-rust-rewrite-mashup (Apache-2.0, see LICENSES/ and NOTICE).
 - Module architecture inspired by ckosmic/g64. No code taken.
+- Skate 3's sound engine: becaring/SK8V (Apache-2.0), ported for this mod.
 - Sound bank research: doriangironde/skate-3-rust-macos and Hailey-Ross's
   audio work on SK8-ENGINE. Sounds are decoded on your machine by vgmstream.
+- undead_corporation: the multiplayer board fix. gumballegal: map testing.
 
 
 License

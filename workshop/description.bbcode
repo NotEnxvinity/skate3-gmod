@@ -7,7 +7,10 @@ Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks, grinds,
 [list]
 [*]Skate 3's physics and trick system, driven from a controller like the real thing.
 [*]Your own playermodel rides the board, posed by Skate 3's animations, and other players see you skate.
-[*]Skate 3's own sounds from your disc (or Half-Life 2's): pops, landings, grinds, wheels, footsteps and bails.
+[*]Skate 3's own sound engine (beta), ported from becaring/SK8V and fed from your disc: pops and landings by surface, grind and wheel loops, seam clicks, bails and the real x2/x3 chimes. The older Skate 3 sounds (or Half-Life 2's) are the fallback.
+[*]Skate 3's HUD and menus: score, LINE, trick stack, FAKIE, the Hall of Meat bail panel, and the L1 quick menu (session marker, Interact, games).
+[*]Seven skatepark maps (gm_skate3_*) built from your disc, plus tool gun placement for park pieces.
+[*]Skaters hit each other: crashes, punches and board smacks (B / R1). Spawned props you don't freeze can be skated too.
 [*]Trick score in three styles: minimal, floating beside you, or Half-Life 2.
 [*]Session markers, like Skate 3. Bail damage can be switched off by the server.
 [*]The [b]Skate 3 Surface[/b] tool (tool gun, Skate 3 tab) fixes a map's collision for skating: flatten a bumpy floor, smooth a ramp, ignore clutter, draw a grind rail, or make a ramp prop use its visible shape. Flags are saved per map and can be shared as a file.
@@ -25,15 +28,15 @@ Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks, grinds,
 [olist]
 [*]Subscribe to this addon.
 [*]Get the S3GM setup from the [b]gmod-releases[/b] channel on [url=DISCORD_INVITE_LINK]Enxvinity's Atelier on Discord[/url]. The Workshop can't carry the skate engine itself, so it comes from there, like G64 does.
-[*]Extract it into your Garry's Mod folder and run the setup once with your Skate 3 .iso. It finds Garry's Mod, installs the engine, and converts your disc's skater, animations and sounds. Run it again after an update.
+[*]Extract it into your Garry's Mod folder and run the setup once with your Skate 3 .iso. It finds Garry's Mod, installs the engine, and converts your disc's skater, animations and sounds. Run it again after an update. Leave "Skate 3's own sound engine" ticked (a few GB, a few more minutes).
 [*]Load a map and equip [b]Skateboard[/b] (spawn menu → Weapons → Skate 3).
 [/olist]
 
 [h2]Controls[/h2]
-Skate 3's own: [b]A[/b] pushes, [b]Y[/b] gets on and off the board, the right stick flicks tricks, triggers grab. [b]D-pad down[/b] drops a session marker, hold [b]D-pad up[/b] to go back to it. Switch weapons to leave skate mode.
+Skate 3's own: [b]A[/b] pushes, [b]Y[/b] gets on and off the board, the right stick flicks tricks, triggers grab. [b]D-pad down[/b] drops a session marker, hold [b]D-pad up[/b] to go back to it. [b]B[/b] / [b]R1[/b] punches, or smacks with the board when it's in your hand. Switch weapons to leave skate mode.
 
 [h2]Settings[/h2]
-Spawn menu → Utilities → Skate 3: stance (regular or goofy), camera height, sounds and bail sounds (Skate 3's from your disc, or Half-Life 2's), volume, and the trick score's look. Server: [b]skate3_bail_damage[/b] turns bail damage on or off.
+Spawn menu → Utilities → Skate 3: stance (regular or goofy), camera height, the sound engine switch with its status, volume, and the trick score's look. Server: [b]skate3_bail_damage[/b] turns bail damage on or off.
 
 [h2]Known conflicts[/h2]
 These addons together leaked memory until the game crashed during testing. If you see "CUtlRBTree overflow", try disabling them:
@@ -50,6 +53,8 @@ These addons together leaked memory until the game crashed during testing. If yo
 [*]Skate 3 engine: [url=https://github.com/SK8-ENGINE/skate-3-rust-engine]SK8-ENGINE/skate-3-rust-engine[/url] (dumbad, Chasm and contributors), used with their permission on the condition this mod stays free.
 [*]Headless host, collision and grind-rail finder: [url=https://github.com/chasmlol/2010-rust-rewrite-mashup]chasmlol/2010-rust-rewrite-mashup[/url] (Apache-2.0).
 [*]Architecture inspired by [url=https://github.com/ckosmic/g64]G64[/url].
+[*]Skate 3's sound engine: [url=https://github.com/becaring/SK8V]becaring/SK8V[/url] (Apache-2.0).
+[*]Multiplayer board fix: undead_corporation. Map testing: gumballegal.
 [*]Sound bank research: doriangironde/skate-3-rust-macos and Hailey-Ross. Sounds decoded on your machine by [url=https://github.com/vgmstream/vgmstream]vgmstream[/url].
 [/list]
 
