@@ -268,12 +268,26 @@ end
 
 -- stand: optional bone -> Matrix of the model standing (entity at the
 -- origin), for how high off the floor each foot and toe bone sits.
-function Anim.Setup(ent, rest, skater, stand)
+-- scale: the skater is drawn at this size for a model much smaller or bigger
+-- than it (cl_skater.lua); its lengths, the board and the grip distances are
+-- worked out at that size.
+function Anim.Setup(ent, rest, skater, stand, scale)
+	scale = scale or 1
 	local bind = {}
 	for name, m in pairs(skater and skater.bind or {}) do
 		bind[name] = istable(m) and Mat(m) or m
 	end
 	local floor = SkateFloor(bind)
+	if scale ~= 1 then
+		for name, m in pairs(bind) do
+			m = Matrix(m)
+			m:SetTranslation(m:GetTranslation() * scale)
+			bind[name] = m
+		end
+		floor = floor and floor * scale
+	end
+	local deck = FindDeck(skater)
+	if deck and scale ~= 1 then deck.a, deck.b = deck.a * scale, deck.b * scale end
 	local info = {
 		rest = rest,
 		pelvisBone = Bone(ent, "Pelvis"),
@@ -281,7 +295,8 @@ function Anim.Setup(ent, rest, skater, stand)
 		below = Below(ent),
 		hands = {},
 		legs = {},
-		deck = FindDeck(skater),
+		deck = deck,
+		scale = scale,
 		face = FindFace(ent),
 		blinkAt = RealTime() + math.Rand(1, 4),
 		weights = {},
@@ -482,6 +497,7 @@ end
 
 local function Arms(info, world, pose)
 	local want = vector_origin
+	local grip, gap = GRIP_DISTANCE * (info.scale or 1), CARRY_GAP * (info.scale or 1)
 	if cv_hands_ik:GetBool() then
 		local onFoot = pose.state and pose.state:find("^Biped") ~= nil
 		local deck = onFoot and info.deck and pose.bones[info.deck.bone]
@@ -509,17 +525,17 @@ local function Arms(info, world, pose)
 						local m = Mat(pose.bones[info.deck.bone])
 						local a, b = m * info.deck.a, m * info.deck.b
 						local d = target:Distance(Closest(target, a, b))
-						w = 1 - math.Clamp((d - GRIP_DISTANCE) / GRIP_DISTANCE, 0, 1)
+						w = 1 - math.Clamp((d - grip) / grip, 0, 1)
 					end
 					aim = LerpVector(w, own, target)
 				end
 				Reach(world, arm, aim, info.below)
 				local near = deckA and target:Distance(Closest(target, deckA, deckB))
-				if near and near < GRIP_DISTANCE and (not best or near < best) then
+				if near and near < grip and (not best or near < best) then
 					best = near
 					carried = true
 					want = world[arm.foot]:GetTranslation() - target
-					if want:Length() > CARRY_GAP then want = want:GetNormalized() * CARRY_GAP end
+					if want:Length() > gap then want = want:GetNormalized() * gap end
 				end
 			end
 		end
@@ -559,7 +575,7 @@ local function Hands(info, world, pose)
 		local hm = hand and world[hand.hand]
 		if hm then
 			local p = hm:GetTranslation()
-			local near = deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE
+			local near = deckA and p:Distance(Closest(p, deckA, deckB)) < GRIP_DISTANCE * (info.scale or 1)
 			-- A fist while punching, a grip while swinging the board.
 			local holding = (not onFoot and near) or info.fist == side
 			-- 0 open (flailing in a bail), 1 relaxed, 2 gripping.

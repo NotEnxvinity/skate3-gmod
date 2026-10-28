@@ -281,7 +281,7 @@ return function(Skater, Perf)
 					bones[part.name] = Flat(m)
 				end
 				Body.ShowBoard(ply, { pos = { f.origin.x, f.origin.y, f.origin.z }, bones = bones,
-					forward = f.forward, up = f.up }, Skater.DrawBoard)
+					forward = f.forward, up = f.up, scale = f.scale }, Skater.DrawBoard)
 			end
 		end
 		Perf.End("other skaters")

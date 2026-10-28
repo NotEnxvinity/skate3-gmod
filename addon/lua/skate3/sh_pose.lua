@@ -17,6 +17,9 @@
 --   model    string, the playermodel the bone numbers belong to ("" when
 --            unknown: then it's the player's own model). Last, so older
 --            versions reading the frame just leave it unread.
+--   scale    number, how much the skater and board are scaled for a small or
+--            big playermodel (1 for most). Positions in the frame already
+--            are; the board's mesh is drawn at this size.
 
 local Pose = {}
 
@@ -91,6 +94,8 @@ function Pose.Write(f)
 		WriteQuat(board[n].q)
 	end
 	net.WriteString(Pose.CleanModel(f.model))
+	-- How much the skater and board are scaled to a small or big playermodel.
+	net.WriteUInt(math.Clamp(Round((f.scale or 1) * 1000), 1, 65535), 16)
 end
 
 -- Nil when the frame is garbage (NaN or off the map).
@@ -117,6 +122,9 @@ function Pose.Read()
 	end
 	-- An older version's frame ends here: reading on gives "".
 	f.model = Pose.CleanModel(net.ReadString())
+	-- Likewise a frame from before the scale was sent: 0, which is 1.
+	local scale = net.ReadUInt(16)
+	f.scale = scale > 0 and scale / 1000 or 1
 	return f
 end
 

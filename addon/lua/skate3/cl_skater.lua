@@ -157,6 +157,8 @@ function Skater.DrawBoard(pose)
 			render.SetMaterial(part.material)
 			local mm = Mat(m)
 			if pose.boardShift then mm:SetTranslation(mm:GetTranslation() + pose.boardShift) end
+			-- Positions are already scaled; the mesh scales about its own origin.
+			if pose.scale and pose.scale ~= 1 then mm:Scale(Vector(pose.scale, pose.scale, pose.scale)) end
 			cam.PushModelMatrix(mm)
 			for _, piece in ipairs(part.meshes) do piece:Draw() end
 			cam.PopModelMatrix()
@@ -601,6 +603,17 @@ if cookie.GetNumber("skate3_body_height_default", 0) < 1 then
 	cookie.Set("skate3_body_height_default", "1")
 end
 local legScale -- the model's hip-to-ankle height over the skater's
+-- A model far smaller or bigger than the skater (a chibi, a teddy bear, a
+-- giant) can't ride a human-sized board: its legs don't reach the deck and
+-- the hips only moved 25% closer or 50% further, whatever its size. Past
+-- those limits the whole skater is scaled to the model instead, board
+-- included, about the skater's origin on the ground. Only what's drawn is
+-- scaled; the simulation, speed and camera don't change.
+local cv_scale = CreateClientConVar("skate3_scale_to_model", "1", true, false,
+	"Skater and board scale down or up to a playermodel much smaller or bigger than the skater (0 = never)")
+local SCALE_BELOW, SCALE_ABOVE = 0.75, 1.5
+local MIN_SCALE, MAX_SCALE = 0.1, 4
+local modelScale = 1 -- what the skater is scaled by for the model worn now
 local neckChain = {} -- { { bone, its offset from its parent at rest, convar }, ... } parents first
 local kids = {} -- bone -> its children
 local parentOf = {} -- bone -> its parent
@@ -623,7 +636,7 @@ local function FindNeck(ent)
 	for _, name in ipairs(TORSO) do add(name, cv_torso) end
 	for _, name in ipairs({ "Neck1", "Head1" }) do add(name, cv_neck) end
 	for _, name in ipairs(LIMBS) do add(name, cv_limbs) end
-	legScale = nil
+	legScale, modelScale = nil, 1
 	local function Z(name)
 		local i = ent:LookupBone("ValveBiped.Bip01_" .. name)
 		return i and rest[i] and rest[i]:GetTranslation().z
@@ -634,8 +647,17 @@ local function FindNeck(ent)
 		local own = hip - (la + ra) / 2
 		local skater = sh:GetTranslation().z - (sl:GetTranslation().z + sr:GetTranslation().z) / 2
 		if own > 1 and skater > 1 then
-			legScale = math.Clamp(own / skater, 0.75, 1.5)
-			print(("[skate3] legs %.0f%% of the skater's, hips lifted to match"):format(legScale * 100))
+			local ratio = own / skater
+			if cv_scale:GetBool() and (ratio < SCALE_BELOW or ratio > SCALE_ABOVE) then
+				modelScale = math.Clamp(ratio, MIN_SCALE, MAX_SCALE)
+				print(("[skate3] legs %.0f%% of the skater's: skater and board scaled to %.0f%% to match (skate3_scale_to_model 0 turns this off)"):format(ratio * 100, modelScale * 100))
+			end
+			-- What's left once the skater is scaled: nothing for a model in
+			-- scale range, the old hip lift for the rest.
+			legScale = math.Clamp(ratio / modelScale, 0.75, 1.5)
+			if modelScale == 1 then
+				print(("[skate3] legs %.0f%% of the skater's, hips lifted to match"):format(legScale * 100))
+			end
 		end
 	end
 end
@@ -841,7 +863,7 @@ function Skater.ShowModel(ply)
 		local callback = not real and cv_bones:GetString() == "callback"
 		-- The finishing touches work on whichever body is drawn.
 		model.skate3AnimEnt = real and ply or model
-		Anim.Setup(model.skate3AnimEnt, rest, data, stand)
+		Anim.Setup(model.skate3AnimEnt, rest, data, stand, modelScale)
 		if callback then
 			model:AddCallback("BuildBonePositions", BuildBones)
 		end
@@ -885,6 +907,7 @@ concommand.Add("skate3_bone_report", function()
 			model:GetNumBodyGroups(), restFrom),
 		model.skate3Real and ("posing your own body, frozen on %s"):format(frozen and frozen.sequence or "?")
 			or "posing a copy (skate3_body copy, or your own body couldn't be posed)",
+		("skater scaled to %.0f%% of its size for this model (skate3_scale_to_model)"):format(modelScale * 100),
 	}
 	for i = 0, model:GetNumBodyGroups() - 1 do
 		lines[#lines + 1] = ("bodygroup %d %s = %d (player %d)"):format(i, model:GetBodygroupName(i),
@@ -1024,7 +1047,7 @@ local function RealFrame(p)
 	lastFrame = {
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
 		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, boardOf = p,
-		model = model.skate3Name,
+		model = model.skate3Name, scale = p.scale,
 	}
 	return { origin = origin, yaw = yaw, rots = rots, final = final, hips = hipsAt and pelvis or nil, hipsAt = hipsAt },
 		forward, up
@@ -1054,7 +1077,7 @@ local function CopyFrame(p)
 	if #sent == 0 then return nil end
 	return {
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
-		bones = sent, board = BoardParts(p, origin), model = model.skate3Name,
+		bones = sent, board = BoardParts(p, origin), model = model.skate3Name, scale = p.scale,
 	}
 end
 
@@ -1156,6 +1179,37 @@ local function UpdateFade(p)
 	ApplyFade(t * t * (3 - 2 * t))
 end
 
+-- The skater's pose p scaled by s about its origin (positions only, the
+-- turns stay): a copy, as the simulation's own pose is read elsewhere.
+-- Everything built from it (the body, the board, the hands and feet) then
+-- works at the model's size.
+local function Scaled(p, s)
+	local o = p.pos
+	local out = {}
+	for k, v in pairs(p) do out[k] = v end
+	local bones = {}
+	for name, m in pairs(p.bones) do
+		local c = { m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12] }
+		c[4] = o[1] + (m[4] - o[1]) * s
+		c[8] = o[2] + (m[8] - o[2]) * s
+		c[12] = o[3] + (m[12] - o[3]) * s
+		bones[name] = c
+	end
+	out.bones, out.scale, out.boardShift = bones, s, nil
+	return out
+end
+
+-- Turning the scaling on or off works the model out again.
+cvars.AddChangeCallback("skate3_scale_to_model", function()
+	if not IsValid(model) then return end
+	if IsValid(owner) then
+		Body.Release(owner)
+		Body.HideBoard(owner)
+	end
+	model.skate3Name = nil
+	lastBuild = -math.huge
+end, "skate3_scale")
+
 function Skater.UpdateModel(p)
 	pose = p
 	-- The player's model can change mid-ride (or arrive late after spawning).
@@ -1174,6 +1228,11 @@ function Skater.UpdateModel(p)
 		Skater.ShowModel(owner)
 	end
 	if not (IsValid(model) and p) then return end
+	-- After any rebuild above, which is where the scale is worked out.
+	if p.bones and p.pos and modelScale ~= 1 then
+		p = Scaled(p, modelScale)
+		pose = p
+	end
 	model:SetPos(Vector(p.pos[1], p.pos[2], p.pos[3]))
 	UpdateFade(p)
 	-- Only on the model it was measured from: another model's bones are
@@ -1191,7 +1250,7 @@ function Skater.UpdateModel(p)
 		Stats.frame = (Stats.frame or 0) + s2 - s
 		Stats.apply = (Stats.apply or 0) + SysTime() - s2
 		if not Skater.Skip.board then
-			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up, boardShift = p.boardShift }, Skater.DrawBoard)
+			Body.ShowBoard(owner, { pos = p.pos, bones = p.bones, forward = forward, up = up, boardShift = p.boardShift, scale = p.scale }, Skater.DrawBoard)
 		end
 	end
 end

@@ -1037,7 +1037,7 @@ function Body.ShowBoard(ply, pose, draw)
 				-- No Skate 3 data on this computer: a plain deck instead.
 				render.SetColorMaterial()
 				render.DrawBox(Vector(p.pos[1], p.pos[2], p.pos[3]), p.forward:AngleEx(p.up),
-					BOARD_MIN, BOARD_MAX, BOARD_COLOR, true)
+					BOARD_MIN * (p.scale or 1), BOARD_MAX * (p.scale or 1), BOARD_COLOR, true)
 			end
 		end
 		e:DrawShadow(false)
