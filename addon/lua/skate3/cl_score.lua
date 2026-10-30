@@ -284,7 +284,9 @@ local function Update(pose)
 			flash = { text = "+" .. Points(sc.banked - last.banked), value = sc.banked - last.banked, good = true, at = now }
 		elseif last.active and not sc.active then
 			if bailing then
-				flash = { text = "Bailed", value = shown, good = false, at = now } -- the score lost
+				-- The score lost. Hall of Meat is off here, so there's no "Bailed" to show: the
+				-- widget just goes (with it on, MeatView above shows the bail).
+				flash, seenAt = nil, -math.huge
 			elseif sc.line <= last.line + 0.5 and last.sequence > 0.5 then
 				-- A trick on its own, not part of a line: it scores but never banks.
 				flash = { text = "+" .. Points(last.sequence), value = last.sequence, good = true, at = now }

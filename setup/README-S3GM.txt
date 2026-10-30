@@ -85,7 +85,7 @@ sharp at any resolution; restart the game once after running setup.
 PlayStation buttons: drawn by the mod. If setup finds a decrypted PS3 copy of Skate 3
 (the folder with PS3_GAME in it, next to the setup or in Downloads or Desktop)
 it makes the game's own PlayStation button pictures from it instead.
-Hall of Meat (Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
+Hall of Meat (on by default; Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
 score, in red, with a skeleton showing fractured bones yellow and broken ones
 red. Bail on purpose: hold both triggers and click both sticks.
 Fixing a map: the Skate 3 Surface tool (tool gun > Skate 3) flattens a bumpy

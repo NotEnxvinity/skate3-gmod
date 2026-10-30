@@ -20,7 +20,7 @@
 
 local Meat = {}
 
-local cv_meat = CreateClientConVar("skate3_hall_of_meat", "0", true, false,
+local cv_meat = CreateClientConVar("skate3_hall_of_meat", "1", true, false,
 	"Hall of Meat: bails score points and break bones (1 on, 0 off)")
 
 function Meat.Enabled()
