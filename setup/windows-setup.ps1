@@ -17,6 +17,12 @@
 # converters, vgmstream, and numpy and Pillow in a private environment.
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+# A PYTHONHOME or PYTHONPATH left in the environment by some other program
+# points the portable Python at the wrong standard library ("No module named
+# 'encodings'"). Only this window loses them.
+foreach ($name in @('PYTHONHOME', 'PYTHONPATH', 'PYTHONSTARTUP', 'PYTHONUSERBASE', 'PYTHONEXECUTABLE', 'PYTHONSAFEPATH')) {
+    Remove-Item -LiteralPath "Env:$name" -ErrorAction SilentlyContinue
+}
 
 # Runs a program only to ask it something: its output, or $null when it
 # fails in any way. With errors set to stop, a program that merely writes to
@@ -29,6 +35,13 @@ function Ask($exe, [string[]]$arguments) {
         if ($LASTEXITCODE -eq 0) { return ("$out").Trim() }
     } catch {}
     return $null
+}
+
+# True when this Python starts and has what the setup needs from it: the
+# standard library (encodings), venv and pip's installer, and ssl for pip.
+function PythonWorks($exe, [string[]]$flags) {
+    if (-not (Test-Path -LiteralPath $exe -PathType Leaf)) { return $false }
+    return ((Ask $exe ($flags + @('-I', '-c', 'import encodings, venv, ensurepip, ssl; print(1)'))) -eq '1')
 }
 
 # The engine revision the skate host was built from (the same as skate3-setup.sh).
@@ -51,6 +64,50 @@ function Die($message) {
     Write-Host "error: $message" -ForegroundColor Red
     [void][System.Windows.Forms.MessageBox]::Show($message, 'S3GM setup', 'OK', 'Error')
     exit 1
+}
+
+# Downloads Python's portable build into $portable, replacing whatever is
+# there, and checks it can start. Stops with a message that names the cause
+# when it can't.
+function FetchPython {
+    Write-Host "Fetching Python $PythonVersion for the converters (one time, nothing is installed)..."
+    $zip = Join-Path $cache 'python.zip'
+    $partial = "$portable.partial"
+    # A copy a stopped run left half done would swallow the new one.
+    foreach ($old in @($portable, $partial)) {
+        if (Test-Path -LiteralPath $old) {
+            try { Remove-Item -LiteralPath $old -Recurse -Force }
+            catch { Die "Couldn't remove the old Python folder $old : $($_.Exception.Message) Close anything using it (an antivirus scan, a Python window), delete $cache by hand, then run this again." }
+        }
+    }
+    try { Invoke-WebRequest -Uri $PythonZip -OutFile $zip -UseBasicParsing }
+    catch { Die "Downloading Python from nuget.org failed: $($_.Exception.Message) Check the internet connection, then run this again." }
+    try { Expand-Archive -LiteralPath $zip -DestinationPath $partial -Force }
+    catch { Die "Unpacking Python failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
+    # Expand-Archive can leave files out without saying so; the .NET unzipper
+    # fills in what is missing.
+    if (-not (Test-Path -LiteralPath (Join-Path $partial 'tools\Lib\encodings\__init__.py'))) {
+        try {
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            Remove-Item -LiteralPath $partial -Recurse -Force -ErrorAction SilentlyContinue
+            [System.IO.Compression.ZipFile]::ExtractToDirectory($zip, $partial)
+        } catch {}
+    }
+    Remove-Item -LiteralPath $zip -Force
+    Move-Item -LiteralPath $partial -Destination $portable
+    if (-not (Test-Path -LiteralPath $portableExe)) {
+        Die "Python was fetched, but $portableExe is missing. An antivirus may have removed it: allow the folder $cache, delete it, then run this again."
+    }
+    if (-not (PythonWorks $portableExe @())) {
+        $why = ''
+        if (-not (Test-Path -LiteralPath (Join-Path $portable 'tools\Lib\encodings\__init__.py'))) {
+            $why = "Its Lib folder came out empty, which is what an antivirus does when it quarantines Python's files."
+        }
+        # Python's own words, for the console and for a screenshot.
+        $ErrorActionPreference = 'Continue'
+        Write-Host (& $portableExe -I -c 'import encodings, venv, ensurepip, ssl' 2>&1 | ForEach-Object { "$_" } | Out-String)
+        Die "Python was fetched but won't start. $why Allow the folder $cache in your antivirus (Windows Security > Virus & threat protection > Manage settings > Exclusions), delete the folder, then run this again."
+    }
 }
 
 # What to convert: a disc image dragged onto the .bat, --game, an .iso (or
@@ -198,31 +255,17 @@ foreach ($candidate in @(@('py', '-3.13'), @('py', '-3.12'), @('py', '-3.11'), @
     # Not $rest: that holds the player's own arguments for skate3_setup.py.
     $exe = $candidate[0]; $flags = @($candidate | Select-Object -Skip 1)
     if (-not (Get-Command $exe -ErrorAction SilentlyContinue)) { continue }
-    $version = Ask $exe ($flags + @('-c', 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))'))
-    if ($version -in @('3.10', '3.11', '3.12', '3.13')) { $python = $candidate; break }
+    $pyVersion = Ask $exe ($flags + @('-c', 'import sys; print(sys.version_info[0], sys.version_info[1], sep=chr(46))'))
+    # One that can't even start the setup's own imports is as good as none.
+    if ($pyVersion -in @('3.10', '3.11', '3.12', '3.13') -and (PythonWorks $exe $flags)) { $python = $candidate; break }
 }
 if (-not $python) {
     # None installed: Python's own portable build, kept with the rest.
     $portable = Join-Path $cache "python-$PythonVersion"
     $portableExe = Join-Path $portable 'tools\python.exe'
-    if (-not (Test-Path $portableExe)) {
-        Write-Host "Fetching Python $PythonVersion for the converters (one time, nothing is installed)..."
-        $zip = Join-Path $cache 'python.zip'
-        $partial = "$portable.partial"
-        # A copy a stopped run left half done would swallow the new one.
-        foreach ($old in @($portable, $partial)) {
-            if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
-        }
-        try { Invoke-WebRequest -Uri $PythonZip -OutFile $zip -UseBasicParsing }
-        catch { Die "Downloading Python from nuget.org failed: $($_.Exception.Message) Check the internet connection, then run this again." }
-        try { Expand-Archive -LiteralPath $zip -DestinationPath $partial -Force }
-        catch { Die "Unpacking Python failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
-        Remove-Item -LiteralPath $zip -Force
-        Move-Item -LiteralPath $partial -Destination $portable
-        if (-not (Test-Path -LiteralPath $portableExe)) {
-            Die "Python was fetched, but $portableExe is missing. An antivirus may have removed it: allow the folder $cache, delete it, then run this again."
-        }
-    }
+    # A copy that is there but can't start (its Lib folder emptied by a stopped
+    # run, an antivirus or a cleaner) is thrown away and fetched again, never reused.
+    if (-not (PythonWorks $portableExe @())) { FetchPython }
     $python = @($portableExe)
 }
 $pyExe = $python[0]; $pyArgs = @($python | Select-Object -Skip 1)
@@ -273,9 +316,27 @@ if (Test-Path $venvPython) {
 }
 if (-not $ready) {
     Write-Host 'Creating a Python environment for the converters (one time)...'
-    if (Test-Path $venv) { Remove-Item -Recurse -Force $venv }
-    & $pyExe @pyArgs -m venv $venv
-    if ($LASTEXITCODE -ne 0) { Die 'Python could not make its environment.' }
+    $venvLog = ''
+    $venvCode = 1
+    # Twice at most: with our own portable Python, the second try starts from a fresh copy of it.
+    for ($attempt = 1; $attempt -le 2 -and $venvCode -ne 0; $attempt++) {
+        if ($attempt -eq 2) {
+            if (-not $portable) { break }
+            Write-Host 'Python could not make its environment; fetching a fresh copy of it and trying once more...'
+            FetchPython
+        }
+        if (Test-Path $venv) { Remove-Item -Recurse -Force $venv }
+        # Python writes its errors to stderr, which would end the setup here.
+        $ErrorActionPreference = 'Continue'
+        $venvLog = & $pyExe @pyArgs -I -m venv $venv 2>&1 | ForEach-Object { "$_" } | Out-String
+        $venvCode = $LASTEXITCODE
+        $ErrorActionPreference = 'Stop'
+    }
+    if ($venvCode -ne 0) {
+        Write-Host $venvLog
+        $tail = if ($venvLog.Length -gt 500) { $venvLog.Substring($venvLog.Length - 500) } else { $venvLog }
+        Die ("Python could not make its environment. If an antivirus is running, allow the folder $cache, delete it, then run this again.`n`n" + $tail.Trim())
+    }
     & $venvPython -m pip install -q --upgrade pip
     & $venvPython -m pip install -q 'numpy==2.2.6' 'Pillow==11.3.0'
     if ($LASTEXITCODE -ne 0) { Die 'Installing numpy and Pillow failed (see above).' }
