@@ -169,10 +169,18 @@ function Meat.Update(pose, ply)
 	end
 	local bailing = pose and pose.state and pose.state:find("^Wipeout") ~= nil
 	if pose and pose.state and not bailing then rideSeen = true end
+	-- The simulation's tick going backwards is a new ride (a marker, a respawn)
+	-- whatever else was reset: its bail is over.
+	if bail and lastTick and pose and pose.tick and pose.tick < lastTick then
+		print(("[skate3] Hall of Meat: bail ended, tick went back (%d -> %d)"):format(lastTick, pose.tick))
+		bail, last, rideSeen = nil, nil, false
+		bailing = false
+	end
 	if not bailing or not pose.bones or (not bail and not rideSeen) then
 		if bail then
 			last, bail = bail, nil
 			last.endedAt = now
+			print(("[skate3] Hall of Meat: bail ended (state %s)"):format(tostring(pose and pose.state)))
 		end
 		track, lastTick, hipsAt = {}, nil, nil
 		return
@@ -183,6 +191,7 @@ function Meat.Update(pose, ply)
 		bail = { points = 0, parts = {}, startedAt = now, hitAt = now }
 		for _, part in ipairs(PARTS) do bail.parts[part.id] = { damage = 0, level = 0 } end
 		last = nil
+		print(("[skate3] Hall of Meat: bail started (state %s, tick %s)"):format(pose.state, tostring(pose.tick)))
 	end
 	-- Only new simulation steps say anything about how the body moved.
 	local tick = pose.tick
@@ -503,6 +512,11 @@ end
 
 hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(depth, skybox)
 	if depth or skybox or not lastBones or not Meat.Enabled() or (Meat.Skipped and Meat.Skipped()) then return end
+	-- No ride, no skeleton: a bail can't outlive the ride it was in.
+	if Meat.Active and not Meat.Active() then
+		bail, last = nil, nil
+		return
+	end
 	local b, going = bail, true
 	if not b then b, going = last, false end
 	if not b then return end

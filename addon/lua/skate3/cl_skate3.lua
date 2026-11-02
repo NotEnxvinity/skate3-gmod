@@ -43,6 +43,8 @@ local BOARD_WEAPON = "weapon_skate3"
 
 local loaded = false
 local active = false
+-- Hall of Meat's skeleton only shows while a ride is on.
+Score.Meat.Active = function() return active end
 local boardHeld = false
 local rideWhenReady = false
 local lastRemount = -math.huge
@@ -309,12 +311,20 @@ end, nil, "Print what the board is made of and where it is drawn")
 
 net.Receive("skate3_state", function()
 	if not net.ReadBool() and active then
+		-- As Stop does: the pose the next ride must not read as its own.
+		local latest = skate3.GetPose and skate3.GetPose()
 		skate3.Suspend()
+		staleTick = latest and latest.tick or pose and pose.tick or staleTick
 		active = false
 		Keyboard.active = false
 		pose = nil
+		lastTick = nil
+		recent, wasBailing = {}, false
 		Skater.HideModel()
 		Sounds.Stop()
+		-- The server took the skater off the board (a respawn, a death): the
+		-- bail they were in must not stay up, with no ride left to end it.
+		Score.Reset()
 		Players.Reset()
 		Menu.Reset()
 	end
