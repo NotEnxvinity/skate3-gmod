@@ -54,30 +54,64 @@ local function CurrentName()
 	return "Unknown"
 end
 
-local asked -- the row the player said Yes to, waiting for the server's answer
+local asked -- the model name waiting for the server's answer
 local shown = {} -- the rows of the playermodel list, so "Wearing" can move
 
-local function Switch(row)
-	asked = row
+local function Say(text)
+	print("[skate3] playermodel: " .. text)
+end
+
+-- Asks the server to switch you to the registered model `name`. The server
+-- answers either way (below); if nothing comes back the player is told so
+-- rather than left guessing.
+local function Switch(name)
+	asked = name
+	Say(("asking the server for %q (it is %s now)"):format(name, tostring(LocalPlayer():GetModel())))
 	net.Start("skate3_playermodel")
-	net.WriteString(row.name)
+	net.WriteString(name)
 	net.SendToServer()
+	timer.Create("skate3_playermodel_wait", 3, 1, function()
+		if asked ~= name then return end
+		asked = nil
+		Say("the server never answered")
+		UI.Toast("The server didn't answer: is S3GM installed on it?")
+	end)
 end
 
 -- The server's answer: ok and the name it applied, or not ok and why.
 net.Receive("skate3_playermodel", function()
 	local ok, text = net.ReadBool(), net.ReadString()
-	if ok then
-		-- Remember it for respawns and restarts (the sandbox applies these on spawn).
-		RunConsoleCommand("cl_playermodel", text)
-		RunConsoleCommand("cl_playerskin", "0")
-		RunConsoleCommand("cl_playerbodygroups", "")
-		for _, r in ipairs(shown) do r.tag = (r.name == text) and "Wearing" or nil end
-		UI.Toast("Now skating as " .. Pretty(text))
-	else
-		UI.Toast(text)
-	end
+	timer.Remove("skate3_playermodel_wait")
 	asked = nil
+	if not ok then
+		Say("the server said no: " .. text)
+		UI.Toast(text)
+		return
+	end
+	Say("the server switched you to " .. text)
+	-- Remember it for respawns and restarts (the sandbox applies these on spawn).
+	RunConsoleCommand("cl_playermodel", text)
+	RunConsoleCommand("cl_playerskin", "0")
+	RunConsoleCommand("cl_playerbodygroups", "")
+	for _, r in ipairs(shown) do r.tag = (r.name == text) and "Wearing" or nil end
+	UI.Toast("Now skating as " .. Pretty(text))
+	-- The model arrives with the next network update; say so if it never does.
+	timer.Simple(2, function()
+		local want = Norm(player_manager.TranslatePlayerModel(text))
+		if IsValid(LocalPlayer()) and Norm(LocalPlayer():GetModel()) ~= want then
+			Say(("still wearing %s after the switch to %s (%s)"):format(tostring(LocalPlayer():GetModel()), text, want))
+		end
+	end)
+end)
+
+-- From the console too, for trying a model without the menu: skate3_playermodel <name>
+concommand.Add("skate3_playermodel", function(_, _, args, line)
+	local name = (line or ""):Trim():gsub('^"(.*)"$', "%1")
+	if name == "" then
+		Say("usage: skate3_playermodel <name>  (a name from the playermodel list, e.g. alyx)")
+		return
+	end
+	Switch(name)
 end)
 
 local function OpenModels()
@@ -93,9 +127,11 @@ local function OpenModels()
 				UI.Toast("You're already " .. row.label)
 				return
 			end
+			-- Right on a model asks once; Yes is under the cursor, so right again
+			-- does it, and left or B backs out.
 			Menu.Prompt("Switch to " .. row.label .. "?", {
+				{ label = "Yes", run = function() Switch(row.name) end },
 				{ label = "No" },
-				{ label = "Yes", run = function() Switch(row) end },
 			})
 		end,
 	})
