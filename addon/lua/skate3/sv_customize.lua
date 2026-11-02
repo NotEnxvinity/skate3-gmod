@@ -40,7 +40,10 @@ net.Receive("skate3_playermodel", function(_, ply)
 	if not (file.Exists(path, "GAME") or util.IsValidModel(path)) then return Reply(ply, false, "That playermodel's files aren't on the server") end
 	ply.skate3ModelAt = CurTime()
 	util.PrecacheModel(path)
-	ply:SetModel(path)
+	-- The entity's own SetModel, not the player's: addons like Enhanced
+	-- PlayerModel Selector replace Player:SetModel with an "enforcer" that
+	-- silently refuses every model but their own (Enx's test 4b did nothing).
+	FindMetaTable("Entity").SetModel(ply, path)
 	ply:SetSkin(0)
 	for i = 0, ply:GetNumBodyGroups() - 1 do ply:SetBodygroup(i, 0) end
 	-- The viewmodel hands follow the model; a gamemode that does this its own way
@@ -48,6 +51,9 @@ net.Receive("skate3_playermodel", function(_, ply)
 	if ply.SetupHands then
 		local ok, err = pcall(ply.SetupHands, ply)
 		if not ok then print("[skate3] playermodel: SetupHands failed: " .. tostring(err)) end
+	end
+	if ply:GetModel():lower() ~= path:lower() then
+		return Reply(ply, false, "Another addon is holding your playermodel")
 	end
 	Reply(ply, true, name)
 end)
