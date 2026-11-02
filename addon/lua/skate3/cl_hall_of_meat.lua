@@ -147,6 +147,11 @@ local function Hit(index, part, state, severity, now, tr)
 end
 
 local told -- the mode switch as the engine last heard it
+-- Whether a pose that wasn't a wipeout has come since the last reset. A ride
+-- restarted from a bail (the marker, a respawn) can open on the old ride's
+-- last pose or on the standing-up pose of the wipeout, and neither is a bail:
+-- one begins when the skater goes from riding into a wipeout.
+local rideSeen = false
 
 -- Follows the skater every frame while riding.
 function Meat.Update(pose, ply)
@@ -163,7 +168,8 @@ function Meat.Update(pose, ply)
 		return
 	end
 	local bailing = pose and pose.state and pose.state:find("^Wipeout") ~= nil
-	if not bailing or not pose.bones then
+	if pose and pose.state and not bailing then rideSeen = true end
+	if not bailing or not pose.bones or (not bail and not rideSeen) then
 		if bail then
 			last, bail = bail, nil
 			last.endedAt = now
@@ -226,6 +232,7 @@ end
 
 function Meat.Reset()
 	bail, last, track, lastTick, hipsAt, lastBones, lastPos = nil, nil, {}, nil, nil, nil, nil
+	rideSeen = false
 end
 
 -- A fresh ride's first moments: no bail starts and none is kept, whatever the

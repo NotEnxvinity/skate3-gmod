@@ -18,7 +18,7 @@ local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_retail_audio", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
-	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee", "skate3_update_notices", "skate3_hom_look" }
+	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee", "skate3_update_notices", "skate3_hom_look", "skate3_ui_hd" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
@@ -160,6 +160,7 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Half-Life 2", "hl2" },
 		})
 		panel:ControlHelp("Skate 3's own look comes from your disc: run the S3GM setup again after updating if it isn't there yet (until then you get Minimal).")
+		panel:CheckBox("HD UI images (only if you added the HD pack)", "skate3_ui_hd")
 		panel:CheckBox("Sharp text (the disc's Futura font)", "skate3_ui_crisp")
 		panel:ControlHelp("Setup installs the disc's Futura as a real font so the text stays sharp at any resolution. Restart the game after running setup.")
 		Choices(panel, "Button pictures", "skate3_ui_glyphs", {
