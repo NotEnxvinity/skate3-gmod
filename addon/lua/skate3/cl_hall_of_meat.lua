@@ -186,8 +186,6 @@ function Meat.Update(pose, ply)
 		return
 	end
 	if not bail then
-		-- For console.log: a bail that shows up where none was expected can be traced.
-		print(("[skate3] Hall of Meat: bail starts (%s, tick %s)"):format(tostring(pose.state), tostring(pose.tick)))
 		bail = { points = 0, parts = {}, startedAt = now, hitAt = now }
 		for _, part in ipairs(PARTS) do bail.parts[part.id] = { damage = 0, level = 0 } end
 		last = nil
