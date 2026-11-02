@@ -78,3 +78,7 @@ byte layout of a vphysics box solid (what Source's .phy files and a map's
 physcollide lump hold) was learned from a box .phy that ships with Garry's
 Mod; the file only supplies the generic 12-triangle box topology, and every
 coordinate and size in it is rewritten.
+
+setup/setup_fonts.py embeds Jost (Latin subset, regular and bold) for the
+setup page, SIL Open Font License 1.1, Copyright 2020 The Jost Project Authors
+(https://github.com/indestructible-type/Jost); the licence text is in that file.

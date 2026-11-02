@@ -522,13 +522,37 @@ def self_test():
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 
-def window(gmod, game=None):
+def window(gmod, game=None, web=False):
     """Like the old setup app: the Garry's Mod folder and disc filled in as
-    best we can, the player checks or changes them, then presses Install."""
+    best we can, the player checks or changes them, then presses Install.
+    The Tk window is the normal one. The browser page (setup_web.py, its own
+    fonts and theme, so it never depends on the system's) is opt-in with --web
+    or S3GM_WEB=1, and the way out when this Python has no Tk."""
+    if not web and os.environ.get('S3GM_WEB') != '1':
+        try:
+            import tkinter  # noqa: F401
+        except ImportError:
+            web = True
+    if web or os.environ.get('S3GM_WEB') == '1':
+        import setup_web
+        setup_web.serve(gmod, game, {'version': s3gm_version, 'garrysmod_in': garrysmod_in, 'install': install,
+                                     'workshop_copy': workshop_copy, 'workshop_note': WORKSHOP_NOTE})
+        return
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     version = s3gm_version()
     root = tk.Tk()
+    try:
+        # A Tk built without Xft only lists the X server's fonts; take a readable one if it has it.
+        from tkinter import font as tkfont
+        have = {name.lower(): name for name in tkfont.families(root)}
+        for wanted in ('dejavu sans', 'noto sans', 'liberation sans', 'helvetica', 'arial'):
+            if wanted in have:
+                for named in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont'):
+                    tkfont.nametofont(named).configure(family=have[wanted], size=11)
+                break
+    except Exception:
+        pass
     root.title(f'S3GM {version} setup'.replace('  ', ' '))
     root.geometry('760x540')
     root.minsize(600, 440)
@@ -651,6 +675,7 @@ def main():
     parser.add_argument('--game', type=Path, help='your Skate 3 disc image (.iso) or extracted default.xex')
     parser.add_argument('--gmod', type=Path, help='the garrysmod folder (found automatically if left out)')
     parser.add_argument('--window', action='store_true', help='show the setup window, filled in with --game and --gmod')
+    parser.add_argument('--web', action='store_true', help='show the setup window as a page in the browser instead of the Tk window')
     parser.add_argument('--no-addon', action='store_true',
                         help='don\'t install the Lua addon (removes an old copy, so the Workshop one loads)')
     # The addon is always installed now; kept so old command lines still work.
@@ -675,7 +700,7 @@ def main():
     else:
         gmod = find_gmod()
     if args.window or args.game is None:
-        window(gmod, args.game)
+        window(gmod, args.game, args.web)
         return 0
     if gmod is None:
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
