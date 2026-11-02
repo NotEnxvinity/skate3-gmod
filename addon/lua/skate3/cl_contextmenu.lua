@@ -363,8 +363,51 @@ function Looks.skate3.Icon(name, x, y, alpha)
 	UI.Button(name, x, y, 255, 255, 255, 255 * alpha)
 end
 
-function Looks.skate3.Box(x, y, w, h)
-	UI.Rounded(6, x, y, w, h, Color(60, 78, 112, 175))
+-- Skate 3's phone panel as the whole backdrop: its corners as they are, its
+-- middle stretched sideways (the centre column, since the art is mirrored
+-- about it) and down, over (x, y, w, h).
+function Looks.skate3.Box(x, y, w, h, alpha)
+	local p = UI.Art().panel
+	local extra, mid = math.max(w - 64, 0), math.max(h - 64, 2)
+	local ky, down = mid / 71, mid - 71
+	local ox, oy = x - 91, y - 48
+	local a = 255 * p.opacity * (alpha or 1)
+	local function Place(part)
+		for _, piece in ipairs(p[part]) do
+			local q, right = {}, piece.quad[1][1] >= 123
+			for i = 1, 4 do
+				local c = piece.quad[i]
+				local py = c[2]
+				if part == "mid" then py = 80 + (py - 80) * ky elseif part == "bottom" then py = py + down end
+				q[i] = { c[1] + (right and extra or 0), py, c[3], c[4] }
+			end
+			UI.Quad(piece.tex, q, ox, oy, 1, 255, 255, 255, a)
+			-- The stretch between the halves: the left half's centre edge held out.
+			if extra > 0 and not right then
+				local m = { q[2], { q[2][1] + extra, q[2][2], q[2][3], q[2][4] }, { q[3][1] + extra, q[3][2], q[3][3], q[3][4] }, q[3] }
+				UI.Quad(piece.tex, m, ox, oy, 1, 255, 255, 255, a)
+			end
+		end
+	end
+	Place("top") Place("mid") Place("bottom")
+end
+
+-- The selected row: the game's neon selector, a soft highlight without it.
+function Looks.skate3.Select(x, y, w, h, alpha)
+	if UI.HasWeb() then
+		UI.NineSlice("web_selector", x, y, w, h, 10, 255, 255, 255, 255 * alpha)
+	else
+		UI.Rounded(6, x, y, w, h, Color(255, 255, 255, 38 * alpha))
+	end
+end
+
+-- A value's chevrons (the game's blue ones), `dir` -1 left or 1 right, centred at (cx, cy).
+function Looks.skate3.Chevron(dir, cx, cy, alpha)
+	if UI.HasWeb() then
+		UI.Quad(dir < 0 and "web_prev" or "web_next", { { cx - 9, cy - 9, 0, 0 }, { cx + 9, cy - 9, 1, 0 }, { cx + 9, cy + 9, 1, 1 }, { cx - 9, cy + 9, 0, 1 } }, 0, 0, 1, 255, 255, 255, 255 * alpha)
+	else
+		UI.Arrow(dir < 0 and "DPad_Left" or "DPad_Right", cx, cy, 5, Color(243, 237, 210, 255 * alpha))
+	end
 end
 
 -- The minimal look: Helvetica Neue Bold, a dark translucent strip.
@@ -489,7 +532,7 @@ local function DrawRoot(look, pose, style)
 		end
 	end
 	if style == "skate3" then
-		look.Strip(height / PITCH)
+		look.Box(91, 48, 67 + widest + 30, height + 21)
 	else
 		look.Strip(height / PITCH, 80 + widest + 24)
 	end
@@ -535,8 +578,12 @@ local function DrawList(look, style)
 		local top = y + 54 + (i - first) * PITCH
 		local alpha = (r.enabled == false) and 0.3 or 1
 		if i == list.sel then
-			UI.Rounded(6, x + 8, top, width - 16, PITCH - 4, Color(255, 255, 255, 38))
-			UI.Arrow("DPad_Right", x + 24, top + 17, 6, Color(243, 237, 210, 255))
+			if look.Select then
+				look.Select(x + 6, top - 2, width - 12, PITCH, 1)
+			else
+				UI.Rounded(6, x + 8, top, width - 16, PITCH - 4, Color(255, 255, 255, 38))
+				UI.Arrow("DPad_Right", x + 24, top + 17, 6, Color(243, 237, 210, 255))
+			end
 		end
 		local labelX = x + 46
 		if r.model then
@@ -558,8 +605,17 @@ local function DrawList(look, style)
 			local lit = i == list.sel and 1 or 0.35
 			local right = x + width - 20
 			look.Right(r.tag, right - 26, top + 7, 20, alpha)
-			UI.Arrow("DPad_Right", right - 8, top + 17, 5, Color(243, 237, 210, 255 * lit))
-			UI.Arrow("DPad_Left", right - 26 - look.Width(r.tag, 20) - 16, top + 17, 5, Color(243, 237, 210, 255 * lit))
+			if look.Chevron then
+				-- The game's chevrons sit on the chosen row only.
+				if i == list.sel then
+					look.Chevron(1, right - 8, top + 17, 1)
+					-- (An info row, the update line, has nothing to change back: only right opens its page.)
+					if not r.info then look.Chevron(-1, right - 26 - look.Width(r.tag, 20) - 16, top + 17, 1) end
+				end
+			else
+				UI.Arrow("DPad_Right", right - 8, top + 17, 5, Color(243, 237, 210, 255 * lit))
+				UI.Arrow("DPad_Left", right - 26 - look.Width(r.tag, 20) - 16, top + 17, 5, Color(243, 237, 210, 255 * lit))
+			end
 		elseif r.tag then
 			look.Right(r.tag, x + width - 20, top + 7, 20, alpha)
 		end

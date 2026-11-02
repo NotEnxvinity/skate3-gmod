@@ -177,6 +177,32 @@ function UI.Shape(id, dx, dy, k, r, g, b, a)
 	end
 end
 
+-- True when setup read the game's web-style menu pieces (the neon selector
+-- and the value chevrons) off the disc.
+function UI.HasWeb()
+	local textures = UI.Art() and art.textures
+	return textures ~= nil and textures.web_selector ~= nil and textures.web_next ~= nil and textures.web_prev ~= nil
+end
+
+-- A picture stretched to (x, y, w, h) with its edges kept: `m` canvas units
+-- of border all round, taken from the same number of the picture's pixels.
+function UI.NineSlice(tex, x, y, w, h, m, r, g, b, a)
+	local info = art.textures[tex]
+	local tw, th = info.w, info.h
+	m = math.min(m, w / 2, h / 2, tw / 2, th / 2)
+	local us, vs = m / tw, m / th
+	local xs, ys = { x, x + m, x + w - m, x + w }, { y, y + m, y + h - m, y + h }
+	local us_, vs_ = { 0, us, 1 - us, 1 }, { 0, vs, 1 - vs, 1 }
+	for j = 1, 3 do
+		for i = 1, 3 do
+			UI.Quad(tex, {
+				{ xs[i], ys[j], us_[i], vs_[j] }, { xs[i + 1], ys[j], us_[i + 1], vs_[j] },
+				{ xs[i + 1], ys[j + 1], us_[i + 1], vs_[j + 1] }, { xs[i], ys[j + 1], us_[i], vs_[j + 1] },
+			}, 0, 0, 1, r, g, b, a)
+		end
+	end
+end
+
 -- The Hall of Meat panel's backdrop and magazine logo (the panel and a soft
 -- black shadow as they are, then the lettering tinted r, g, b) with their
 -- origin at (dx, dy). False if the disc art for it isn't there; the second

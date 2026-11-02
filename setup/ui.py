@@ -32,6 +32,13 @@ HD_BUTTON = 'ui/images/buttons/xbox360/buttons/button_%s_hud.png'
 HD_LOGO = 'ui/screens/hud2/homscoring/%s.png'
 HD_FONT = {'heavy': 'fonts/atlas-png/futuraheavy.png', 'shadow': 'fonts/atlas-png/futurashadow.png'}
 PANEL = (91.0, 48.0)  # where the quick menu's panel sits on the canvas
+# The game's own web-style menu pieces (plain PNGs inside miscboot.big): the
+# neon selector and the value chevrons the settings list borrows.
+WEB_DISC = {
+    'web_selector': 'data/webkit/Content/images/selector_small.png',
+    'web_next': 'data/webkit/Content/images/select_arrow_next.png',
+    'web_prev': 'data/webkit/Content/images/select_arrow_previous.png',
+}
 # The front-end archives the extractors read (miscboot.big is names.py's too).
 FROM_DISC = {'data/big/fedata.big', 'data/big/fetexture.big', 'data/big/fedynamic.big', 'data/big/miscboot.big'}
 
@@ -78,7 +85,24 @@ def logo_pieces(cache):
     return pieces
 
 
-def build(scoring, marker, out, report=print, logo=None):
+def web_images(game):
+    """{name: (rgba bytes, width, height)} for WEB_DISC, read from the disc's
+    miscboot.big; empty if it can't be read."""
+    import io
+    from PIL import Image
+    from vendor.skate3_ui.big import BigArchive
+    archive = BigArchive(Path(game) / 'data/big/miscboot.big')
+    found = {}
+    for name, path in WEB_DISC.items():
+        entry = next((e for e in archive.entries if e.path == path), None)
+        if entry is None:
+            continue
+        image = Image.open(io.BytesIO(archive.read(entry))).convert('RGBA')
+        found[name] = (image.tobytes(), image.width, image.height)
+    return found
+
+
+def build(scoring, marker, out, report=print, logo=None, web=None):
     """scoring: prepare_hud's output folder; marker: extract_session_marker's;
     logo: the extracted homscoring folder (optional, the Hall of Meat logo)."""
     scoring, marker, out = Path(scoring), Path(marker), Path(out)
@@ -172,6 +196,10 @@ def build(scoring, marker, out, report=print, logo=None):
         except Exception as error:
             report(f'Hall of Meat logo skipped: {error}')
 
+    # The web-style selector and chevrons (the settings and games lists), if read.
+    for name, (raw, width, height) in (web or {}).items():
+        add_texture(name, raw, width, height)
+
     (out / 'ui.json').write_text(json.dumps(ui, separators=(',', ':')), encoding='utf-8')
     report(f'Skate 3 UI art ready: {len(ui["textures"])} images, {len(ui["fonts"])} fonts')
     return ui
@@ -195,7 +223,12 @@ def export(engine, game, out, collections, report):
             logo = tmp / 'logo'
         except Exception as error:
             report(f'Hall of Meat logo skipped: {error}')
-        return build(tmp / 'scoring', tmp / 'marker', out, report, logo)
+        web = None
+        try:
+            web = web_images(Path(game).resolve())
+        except Exception as error:
+            report(f'The menu selector art was skipped: {error}')
+        return build(tmp / 'scoring', tmp / 'marker', out, report, logo, web)
 
 
 def install_hd(source, out, report):
