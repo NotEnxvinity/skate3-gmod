@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, audio_cache, convert, names, park, ui, xdvdfs  # noqa: E402
+import audio, audio_cache, convert, names, park, skeleton, ui, xdvdfs  # noqa: E402
 from syncdir import same_bytes, sync_tree, write_if_changed  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
@@ -40,6 +40,7 @@ FROM_DISC = {
     *audio.FROM_DISC,
     *names.FROM_DISC,
     *ui.FROM_DISC,
+    *skeleton.FROM_DISC,
     *park.FROM_DISC,
 }
 FROM_DISC_FOLDERS = ('data/anim/',)
@@ -420,6 +421,12 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
                 (ui_folder / 'setup-error.txt').write_text(f'{type(error).__name__}: {error}'[:300], encoding='utf-8')
             except OSError:
                 pass
+        # Hall of Meat's skeleton, Skate 3's own model; without it the mod draws plain X-ray bones.
+        try:
+            skeleton.export(engine_dir(), xex.parent, data / 'assets/skeleton', report)
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t read Hall of Meat\'s skeleton ({error}); Hall of Meat will show the X-ray bone lines.')
         # The disc's own Futura as a real font, so the text is sharp at any resolution.
         try:
             ui.export_fonts(xex.parent, gmod / 'resource/fonts', report)

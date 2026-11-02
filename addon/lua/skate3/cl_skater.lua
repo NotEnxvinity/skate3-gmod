@@ -1308,6 +1308,11 @@ function Skater.RealBody()
 	return IsValid(model) and model.skate3Real == true and pose ~= nil
 end
 
+-- What the skater is scaled by for the model worn now (1: not scaled).
+function Skater.ModelScale()
+	return modelScale
+end
+
 -- The body drawn as the skater: your own player while posing it, else the copy.
 function Skater.BodyEntity()
 	if Skater.RealBody() then return owner end
