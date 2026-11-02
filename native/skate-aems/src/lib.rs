@@ -3,6 +3,10 @@
 //! patch VM with its control tick, and the sound-player glue down to EA Audio
 //! Core's dry voices. See `docs/AEMS.md`.
 //!
+//! Vendored from SK8V (https://github.com/becaring/SK8V, rust/skate-aems).
+//! `docs/AEMS.md`, `tools/...` and `local/re/...` in this crate's comments are
+//! paths in that repository, not this one.
+//!
 //! The port keeps the game's float branches and PowerPC rounding. Clippy lints
 //! that would rewrite them are allowed here with the reason:
 //! - `neg_cmp_op_on_partial_ord`: `!(a < b)` is true for NaN, `a >= b` is not.

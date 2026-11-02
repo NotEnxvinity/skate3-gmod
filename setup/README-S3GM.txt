@@ -1,4 +1,4 @@
-S3GM v2.3.0: Skate 3 in Garry's Mod
+S3GM v2.3.1: Skate 3 in Garry's Mod
 ===================================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
