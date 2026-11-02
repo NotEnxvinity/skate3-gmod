@@ -515,9 +515,28 @@ def self_test():
     print(f'self-test ok: {len(converter_modules(engine))} converter modules')
 
 
+def tk_looks_right():
+    """Whether Tk can draw a good window here. The portable Python's Linux Tk is
+    built without Xft (bitmap X fonts, flat grey widgets, and uglier still when
+    the desktop's X fonts change), and Tk may not be there at all; those get
+    the setup page in the browser, which carries its own fonts and theme."""
+    if sys.platform.startswith('linux'):
+        return False
+    try:
+        import tkinter
+        return 'no-xft' not in str(tkinter.Tcl().call('info', 'patchlevel'))
+    except Exception:
+        return False
+
+
 def window(gmod, game=None):
     """Like the old setup app: the Garry's Mod folder and disc filled in as
     best we can, the player checks or changes them, then presses Install."""
+    if os.environ.get('S3GM_TK') != '1' and not tk_looks_right():
+        import setup_web
+        setup_web.serve(gmod, game, {'version': s3gm_version, 'garrysmod_in': garrysmod_in, 'install': install,
+                                     'workshop_copy': workshop_copy, 'workshop_note': WORKSHOP_NOTE})
+        return
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     version = s3gm_version()

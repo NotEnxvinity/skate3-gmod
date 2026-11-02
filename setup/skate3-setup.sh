@@ -76,12 +76,14 @@ if [ -z "$game" ]; then
     fi
 fi
 
-# A Python that numpy 2.2 has wheels for: 3.10 to 3.13, with tkinter for the
-# setup window (SteamOS's own Python has none).
+# A Python that numpy 2.2 has wheels for: 3.10 to 3.13, able to make a venv.
+# On a Mac it needs tkinter for the setup window; on Linux the window is a page
+# in the browser (its own fonts and theme), so no Tk is needed.
+if $mac; then need_tk=tkinter; else need_tk=; fi
 python=
 for candidate in python3.13 python3.12 python3.11 python3.10 python3; do
     if command -v "$candidate" >/dev/null &&
-        "$candidate" -c 'import sys, tkinter; sys.exit(not (3, 10) <= sys.version_info[:2] <= (3, 13))' 2>/dev/null; then
+        "$candidate" -c "import sys, venv, ensurepip${need_tk:+, $need_tk}; sys.exit(not (3, 10) <= sys.version_info[:2] <= (3, 13))" 2>/dev/null; then
         python=$(command -v "$candidate")
         break
     fi
@@ -138,7 +140,7 @@ if [ ! -x "$vgmstream" ]; then
 fi
 
 venv="$cache/venv"
-if [ ! -x "$venv/bin/python" ] || ! "$venv/bin/python" -c 'import numpy, PIL, tkinter' 2>/dev/null; then
+if [ ! -x "$venv/bin/python" ] || ! "$venv/bin/python" -c "import numpy, PIL${need_tk:+, $need_tk}" 2>/dev/null; then
     echo "Creating a Python environment for the converters (one time)..."
     rm -rf "$venv"
     "$python" -m venv "$venv"
