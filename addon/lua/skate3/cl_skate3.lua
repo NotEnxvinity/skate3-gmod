@@ -31,7 +31,7 @@ local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OS
 local cv_path = CreateClientConVar("skate3_data_path", "", true, false, "Converted Skate 3 data folder (blank: garrysmod/data/skate3/assets)")
 local cv_rails = CreateClientConVar("skate3_debug_rails", "0", false, false, "Draw the grind rails found in this map")
 -- What this install calls itself; the update checker compares it with GitHub's latest release.
-S3GM_BUILD = "v2.4.0-test-3b"
+S3GM_BUILD = "v2.4.0-test-4"
 print("[skate3] lua build: " .. S3GM_BUILD)
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
