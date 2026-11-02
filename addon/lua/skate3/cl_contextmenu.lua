@@ -6,6 +6,7 @@
 --   D-pad up          hold to go back to the session marker
 --   D-pad down        place the session marker
 --   D-pad left        interact with something off the board (doors, buttons)
+--   D-pad right       customize: playermodel and board (cl_customize.lua)
 --   ------------
 --   Y                 the games list (a game of S.K.A.T.E. and the like)
 --   X                 settings
@@ -33,7 +34,7 @@ local DPAD = bit.bor(UP, DOWN, LEFT, RIGHT)
 local band, bor, bnot = bit.band, bit.bor, bit.bnot
 
 local OPEN_AFTER = 0.2      -- L1 held this long before the menu shows
-local REPEAT_FIRST, REPEAT_EVERY = 0.4, 0.12
+local REPEAT_FIRST, REPEAT_EVERY, REPEAT_FAST = 0.4, 0.12, 0.04 -- held for a second, a long list scrolls fast
 
 local stack = {}            -- open list views, the top one shown
 local lbSince               -- when L1 went down on the ground
@@ -42,6 +43,7 @@ local last = 0              -- last frame's buttons
 local ignore = 0            -- D-pad directions held since a view opened; ignored until let go
 local hold                  -- { bit, since } while up is held to go back to the marker
 local repeatAt              -- when a held up/down repeats next
+local repeatSince           -- when this hold of up/down began
 
 local modes = {}            -- registered modes, for the games list
 local interacts = {}        -- registered "left" actions
@@ -278,11 +280,11 @@ function Menu.Update(now, pose, buttons)
 		local n = #list.rows
 		list.sel = n > 0 and math.Clamp(list.sel, 1, n) or 1
 		local step = 0
-		if band(freshly, UP) ~= 0 then step = -1 repeatAt = now + REPEAT_FIRST
-		elseif band(freshly, DOWN) ~= 0 then step = 1 repeatAt = now + REPEAT_FIRST
+		if band(freshly, UP) ~= 0 then step = -1 repeatAt = now + REPEAT_FIRST repeatSince = now
+		elseif band(freshly, DOWN) ~= 0 then step = 1 repeatAt = now + REPEAT_FIRST repeatSince = now
 		elseif repeatAt and now >= repeatAt and band(free, bor(UP, DOWN)) ~= 0 then
 			step = band(free, UP) ~= 0 and -1 or 1
-			repeatAt = now + REPEAT_EVERY
+			repeatAt = now + ((repeatSince and now - repeatSince > 1) and REPEAT_FAST or REPEAT_EVERY)
 		elseif band(free, bor(UP, DOWN)) == 0 then
 			repeatAt = nil
 		end
@@ -320,6 +322,7 @@ function Menu.Update(now, pose, buttons)
 			UI.Toast("Nothing to interact with")
 		end
 	end
+	if band(freshly, RIGHT) ~= 0 and Menu.OnCustomize then Menu.OnCustomize() end
 	if band(freshly, BTN_Y) ~= 0 then OpenGames() end
 	if band(freshly, BTN_X) ~= 0 then OpenSettings() end
 
@@ -538,6 +541,7 @@ local function Rows(pose)
 		{ icon = "DPad_Up", label = "Go To Marker", enabled = Marker.Has(), bit = UP },
 		{ icon = "DPad_Down", label = "Place Marker", enabled = true },
 		{ icon = "DPad_Left", label = act and act.label or "Interact", enabled = act ~= nil },
+		{ icon = "DPad_Right", label = "Customize", enabled = Menu.OnCustomize ~= nil },
 		{ kind = "divider" },
 		{ icon = "Y", label = "Games", enabled = #modes > 0 },
 		{ icon = "X", label = "Settings", enabled = true },

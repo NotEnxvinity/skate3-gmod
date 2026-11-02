@@ -36,6 +36,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_glyphs.lua")
 	AddCSLuaFile("skate3/cl_marker.lua")
 	AddCSLuaFile("skate3/cl_contextmenu.lua")
+	AddCSLuaFile("skate3/cl_customize.lua")
 	AddCSLuaFile("skate3/cl_score.lua")
 	AddCSLuaFile("skate3/cl_score_skate3.lua")
 	AddCSLuaFile("skate3/cl_update.lua")
@@ -53,6 +54,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_demo.lua")
 	include("skate3/sv_skate3.lua")
 	include("skate3/sv_park.lua")
+	include("skate3/sv_customize.lua")
 else
 	include("skate3/cl_skate3.lua")
 end
