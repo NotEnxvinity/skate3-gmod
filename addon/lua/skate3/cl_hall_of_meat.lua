@@ -76,6 +76,7 @@ local lastTick
 local lastBones -- the skater's bones this frame, for the X-ray
 local track = {} -- id -> { pos, vel, coolUntil }
 local hipsAt
+local quietUntil = 0 -- no bail starts before this time (Meat.Quiet)
 
 local function Pos(m)
 	return Vector(m[4], m[8], m[12])
@@ -148,6 +149,10 @@ function Meat.Update(pose, ply)
 		told = Meat.Enabled()
 		skate3.SetHallOfMeat(told and 1 or 0)
 	end
+	if now < quietUntil then
+		Meat.Reset()
+		return
+	end
 	local bailing = pose and pose.state and pose.state:find("^Wipeout") ~= nil
 	if not bailing or not pose.bones then
 		if bail then
@@ -158,6 +163,8 @@ function Meat.Update(pose, ply)
 		return
 	end
 	if not bail then
+		-- For console.log: a bail that shows up where none was expected can be traced.
+		print(("[skate3] Hall of Meat: bail starts (%s, tick %s)"):format(tostring(pose.state), tostring(pose.tick)))
 		bail = { points = 0, parts = {}, startedAt = now, hitAt = now }
 		for _, part in ipairs(PARTS) do bail.parts[part.id] = { damage = 0, level = 0 } end
 		last = nil
@@ -210,6 +217,13 @@ end
 
 function Meat.Reset()
 	bail, last, track, lastTick, hipsAt, lastBones = nil, nil, {}, nil, nil, nil
+end
+
+-- A fresh ride's first moments: no bail starts and none is kept, whatever the
+-- first poses say (they can still be the last ride's wipeout).
+function Meat.Quiet(seconds)
+	quietUntil = RealTime() + seconds
+	Meat.Reset()
 end
 
 -- Skate 3's X-ray: the skeleton drawn through the skater's body, while the

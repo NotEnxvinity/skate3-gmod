@@ -274,6 +274,7 @@ local function Start()
 	SetActive(true)
 	lastTick = nil
 	staleUntil = RealTime() + 1
+	Score.Meat.Quiet(1)
 	-- A fresh ride: no Hall of Meat panel or skeleton from the last bail, and
 	-- no half-finished score.
 	Score.Reset()

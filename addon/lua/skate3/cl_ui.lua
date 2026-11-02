@@ -17,6 +17,9 @@ local cv_world = CreateClientConVar("skate3_ui_world", "0", true, false,
 local cv_crisp = CreateClientConVar("skate3_ui_crisp", "1", true, false,
 	"Draw the Skate 3 look's text with the disc's Futura font where setup installed it (sharp at any resolution), not its bitmaps (1 on, 0 off)")
 
+local cv_hd = CreateClientConVar("skate3_ui_hd", "1", true, false,
+	"Use the upscaled HD pack in data/skate3/ui-hd where there is one (1 on, 0 off: the stock disc art everyone else gets)")
+
 local ART = "skate3/assets/ui/"
 -- Replacements for the disc's images with the same names (an upscaled set),
 -- looked for first. Setup never touches this folder.
@@ -144,11 +147,14 @@ local function Mat(name)
 	local path = ART .. name .. ".png"
 	-- An upscaled copy from the optional HD pack, where ui.json says it would be.
 	local info = art and art.textures and art.textures[name]
-	if info and info.hd and not SOFT[name] and file.Exists(HD .. info.hd, "DATA") then path = HD .. info.hd end
+	if info and info.hd and not SOFT[name] and cv_hd:GetBool() and file.Exists(HD .. info.hd, "DATA") then path = HD .. info.hd end
 	m = Material("../data/" .. path, SOFT[name] and "smooth" or "smooth noclamp")
 	UI.mats[name] = m
 	return m
 end
+
+-- Switching the HD pack on or off takes the pictures already loaded away.
+cvars.AddChangeCallback("skate3_ui_hd", function() UI.mats = {} end, "skate3_ui_hd")
 
 -- The four corners DrawPoly is handed for a rectangle, reused every call.
 local verts = { {}, {}, {}, {} }
@@ -366,11 +372,14 @@ local function Run(font, text, x, y, h, r, g, b, a)
 end
 
 -- The disc's own Futura as a real font (setup puts it in resource/fonts as
--- "S3GM Futura"), so text is sharp at any size. Whether it's installed is
+-- "S3GM Futura B"), so text is sharp at any size. Whether it's installed is
 -- found out once by measuring text in it against a font that doesn't exist.
 local PROBE = "Wmiqjg0123 Skate"
-local FAMILY = "S3GM Futura"
-local CAP, ASCENT = 0.754, 0.825 -- the font's capital height and baseline, in ems
+-- "B": the cut whose cell fits the descenders (setup/ui.py FONT_BASELINE); an older
+-- setup's "S3GM Futura" is not it, and the text stays bitmap until setup runs again.
+local FAMILY = "S3GM Futura B"
+-- The font's capital height and baseline, in ems (its em is declared 1.1x the glyphs' own).
+local CAP, ASCENT = 0.754 / 1.1, 0.7636
 local crisp
 
 local function CrispAvailable()

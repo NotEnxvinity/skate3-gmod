@@ -81,7 +81,7 @@ controller's name, and Steam Input can hide a PlayStation pad behind an Xbox
 name, so pick PlayStation yourself then), and a button to reset them all to the
 defaults.
 Sharp text: setup also installs the disc's own Futura as a real font
-(garrysmod/resource/fonts/s3gm_futura.ttf) so the Skate 3 look's text stays
+(garrysmod/resource/fonts/s3gm_futura_b.ttf) so the Skate 3 look's text stays
 sharp at any resolution; restart the game once after running setup.
 PlayStation buttons: drawn by the mod. If setup finds a decrypted PS3 copy of Skate 3
 (the folder with PS3_GAME in it, next to the setup or in Downloads or Desktop)

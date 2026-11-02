@@ -410,7 +410,13 @@ function Looks.skate3.Box(x, y, w, h, alpha)
 			UI.Quad(piece.tex, q, ox, oy, 1, 255, 255, 255, a)
 			-- The stretch between the halves: the left half's centre edge held out.
 			if extra > 0 and not right then
-				local m = { q[2], { q[2][1] + extra, q[2][2], q[2][3], q[2][4] }, { q[3][1] + extra, q[3][2], q[3][3], q[3][4] }, q[3] }
+				-- Held a little inside the picture: sampled right on its edge,
+				-- the wrapping texture would blend in the far edge's colour (a
+				-- dark band down each side).
+				local function In(c) return c > 0.95 and 0.984 or c < 0.05 and 0.016 or c end
+				local u, v = q[2][3] == q[3][3] and In(q[2][3]) or nil, q[2][4] == q[3][4] and In(q[2][4]) or nil
+				local function P(c, x) return { x, c[2], u or c[3], v or c[4] } end
+				local m = { P(q[2], q[2][1]), P(q[2], q[2][1] + extra), P(q[3], q[3][1] + extra), P(q[3], q[3][1]) }
 				UI.Quad(piece.tex, m, ox, oy, 1, 255, 255, 255, a)
 			end
 		end
