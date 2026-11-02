@@ -436,8 +436,11 @@ function Meat.SkeletonReady()
 end
 
 -- The skater's size against the model it wears, so the bones fit it too
--- (set by cl_skate3.lua; one without scaling).
+-- (set by cl_skate3.lua; one without scaling), and the pose the body and board
+-- are drawn from this frame. This file's own bones are read when the score
+-- draws, a frame behind the body, so the skeleton goes by the drawn pose.
 Meat.Scale = nil
+Meat.Pose = nil
 
 local function Mat(m)
 	return Matrix({
@@ -452,7 +455,16 @@ end
 local function DrawSkeleton(parts, alpha)
 	local s = LoadSkeleton()
 	if not s then return false end
-	local scale = Meat.Scale and Meat.Scale() or 1
+	-- The pose the body and board are drawn from, already scaled to the model.
+	-- Without one (no body is shown), the bones this file read last.
+	local shown = Meat.Pose and Meat.Pose()
+	local bones, scale, origin
+	if shown and shown.bones then
+		bones, scale = shown.bones, shown.scale or 1
+	else
+		bones, scale, origin = lastBones, Meat.Scale and Meat.Scale() or 1, lastPos
+	end
+	if not bones then return false end
 	local set = alpha < 1 and s.materials.fading or s.materials.solid
 	local skull = cv_skull:GetBool()
 	-- Over the body, bones in front of bones: the depth starts over for them.
@@ -465,17 +477,18 @@ local function DrawSkeleton(parts, alpha)
 	if alpha < 1 then render.SetBlend(alpha) end
 	local drawn = 0
 	for _, g in ipairs(s.groups) do
-		local m = lastBones[g.bone]
+		local m = bones[g.bone]
 		local state = parts[g.part]
 		if m and state and (skull or g.part ~= "skull") then
 			local mm = Mat(m)
-			if scale ~= 1 and lastPos then
+			if origin and scale ~= 1 then
+				-- Bones that aren't scaled yet: about the skater, as the body's are.
 				mm:SetTranslation(Vector(
-					lastPos[1] + (m[4] - lastPos[1]) * scale,
-					lastPos[2] + (m[8] - lastPos[2]) * scale,
-					lastPos[3] + (m[12] - lastPos[3]) * scale))
-				mm:Scale(Vector(scale, scale, scale))
+					origin[1] + (m[4] - origin[1]) * scale,
+					origin[2] + (m[8] - origin[2]) * scale,
+					origin[3] + (m[12] - origin[3]) * scale))
 			end
+			if scale ~= 1 then mm:Scale(Vector(scale, scale, scale)) end
 			render.SetMaterial(set[state.level] or set[0])
 			cam.PushModelMatrix(mm)
 			g.mesh:Draw()

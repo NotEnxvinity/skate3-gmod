@@ -10,6 +10,7 @@ local Menu = include("skate3/cl_contextmenu.lua")
 Score.Meat.Body = Skater.BodyEntity
 Score.Meat.Skipped = function() return Skater.Skip.hom end
 Score.Meat.Scale = Skater.ModelScale
+Score.Meat.Pose = Skater.DrawnPose
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_update.lua")
 include("skate3/cl_menu.lua")

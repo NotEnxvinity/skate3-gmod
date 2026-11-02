@@ -1308,6 +1308,12 @@ function Skater.RealBody()
 	return IsValid(model) and model.skate3Real == true and pose ~= nil
 end
 
+-- The pose the body and board are drawn from this frame (scaled to the model
+-- like they are), for things that must sit on them without lagging a frame.
+function Skater.DrawnPose()
+	return IsValid(model) and pose or nil
+end
+
 -- What the skater is scaled by for the model worn now (1: not scaled).
 function Skater.ModelScale()
 	return modelScale
