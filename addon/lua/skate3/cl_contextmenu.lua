@@ -231,7 +231,10 @@ end
 -- their marker (the ride restarted, so the caller stops there for the frame).
 function Menu.Update(now, pose, buttons)
 	local state = pose and pose.state or ""
-	local onGround = pose and not state:find("Air") and not state:find("^Wipeout") and not state:find("^Grind")
+	-- Up whenever the skater isn't in the air or on a grind, a bail's wipeout
+	-- included (Hall of Meat's bail lasts a while, and the way back to the
+	-- marker is wanted most then).
+	local onGround = pose and not state:find("Air") and not state:find("^Grind")
 	local down = band(buttons, LB) ~= 0
 	if cv_menu:GetBool() and down and onGround then
 		lbSince = lbSince or now
@@ -473,7 +476,6 @@ local function Rows(pose)
 end
 
 local GAP = 12 -- a divider's height, canvas units
-local RULES = { skate3 = Color(145, 199, 219), minimal = Color(255, 255, 255), hl2 = Color(255, 220, 0) }
 
 local function DrawRoot(look, pose, style)
 	local rows = Rows(pose)
@@ -491,19 +493,14 @@ local function DrawRoot(look, pose, style)
 	else
 		look.Strip(height / PITCH, 80 + widest + 24)
 	end
-	local rule, ruleWidth = RULES[style] or WHITE, 64 + widest + 20
 	local top = 54
 	for _, r in ipairs(rows) do
 		if r.kind == "divider" then
-			UI.Rect(99, top + GAP / 2 - 1, ruleWidth, 2, rule, 0.7)
 			top = top + GAP
 		else
 			local alpha = (r.enabled == false) and 0.3 or 1
 			look.Icon(r.icon, 99, top, alpha)
 			look.Text(r.label, 158, top + 11, 20, alpha)
-			if r.kind == "header" then
-				UI.Rect(99, top + PITCH - 3, ruleWidth, 2, rule, 0.7)
-			end
 			if hold and r.bit == hold.bit and hold.progress and hold.progress > 0 then
 				UI.Rect(158, top + 36, math.max(look.Width(r.label, 20), 20) * hold.progress, 2, CREAM, 0.9)
 			end
@@ -532,7 +529,6 @@ local function DrawList(look, style)
 	local height = 52 + math.max(shown, 1) * PITCH + 46
 	look.Box(x, y, width, height)
 	if list.title then look.Text(list.title, x + 20, y + 14, 20, 0.7) end
-	UI.Rect(x + 16, y + 48, width - 32, 1, CREAM, 0.25)
 	if n == 0 then look.Text(list.empty or "Nothing here yet", x + 20, y + 62, 20, 0.5) end
 	for i = first, last_ do
 		local r = rows[i]

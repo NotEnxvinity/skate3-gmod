@@ -209,9 +209,17 @@ local function SetActive(on)
 	net.SendToServer()
 end
 
+-- The native side keeps the last ride's pose until the new ride's first one
+-- replaces it (Activate is a job for its thread), so a ride restarted from a
+-- bail would read the old Wipeout for a frame or two and start a fresh Hall of
+-- Meat bail. staleTick is the old pose's tick: it's thrown away until it
+-- changes, for up to a second.
+local staleTick, staleUntil = nil, 0
+
 local function Stop()
 	if not active then return end
 	skate3.Suspend()
+	staleTick = pose and pose.tick or staleTick
 	if pose then
 		net.Start("skate3_move")
 		net.WriteVector(V(pose.pos))
@@ -261,6 +269,7 @@ local function Start()
 	end
 	SetActive(true)
 	lastTick = nil
+	staleUntil = RealTime() + 1
 	-- A fresh ride: no Hall of Meat panel or skeleton from the last bail, and
 	-- no half-finished score.
 	Score.Reset()
@@ -481,6 +490,7 @@ hook.Add("Think", "skate3_step", function()
 	local input = skate3.GetInput and skate3.GetInput()
 	if Menu.Update(now, pose, bit.bor(input and input.buttons or 0, Keyboard.buttons)) then return end
 	if not skip.pose or not pose then pose = Perf.Time("get pose", skate3.GetPose) or pose end
+	if pose and staleTick and pose.tick == staleTick and RealTime() < staleUntil then pose = nil end
 	if pose and pose.tick ~= lastTick then
 		local frozen = now - tickAt
 		-- A slow frame holds the simulation up too; this is only the time it
