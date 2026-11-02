@@ -86,6 +86,12 @@ sharp at any resolution; restart the game once after running setup.
 PlayStation buttons: drawn by the mod. If setup finds a decrypted PS3 copy of Skate 3
 (the folder with PS3_GAME in it, next to the setup or in Downloads or Desktop)
 it makes the game's own PlayStation button pictures from it instead.
+Update notices (on by default; Utilities > Skate 3, the menu's Settings, or skate3_update_notices):
+shortly after you join a game S3GM asks GitHub (api.github.com, about once every six hours)
+what the newest release is. If it's newer than your install you get a small card once per
+version, and an "Update available" line at the top of the menu's Settings (press right on it
+to open the releases page). Nothing is downloaded or installed for you. Off means no check at
+all; skate3_update_check checks right now and says what it found in the console.
 Hall of Meat (on by default; Utilities > Skate 3, or skate3_hall_of_meat_toggle): bails
 score, in red, with a skeleton showing fractured bones yellow and broken ones
 red. Bail on purpose: hold both triggers and click both sticks.

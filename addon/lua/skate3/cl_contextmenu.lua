@@ -183,6 +183,7 @@ local SETTINGS = {
 	{ "Score beside the skater", "skate3_ui_world", ONOFF },
 	{ "Hall of Meat", "skate3_hall_of_meat", ONOFF },
 	{ "Punch and smack", "skate3_melee", ONOFF },
+	{ "Update notices", "skate3_update_notices", ONOFF },
 }
 
 -- Which of a setting's values the convar is on (the nearest, for numbers).
@@ -201,6 +202,11 @@ end
 
 local function SettingsRows()
 	local rows = {}
+	-- A new release on GitHub, first in the list while there is one (right opens its page).
+	local newer = S3GM_Update and S3GM_Update.Latest()
+	if newer then
+		rows[1] = { label = "Update available", tag = newer, info = true }
+	end
 	for _, def in ipairs(SETTINGS) do
 		local cv = GetConVar(def[2])
 		if cv then
@@ -211,11 +217,19 @@ local function SettingsRows()
 end
 
 local function OpenSettings()
+	if S3GM_Update then S3GM_Update.Acknowledge() end
 	Menu.OpenList({
 		title = "Settings",
 		rows = SettingsRows(),
 		refresh = SettingsRows,
 		onAdjust = function(row, dir)
+			if row.info then
+				if dir == 1 then
+					S3GM_Update.Open()
+					UI.Toast("Opened the S3GM releases page")
+				end
+				return
+			end
 			local def = row.def
 			local n = #def[3]
 			local i = ValueIndex(def, row.cv) + dir
@@ -251,7 +265,16 @@ function Menu.Update(now, pose, buttons)
 
 	if #stack > 0 then
 		local list = stack[#stack]
-		if list.refresh then list.rows = list.refresh() end
+		if list.refresh then
+			-- Rows can come and go (the update line), so the selection follows its row.
+			local keep = list.rows[list.sel] and list.rows[list.sel].label
+			list.rows = list.refresh()
+			if keep then
+				for i, r in ipairs(list.rows) do
+					if r.label == keep then list.sel = i break end
+				end
+			end
+		end
 		local n = #list.rows
 		list.sel = n > 0 and math.Clamp(list.sel, 1, n) or 1
 		local step = 0
@@ -431,6 +454,9 @@ Looks.minimal = {
 	end,
 }
 
+-- The update card (cl_update.lua) borrows the looks.
+Menu.Looks = Looks
+
 -- A D-pad arrow as a small filled triangle pointing the way, centred at (x, y).
 local ARROWS = {
 	DPad_Up = { { 0, -1 }, { 1, 0.8 }, { -1, 0.8 } },
@@ -470,8 +496,8 @@ function Looks.minimal.Icon(name, x, y, alpha)
 	UI.Arrow(name, x + 24, y + 24, 7, Color(255, 255, 255, 255 * alpha))
 end
 
-function Looks.minimal.Box(x, y, w, h)
-	UI.Rounded(10, x, y, w, h, Color(0, 0, 0, 150))
+function Looks.minimal.Box(x, y, w, h, alpha)
+	UI.Rounded(10, x, y, w, h, Color(0, 0, 0, 150 * (alpha or 1)))
 end
 
 -- Half-Life 2's: its yellow on a dim box.
@@ -499,8 +525,8 @@ function Looks.hl2.Icon(name, x, y, alpha)
 	UI.Arrow(name, x + 24, y + 24, 7, Color(255, 220, 0, 230 * alpha))
 end
 
-function Looks.hl2.Box(x, y, w, h)
-	UI.Rounded(8, x, y, w, h, Color(0, 0, 0, 76))
+function Looks.hl2.Box(x, y, w, h, alpha)
+	UI.Rounded(8, x, y, w, h, Color(0, 0, 0, 76 * (alpha or 1)))
 end
 
 -- The root menu, top to bottom: a header, the D-pad rows, a divider and the
@@ -614,7 +640,7 @@ local function DrawList(look, style)
 				end
 			else
 				UI.Arrow("DPad_Right", right - 8, top + 17, 5, Color(243, 237, 210, 255 * lit))
-				UI.Arrow("DPad_Left", right - 26 - look.Width(r.tag, 20) - 16, top + 17, 5, Color(243, 237, 210, 255 * lit))
+				if not r.info then UI.Arrow("DPad_Left", right - 26 - look.Width(r.tag, 20) - 16, top + 17, 5, Color(243, 237, 210, 255 * lit)) end
 			end
 		elseif r.tag then
 			look.Right(r.tag, x + width - 20, top + 7, 20, alpha)

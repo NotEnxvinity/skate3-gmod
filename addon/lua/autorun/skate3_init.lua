@@ -38,6 +38,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_contextmenu.lua")
 	AddCSLuaFile("skate3/cl_score.lua")
 	AddCSLuaFile("skate3/cl_score_skate3.lua")
+	AddCSLuaFile("skate3/cl_update.lua")
 	AddCSLuaFile("skate3/cl_menu.lua")
 	AddCSLuaFile("skate3/cl_props.lua")
 	AddCSLuaFile("skate3/cl_park.lua")
