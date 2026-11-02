@@ -369,8 +369,16 @@ def export_ps3(engine, usrdir, out, report):
 # soft above 720p). They're renamed so they can't clash with a Futura the
 # player has installed, and so the mod can find them by one name.
 FONT_DISC = 'data/webkit/FuturaStd-Heavy.ttf'
-FONT_FAMILY = 'S3GM Futura'
-FONT_FILE = 's3gm_futura.ttf'
+# "B": the second cut, whose cell is tall enough for g, j, p, q and y (the first
+# one's clipped their tails). A different name, so a font file installed by an
+# older setup is never mistaken for it (the addon falls back to the bitmap text).
+FONT_FAMILY = 'S3GM Futura B'
+FONT_FILE = 's3gm_futura_b.ttf'
+# The cell's baseline, as a share of it. Futura's descenders go 0.256 em below
+# the baseline and its tallest letters 0.83 above, more than one em together,
+# so the font's em is declared 10% bigger (glyphs unchanged, so they draw 10%
+# smaller) with the cell split 0.7636 above the baseline and 0.2364 below it.
+FONT_EM_GROWTH, FONT_BASELINE = 1.1, 0.7636
 
 
 def rename_ttf(data, family):
@@ -396,16 +404,23 @@ def rename_ttf(data, family):
     if not any(t == b'name' for t, _ in tables):
         raise ValueError('not a font with a name table')
     # One ascent and descent everywhere (they add up to the em), so a font of
-    # size N is N pixels tall with its baseline at 0.825 N on every platform,
-    # whichever of the font's three metric sets the system reads.
+    # size N is N pixels tall with its baseline at FONT_BASELINE * N on every
+    # platform, whichever of the font's three metric sets the system reads.
+    # The em is declared FONT_EM_GROWTH bigger first, to make room for the
+    # descenders (see FONT_BASELINE).
+    em = next(struct.unpack('>H', b[18:20])[0] for t, b in tables if t == b'head')
+    em = round(em * FONT_EM_GROWTH)
+    up = round(em * FONT_BASELINE)
+    down = em - up
     for t, b in tables:
         if t == b'head':
             b[8:12] = b'\0\0\0\0'  # checkSumAdjustment, set below
+            b[18:20] = struct.pack('>H', em)
         elif t == b'hhea':
-            b[4:10] = struct.pack('>hhh', 825, -175, 0)
+            b[4:10] = struct.pack('>hhh', up, -down, 0)
         elif t == b'OS/2' and len(b) >= 78:
-            b[68:74] = struct.pack('>hhh', 825, -175, 0)
-            b[74:78] = struct.pack('>HH', 825, 175)
+            b[68:74] = struct.pack('>hhh', up, -down, 0)
+            b[74:78] = struct.pack('>HH', up, down)
             b[62:64] = struct.pack('>H', struct.unpack('>H', b[62:64])[0] | 0x80)  # use the typo metrics
     def checksum(blob):
         blob = bytes(blob) + b'\0' * (-len(blob) % 4)
