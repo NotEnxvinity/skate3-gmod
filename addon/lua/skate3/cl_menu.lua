@@ -18,7 +18,7 @@ local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_retail_audio", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
-	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee", "skate3_update_notices" }
+	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee", "skate3_update_notices", "skate3_hom_look" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
@@ -176,6 +176,11 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:CheckBox("Show the status line", "skate3_hud")
 		panel:CheckBox("Hall of Meat", "skate3_hall_of_meat")
 		panel:ControlHelp("Bails score points and break bones, shown in red, with the skeleton showing through your skater. Bail on purpose: hold both triggers and click both sticks.")
+		Choices(panel, "Hall of Meat bones", "skate3_hom_look", {
+			{ "Skeleton (Skate 3's own)", "skeleton" },
+			{ "X-ray (plain bone lines)", "xray" },
+		})
+		panel:ControlHelp("The skeleton is Skate 3's own Hall of Meat model, made from your disc by the setup: run the S3GM setup again after updating if it isn't there yet (until then you get the X-ray lines).")
 
 		panel:CheckBox("Punch and smack other players", "skate3_melee")
 		panel:ControlHelp("On foot, B or R1 (F or Ctrl): punches, or a smack with the board when you hold it. Skaters who run into each other bail.")

@@ -4,8 +4,10 @@
 -- (skate3_bail_damage) charges for injuries and its blood (skate3_blood)
 -- splats where the hard hits land. With Hall of Meat on, bails also score,
 -- in red, and the skeleton shows through the skater: fractures yellow and
--- breaks red. The engine has no injuries of its own, so the hits are read
--- off the bail's bones here; the numbers are our tuning.
+-- breaks red. The skeleton is Skate 3's own (the disc's dem_bones_hom model,
+-- read by setup into data/skate3/assets/skeleton; skate3_hom_look picks it
+-- or the plain X-ray lines). The engine has no injuries of its own, so the
+-- hits are read off the bail's bones here; the numbers are our tuning.
 -- Bail on purpose: both triggers and both sticks clicked.
 --
 -- Every hit is also announced to the rest of the mod with the hook
@@ -26,6 +28,11 @@ local cv_meat = CreateClientConVar("skate3_hall_of_meat", "1", true, false,
 function Meat.Enabled()
 	return cv_meat:GetBool()
 end
+
+local cv_look = CreateClientConVar("skate3_hom_look", "skeleton", true, false,
+	"Hall of Meat's bones: skeleton (Skate 3's own, from your disc) or xray (plain bone lines)")
+local cv_skull = CreateClientConVar("skate3_hom_skull", "1", true, false,
+	"Hall of Meat's skeleton shows its skull (1 on, 0 off)")
 
 local UNITS = 39.37 -- map units per metre
 local TICK = 1 / 60 -- the simulation's step
@@ -74,6 +81,7 @@ local bail -- the bail being scored: { points, parts = { id -> state }, ... }
 local last -- the last bail, kept while its score shows
 local lastTick
 local lastBones -- the skater's bones this frame, for the X-ray
+local lastPos -- where the skater is, for scaling the skeleton to the model
 local track = {} -- id -> { pos, vel, coolUntil }
 local hipsAt
 local quietUntil = 0 -- no bail starts before this time (Meat.Quiet)
@@ -144,6 +152,7 @@ local told -- the mode switch as the engine last heard it
 function Meat.Update(pose, ply)
 	local now = RealTime()
 	lastBones = pose and pose.bones or nil
+	lastPos = pose and pose.pos or nil
 	-- The engine's Hall of Meat switch: it lets the camera do its broken-bone shot.
 	if told ~= Meat.Enabled() and skate3 and skate3.SetHallOfMeat then
 		told = Meat.Enabled()
@@ -216,7 +225,7 @@ function Meat.Current()
 end
 
 function Meat.Reset()
-	bail, last, track, lastTick, hipsAt, lastBones = nil, nil, {}, nil, nil, nil
+	bail, last, track, lastTick, hipsAt, lastBones, lastPos = nil, nil, {}, nil, nil, nil, nil
 end
 
 -- A fresh ride's first moments: no bail starts and none is kept, whatever the
@@ -319,13 +328,173 @@ local function DrawEngineBones(bones, parts, alpha)
 	end
 end
 
-hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(_, skybox)
-	if skybox or not lastBones or not Meat.Enabled() or (Meat.Skipped and Meat.Skipped()) then return end
+---------------------------------------------------------------------------
+-- Skate 3's own skeleton: the disc's Hall of Meat model, in rigid chunks
+-- (setup/skeleton.py). Each chunk is built once as a mesh relative to the
+-- skater's bone that carries it and drawn under that bone every frame, the
+-- way the board is. Colours follow the injuries: white, yellow, red.
+local SKELETON = "skate3/assets/skeleton/"
+local skeleton -- nil: not tried yet; false: not there; else { groups, textured }
+local skeletonNote -- why it isn't there, printed once
+
+local function ReadSkeleton()
+	local f = file.Open(SKELETON .. "hom.bin", "rb", "DATA")
+	if not f then return nil, "setup hasn't made data/" .. SKELETON .. "hom.bin (run the S3GM setup again)" end
+	local ok, groups = pcall(function()
+		if f:Read(4) ~= "S3HM" or f:ReadByte() ~= 1 then error("it isn't a version 1 skeleton file") end
+		local out = {}
+		for _ = 1, f:ReadByte() do
+			local g = {}
+			g.bone = f:Read(f:ReadByte())
+			g.part = f:Read(f:ReadByte())
+			local nv, nt = f:ReadLong(), f:ReadLong()
+			if nv < 0 or nt < 0 or nv > 65535 or nt > 100000 then error("its sizes make no sense") end
+			local v = {}
+			for i = 1, nv * 8 do v[i] = f:ReadFloat() end
+			local t = {}
+			for i = 1, nt * 3 do
+				local n = f:ReadShort()
+				t[i] = (n < 0 and n + 65536 or n) + 1
+			end
+			g.verts, g.tris = v, t
+			out[#out + 1] = g
+		end
+		return out
+	end)
+	f:Close()
+	if not ok then return nil, "data/" .. SKELETON .. "hom.bin is unreadable (" .. tostring(groups) .. ")" end
+	return groups
+end
+
+local function BuildGroup(g)
+	local v, t = g.verts, g.tris
+	local triangles = #t / 3
+	local m = Mesh()
+	mesh.Begin(m, MATERIAL_TRIANGLES, triangles)
+	for i = 1, #t do
+		local o = (t[i] - 1) * 8
+		mesh.Position(Vector(v[o + 1], v[o + 2], v[o + 3]))
+		mesh.Normal(Vector(v[o + 4], v[o + 5], v[o + 6]))
+		mesh.TexCoord(0, v[o + 7], v[o + 8])
+		mesh.AdvanceVertex()
+	end
+	mesh.End()
+	g.mesh, g.verts, g.tris = m, nil, nil
+end
+
+-- A tint per injury level; the texture is mid grey, so the lighting runs bright.
+local TINTS = { [0] = Vector(1, 1, 1), Vector(1, 0.8, 0.12), Vector(1, 0.16, 0.12) }
+local builds = 0
+
+local function Materials()
+	-- A fresh name each time: Garry's Mod keeps CreateMaterial's across map changes.
+	builds = builds + 1
+	local png = "skate3/assets/skeleton/hom.png"
+	local source = file.Exists(png, "DATA") and Material("../data/" .. png, "smooth mips") or nil
+	local texture = source and not source:IsError() and source:GetTexture("$basetexture") or nil
+	local out = {}
+	for _, translucent in ipairs({ false, true }) do
+		local set = {}
+		for level = 0, 2 do
+			local mat = CreateMaterial(("skate3_hom_%d_%d_%s"):format(builds, level, translucent and "t" or "o"),
+				"VertexLitGeneric", {
+					["$basetexture"] = "color/white", ["$model"] = 1, ["$nocull"] = 1,
+					["$translucent"] = translucent and 1 or 0,
+				})
+			if texture then mat:SetTexture("$basetexture", texture) end
+			mat:SetVector("$color2", TINTS[level])
+			set[level] = mat
+		end
+		out[translucent and "fading" or "solid"] = set
+	end
+	return out
+end
+
+local function LoadSkeleton()
+	if skeleton ~= nil then return skeleton end
+	local groups, why = ReadSkeleton()
+	if not groups then
+		skeleton, skeletonNote = false, why
+		return false
+	end
+	for _, g in ipairs(groups) do BuildGroup(g) end
+	skeleton = { groups = groups, materials = Materials() }
+	print(("[skate3] Hall of Meat skeleton ready: %d chunks"):format(#groups))
+	return skeleton
+end
+
+-- Whether Skate 3's own skeleton is there to draw (the menu says so).
+function Meat.SkeletonReady()
+	return LoadSkeleton() ~= false
+end
+
+-- The skater's size against the model it wears, so the bones fit it too
+-- (set by cl_skate3.lua; one without scaling).
+Meat.Scale = nil
+
+local function Mat(m)
+	return Matrix({
+		{ m[1], m[2], m[3], m[4] },
+		{ m[5], m[6], m[7], m[8] },
+		{ m[9], m[10], m[11], m[12] },
+		{ 0, 0, 0, 1 },
+	})
+end
+
+-- Draws the skeleton under the skater's bones; false when there's none to draw.
+local function DrawSkeleton(parts, alpha)
+	local s = LoadSkeleton()
+	if not s then return false end
+	local scale = Meat.Scale and Meat.Scale() or 1
+	local set = alpha < 1 and s.materials.fading or s.materials.solid
+	local skull = cv_skull:GetBool()
+	-- Over the body, bones in front of bones: the depth starts over for them.
+	render.ClearDepth()
+	render.SuppressEngineLighting(true)
+	render.ResetModelLighting(1.1, 1.1, 1.1)
+	render.SetModelLighting(BOX_TOP, 1.7, 1.7, 1.7)
+	render.SetModelLighting(BOX_FRONT, 1.4, 1.4, 1.4)
+	render.SetModelLighting(BOX_RIGHT, 1.2, 1.2, 1.2)
+	if alpha < 1 then render.SetBlend(alpha) end
+	local drawn = 0
+	for _, g in ipairs(s.groups) do
+		local m = lastBones[g.bone]
+		local state = parts[g.part]
+		if m and state and (skull or g.part ~= "skull") then
+			local mm = Mat(m)
+			if scale ~= 1 and lastPos then
+				mm:SetTranslation(Vector(
+					lastPos[1] + (m[4] - lastPos[1]) * scale,
+					lastPos[2] + (m[8] - lastPos[2]) * scale,
+					lastPos[3] + (m[12] - lastPos[3]) * scale))
+				mm:Scale(Vector(scale, scale, scale))
+			end
+			render.SetMaterial(set[state.level] or set[0])
+			cam.PushModelMatrix(mm)
+			g.mesh:Draw()
+			cam.PopModelMatrix()
+			drawn = drawn + 1
+		end
+	end
+	if alpha < 1 then render.SetBlend(1) end
+	render.SuppressEngineLighting(false)
+	return drawn > 0
+end
+
+hook.Add("PostDrawTranslucentRenderables", "skate3_meat_xray", function(depth, skybox)
+	if depth or skybox or not lastBones or not Meat.Enabled() or (Meat.Skipped and Meat.Skipped()) then return end
 	local b, going = bail, true
 	if not b then b, going = last, false end
 	if not b then return end
 	local alpha = going and 1 or math.Clamp((SHOW_AFTER + FADE - (RealTime() - b.endedAt)) / FADE, 0, 1)
 	if alpha <= 0 then return end
+	if cv_look:GetString() == "skeleton" then
+		if DrawSkeleton(b.parts, alpha) then return end
+		if skeletonNote then
+			print("[skate3] Hall of Meat: using the X-ray lines, " .. skeletonNote)
+			skeletonNote = nil
+		end
+	end
 	cam.IgnoreZ(true)
 	if not (Meat.Body and DrawBodyBones(Meat.Body(), b.parts, alpha)) then
 		DrawEngineBones(lastBones, b.parts, alpha)
@@ -338,5 +507,8 @@ concommand.Add("skate3_hall_of_meat_toggle", function()
 	chat.AddText(Color(120, 200, 255), "[skate3] ", color_white,
 		"Hall of Meat " .. (Meat.Enabled() and "off" or "on") .. (Meat.Enabled() and "" or ": bails score now. Both triggers and both sticks to bail on purpose."))
 end, nil, "Turn Hall of Meat on or off")
+
+-- The settings menu asks whether the skeleton is there.
+S3GM_Meat = Meat
 
 return Meat

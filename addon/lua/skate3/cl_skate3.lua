@@ -9,6 +9,7 @@ local Menu = include("skate3/cl_contextmenu.lua")
 -- Hall of Meat's X-ray skeleton is posed like the body the skater shows.
 Score.Meat.Body = Skater.BodyEntity
 Score.Meat.Skipped = function() return Skater.Skip.hom end
+Score.Meat.Scale = Skater.ModelScale
 local Keyboard = include("skate3/cl_keyboard.lua")
 include("skate3/cl_update.lua")
 include("skate3/cl_menu.lua")

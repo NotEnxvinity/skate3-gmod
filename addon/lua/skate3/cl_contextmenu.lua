@@ -184,6 +184,13 @@ local SETTINGS = {
 	{ "Button pictures", "skate3_ui_glyphs", { { "Automatic", "auto" }, { "Xbox", "xbox" }, { "PlayStation", "playstation" } } },
 	{ "Score beside the skater", "skate3_ui_world", ONOFF },
 	{ "Hall of Meat", "skate3_hall_of_meat", ONOFF },
+	{ "Hall of Meat bones", "skate3_hom_look", { { "Skeleton", "skeleton" }, { "X-ray", "xray" } },
+		after = function(value)
+			-- The skeleton is made from the disc by the setup; say so when it isn't there.
+			if value == "skeleton" and S3GM_Meat and S3GM_Meat.SkeletonReady and not S3GM_Meat.SkeletonReady() then
+				UI.Toast("Run the S3GM setup again to get the skeleton (X-ray until then)")
+			end
+		end },
 	{ "Punch and smack", "skate3_melee", ONOFF },
 	{ "Update notices", "skate3_update_notices", ONOFF },
 }
@@ -238,6 +245,7 @@ local function OpenSettings()
 			if def.number then i = math.Clamp(i, 1, n) else i = (i - 1) % n + 1 end
 			RunConsoleCommand(def[2], def[3][i][2])
 			if def.note then UI.Toast(def.note) end
+			if def.after then def.after(def[3][i][2]) end
 		end,
 	})
 end
