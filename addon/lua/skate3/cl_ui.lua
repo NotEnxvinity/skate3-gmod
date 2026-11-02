@@ -148,7 +148,11 @@ local function Mat(name)
 	-- An upscaled copy from the optional HD pack, where ui.json says it would be.
 	local info = art and art.textures and art.textures[name]
 	if info and info.hd and not SOFT[name] and cv_hd:GetBool() and file.Exists(HD .. info.hd, "DATA") then path = HD .. info.hd end
-	m = Material("../data/" .. path, SOFT[name] and "smooth" or "smooth noclamp")
+	-- "smooth" only: the picture's edge pixels stay put. ("noclamp" lets the
+	-- picture wrap, so a quad whose texture coordinates end exactly on 1 blends
+	-- in the opposite edge: a thin line wherever two quads meet, down the
+	-- phone panel, across the multiplier disc and its glow.)
+	m = Material("../data/" .. path, "smooth")
 	UI.mats[name] = m
 	return m
 end
