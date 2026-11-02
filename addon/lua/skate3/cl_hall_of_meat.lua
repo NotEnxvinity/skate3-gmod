@@ -199,6 +199,10 @@ function Meat.Update(pose, ply)
 			last, bail = bail, nil
 			last.endedAt = now
 			print(("[skate3] Hall of Meat: bail ended (state %s)"):format(tostring(pose and pose.state)))
+			-- The engine's own respawn goes through Teleporting (test 5's log: every
+			-- bail ended there): the skater is somewhere else already, so nothing
+			-- of the bail stays on screen.
+			if pose and pose.state and pose.state:find("^Teleport") then last = nil end
 		end
 		track, lastTick, hipsAt = {}, nil, nil
 		return
