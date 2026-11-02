@@ -1,32 +1,38 @@
--- The contextual menu, after Skate 3's D-pad menu: hold L1 (Shift on a
--- keyboard) and a small menu appears top left, hiding the score:
+-- The contextual menu, laid out like Skate 2's phone and drawn in Skate 3's
+-- own look: hold L1 (Shift on a keyboard) and a menu appears top left, hiding
+-- the score:
 --
---   D-pad down   place the session marker
---   D-pad up     hold to go back to it
---   D-pad left   interact with something off the board (doors, buttons)
---   D-pad right  hold for the games list (a game of S.K.A.T.E. and the like)
+--   L1 Menu           (the header)
+--   D-pad up          hold to go back to the session marker
+--   D-pad down        place the session marker
+--   D-pad left        interact with something off the board (doors, buttons)
+--   ------------
+--   Y                 the games list (a game of S.K.A.T.E. and the like)
+--   X                 settings
 --
 -- Games and other modes plug in through S3GM_Menu: RegisterMode adds an entry
 -- to the games list, OpenList shows a persistent list view (up and down pick,
--- right chooses, left goes back), and RegisterInteract supplies the "left"
+-- right chooses, left goes back; a settings list sets onAdjust so left and
+-- right change the row's value and B goes back), and RegisterInteract supplies the "left"
 -- action. Nothing here touches L1 itself: the simulation still reads it, so
 -- mach 1 (jump, L1, land on the board) works as ever. The menu only opens
 -- once L1 has been down a moment and the skater is on the ground, so the L1
--- of a mach 1 jump never flashes it up.
+-- of a mach 1 jump never flashes it up. While it is open X and Y belong to the
+-- menu: Menu.Mask() is what the simulation must not see.
 
 S3GM_Menu = S3GM_Menu or {}
 local Menu = S3GM_Menu
 local UI = S3GM_UI
 local Marker = S3GM_Marker
 
-local cv_menu = CreateClientConVar("skate3_menu", "1", true, false, "Hold L1 for the contextual menu (marker, interact, games)")
+local cv_menu = CreateClientConVar("skate3_menu", "1", true, false, "Hold L1 for the contextual menu (marker, interact, games, settings)")
 
 local UP, DOWN, LEFT, RIGHT, LB = 0x0001, 0x0002, 0x0004, 0x0008, 0x0100
+local BTN_X, BTN_Y, BTN_B = 0x4000, 0x8000, 0x2000
 local DPAD = bit.bor(UP, DOWN, LEFT, RIGHT)
 local band, bor, bnot = bit.band, bit.bor, bit.bnot
 
 local OPEN_AFTER = 0.2      -- L1 held this long before the menu shows
-local GAMES_HOLD = 0.45     -- hold right this long for the games list
 local REPEAT_FIRST, REPEAT_EVERY = 0.4, 0.12
 
 local stack = {}            -- open list views, the top one shown
@@ -34,7 +40,7 @@ local lbSince               -- when L1 went down on the ground
 local rootShown = false
 local last = 0              -- last frame's buttons
 local ignore = 0            -- D-pad directions held since a view opened; ignored until let go
-local hold                  -- { bit, since } while up or right is held for its action
+local hold                  -- { bit, since } while up is held to go back to the marker
 local repeatAt              -- when a held up/down repeats next
 
 local modes = {}            -- registered modes, for the games list
@@ -71,7 +77,9 @@ end
 -- Shows a persistent list view. list = {
 --   title = "Games", rows = { { label, tag, model, enabled, ... }, ... },
 --   refresh = function() -> rows (optional, run every frame, for live lists),
---   onPick = function(row, index), onBack = function() (optional) }.
+--   onPick = function(row, index), onBack = function() (optional),
+--   onAdjust = function(row, direction) (optional: left/right change the
+--   selected row's value, -1 or 1, and B goes back instead of left) }.
 -- A row's `tag` is short text on its right (the letters "S K A"); `model` a
 -- playermodel path whose icon shows on its left. Holds the D-pad as a latch
 -- so the press that opened it doesn't also choose.
@@ -111,6 +119,15 @@ end
 -- True while a list view has the D-pad, even with L1 let go.
 function Menu.HasList()
 	return #stack > 0
+end
+
+-- The buttons the simulation must not see right now: X and Y while the menu
+-- is up (Y would step off the board). Read before the frame's step, so it
+-- goes by the menu as the last frame left it.
+function Menu.Mask()
+	if #stack > 0 then return bor(BTN_X, BTN_Y, BTN_B) end
+	if rootShown then return bor(BTN_X, BTN_Y) end
+	return 0
 end
 
 -- Starts over: the skater stopped skating.
@@ -154,6 +171,61 @@ local function OpenGames()
 	})
 end
 
+local ONOFF = { { "On", "1" }, { "Off", "0" } }
+-- The settings list: label, convar, the values it cycles through (shown, set).
+local SETTINGS = {
+	{ "Stance", "skate3_stance", { { "Regular", "regular" }, { "Goofy", "goofy" } }, note = "Stance applies the next time you get on" },
+	{ "Camera", "skate3_camera", { { "Low", "low" }, { "Normal", "normal" }, { "High", "high" } } },
+	{ "Volume", "skate3_volume", { { "0%", "0" }, { "25%", "0.25" }, { "50%", "0.5" }, { "75%", "0.75" }, { "100%", "1" } }, number = true },
+	{ "Trick score", "skate3_score_hud", ONOFF },
+	{ "Look", "skate3_ui_style", { { "Skate 3", "skate3" }, { "Minimal", "minimal" }, { "Half-Life 2", "hl2" } } },
+	{ "Button pictures", "skate3_ui_glyphs", { { "Automatic", "auto" }, { "Xbox", "xbox" }, { "PlayStation", "playstation" } } },
+	{ "Score beside the skater", "skate3_ui_world", ONOFF },
+	{ "Hall of Meat", "skate3_hall_of_meat", ONOFF },
+	{ "Punch and smack", "skate3_melee", ONOFF },
+}
+
+-- Which of a setting's values the convar is on (the nearest, for numbers).
+local function ValueIndex(def, cv)
+	local now = cv:GetString()
+	local best, bestGap = 1, math.huge
+	for i, v in ipairs(def[3]) do
+		if v[2] == now then return i end
+		if def.number then
+			local gap = math.abs((tonumber(v[2]) or 0) - (tonumber(now) or 0))
+			if gap < bestGap then best, bestGap = i, gap end
+		end
+	end
+	return best
+end
+
+local function SettingsRows()
+	local rows = {}
+	for _, def in ipairs(SETTINGS) do
+		local cv = GetConVar(def[2])
+		if cv then
+			rows[#rows + 1] = { label = def[1], tag = def[3][ValueIndex(def, cv)][1], def = def, cv = cv }
+		end
+	end
+	return rows
+end
+
+local function OpenSettings()
+	Menu.OpenList({
+		title = "Settings",
+		rows = SettingsRows(),
+		refresh = SettingsRows,
+		onAdjust = function(row, dir)
+			local def = row.def
+			local n = #def[3]
+			local i = ValueIndex(def, row.cv) + dir
+			if def.number then i = math.Clamp(i, 1, n) else i = (i - 1) % n + 1 end
+			RunConsoleCommand(def[2], def[3][i][2])
+			if def.note then UI.Toast(def.note) end
+		end,
+	})
+end
+
 -- Per frame, while skating. `buttons` is the pad's and keyboard's buttons as
 -- the simulation reads them. Returns true when it just took the skater to
 -- their marker (the ride restarted, so the caller stops there for the frame).
@@ -189,10 +261,19 @@ function Menu.Update(now, pose, buttons)
 			repeatAt = nil
 		end
 		if step ~= 0 and n > 0 then list.sel = (list.sel - 1 + step) % n + 1 end
-		if band(freshly, RIGHT) ~= 0 and n > 0 then
+		if list.onAdjust then
+			-- A settings list: the D-pad changes the value, B goes back.
+			local dir = band(freshly, RIGHT) ~= 0 and 1 or band(freshly, LEFT) ~= 0 and -1 or 0
+			if dir ~= 0 and n > 0 then
+				local row = list.rows[list.sel]
+				if row.enabled ~= false then list.onAdjust(row, dir) end
+			elseif band(freshly, BTN_B) ~= 0 then
+				Menu.Back()
+			end
+		elseif band(freshly, RIGHT) ~= 0 and n > 0 then
 			local row = list.rows[list.sel]
 			if row.enabled ~= false and list.onPick then list.onPick(row, list.sel) end
-		elseif band(freshly, LEFT) ~= 0 then
+		elseif band(freshly, LEFT) ~= 0 or band(freshly, BTN_B) ~= 0 then
 			Menu.Back()
 		end
 		hold = nil
@@ -213,26 +294,23 @@ function Menu.Update(now, pose, buttons)
 			UI.Toast("Nothing to interact with")
 		end
 	end
+	if band(freshly, BTN_Y) ~= 0 then OpenGames() end
+	if band(freshly, BTN_X) ~= 0 then OpenSettings() end
 
-	-- Up and right are holds.
-	local want = band(free, UP) ~= 0 and UP or band(free, RIGHT) ~= 0 and RIGHT or nil
+	-- Up is a hold, as long as the way back is far.
+	local want = band(free, UP) ~= 0 and UP or nil
 	if want and (not hold or hold.bit ~= want) then hold = { bit = want, since = now } end
 	if not want then hold = nil end
 	if hold then
-		local needed = hold.bit == UP and Marker.HoldTime() or GAMES_HOLD
+		local needed = Marker.HoldTime()
 		if not needed then
 			hold.progress = 0
 		else
 			hold.progress = math.min((now - hold.since) / needed, 1)
 			if hold.progress >= 1 then
-				local bit_ = hold.bit
 				hold = nil
-				ignore = bor(ignore, bit_)
-				if bit_ == UP then
-					if Marker.GoTo() then return true end
-				else
-					OpenGames()
-				end
+				ignore = bor(ignore, UP)
+				if Marker.GoTo() then return true end
 			end
 		end
 	end
@@ -315,9 +393,19 @@ local ARROWS = {
 	DPad_Right = { { 1, 0 }, { -0.8, 1 }, { -0.8, -1 } },
 }
 
+-- The flat looks name the buttons that aren't a D-pad arrow in letters.
+local LETTERS = { L_Bumper = "L1", X = "X", Y = "Y" }
+
 function UI.Arrow(name, cx, cy, size, color)
 	local shape = ARROWS[name]
-	if not shape then return end
+	if not shape then
+		local letters = LETTERS[name]
+		if letters then
+			local X, Y = UI.P(cx, cy)
+			draw.SimpleText(letters, UI.Font(15 * UI.Scale()), X, Y, color, TEXT_ALIGN_CENTER, TEXT_ALIGN_CENTER)
+		end
+		return
+	end
 	local poly = {}
 	for i, p in ipairs(shape) do
 		local x, y = UI.P(cx + p[1] * size, cy + p[2] * size)
@@ -369,32 +457,57 @@ function Looks.hl2.Box(x, y, w, h)
 	UI.Rounded(8, x, y, w, h, Color(0, 0, 0, 76))
 end
 
+-- The root menu, top to bottom: a header, the D-pad rows, a divider and the
+-- face-button rows.
 local function Rows(pose)
 	local act = Interaction(pose)
 	return {
-		{ dir = "DPad_Up", label = "Go To Marker", enabled = Marker.Has(), bit = UP },
-		{ dir = "DPad_Down", label = "Place Marker", enabled = true },
-		{ dir = "DPad_Left", label = act and act.label or "Interact", enabled = act ~= nil },
-		{ dir = "DPad_Right", label = "Games", enabled = #modes > 0, bit = RIGHT },
+		{ kind = "header", icon = "L_Bumper", label = "Menu" },
+		{ icon = "DPad_Up", label = "Go To Marker", enabled = Marker.Has(), bit = UP },
+		{ icon = "DPad_Down", label = "Place Marker", enabled = true },
+		{ icon = "DPad_Left", label = act and act.label or "Interact", enabled = act ~= nil },
+		{ kind = "divider" },
+		{ icon = "Y", label = "Games", enabled = #modes > 0 },
+		{ icon = "X", label = "Settings", enabled = true },
 	}
 end
 
+local GAP = 12 -- a divider's height, canvas units
+local RULES = { skate3 = Color(145, 199, 219), minimal = Color(255, 255, 255), hl2 = Color(255, 220, 0) }
+
 local function DrawRoot(look, pose, style)
 	local rows = Rows(pose)
-	local widest = 0
-	for _, r in ipairs(rows) do widest = math.max(widest, look.Width(r.label, 20)) end
-	if style == "skate3" then
-		look.Strip(#rows)
-	else
-		look.Strip(#rows, 80 + widest + 24)
+	local widest, height = 0, 0
+	for _, r in ipairs(rows) do
+		if r.kind == "divider" then
+			height = height + GAP
+		else
+			height = height + PITCH
+			widest = math.max(widest, look.Width(r.label, 20))
+		end
 	end
-	for i, r in ipairs(rows) do
-		local top = 54 + (i - 1) * PITCH
-		local alpha = r.enabled and 1 or 0.3
-		look.Icon(r.dir, 99, top, alpha)
-		look.Text(r.label, 158, top + 11, 20, alpha)
-		if hold and r.bit == hold.bit and hold.progress and hold.progress > 0 then
-			UI.Rect(158, top + 36, math.max(look.Width(r.label, 20), 20) * hold.progress, 2, CREAM, 0.9)
+	if style == "skate3" then
+		look.Strip(height / PITCH)
+	else
+		look.Strip(height / PITCH, 80 + widest + 24)
+	end
+	local rule, ruleWidth = RULES[style] or WHITE, 64 + widest + 20
+	local top = 54
+	for _, r in ipairs(rows) do
+		if r.kind == "divider" then
+			UI.Rect(99, top + GAP / 2 - 1, ruleWidth, 2, rule, 0.7)
+			top = top + GAP
+		else
+			local alpha = (r.enabled == false) and 0.3 or 1
+			look.Icon(r.icon, 99, top, alpha)
+			look.Text(r.label, 158, top + 11, 20, alpha)
+			if r.kind == "header" then
+				UI.Rect(99, top + PITCH - 3, ruleWidth, 2, rule, 0.7)
+			end
+			if hold and r.bit == hold.bit and hold.progress and hold.progress > 0 then
+				UI.Rect(158, top + 36, math.max(look.Width(r.label, 20), 20) * hold.progress, 2, CREAM, 0.9)
+			end
+			top = top + PITCH
 		end
 	end
 end
@@ -408,10 +521,12 @@ local function DrawList(look, style)
 	local last_ = math.min(n, first + MAX_ROWS - 1)
 	local shown = last_ - first + 1
 
-	local width = math.max(look.Width(list.title or "", 20) + 40, 360)
+	local hint = list.onAdjust and "Up / Down  Select      Left / Right  Change      B  Back"
+		or "Up / Down  Select      Right  Choose      Left  Back"
+	local width = math.max(look.Width(list.title or "", 20) + 40, look.Width(hint, 16) + 40, 360)
 	for i = first, last_ do
 		local r = rows[i]
-		width = math.max(width, 70 + look.Width(r.label or "", 20) + (r.tag and look.Width(r.tag, 20) + 50 or 0))
+		width = math.max(width, 70 + look.Width(r.label or "", 20) + (r.tag and look.Width(r.tag, 20) + (list.onAdjust and 90 or 50) or 0))
 	end
 	local x, y = 91, 48
 	local height = 52 + math.max(shown, 1) * PITCH + 46
@@ -442,9 +557,18 @@ local function DrawList(look, style)
 			labelX = labelX + PITCH
 		end
 		look.Text(r.label or "", labelX, top + 7, 20, alpha)
-		if r.tag then look.Right(r.tag, x + width - 20, top + 7, 20, alpha) end
+		if r.tag and list.onAdjust then
+			-- A setting: its value between arrows, lit on the chosen row.
+			local lit = i == list.sel and 1 or 0.35
+			local right = x + width - 20
+			look.Right(r.tag, right - 26, top + 7, 20, alpha)
+			UI.Arrow("DPad_Right", right - 8, top + 17, 5, Color(243, 237, 210, 255 * lit))
+			UI.Arrow("DPad_Left", right - 26 - look.Width(r.tag, 20) - 16, top + 17, 5, Color(243, 237, 210, 255 * lit))
+		elseif r.tag then
+			look.Right(r.tag, x + width - 20, top + 7, 20, alpha)
+		end
 	end
-	look.Text("Up / Down  Select      Right  Choose      Left  Back", x + 20, y + height - 32, 16, 0.45)
+	look.Text(hint, x + 20, y + height - 32, 16, 0.45)
 end
 
 -- Draws whatever of the menu is up. Call from HUDPaint.

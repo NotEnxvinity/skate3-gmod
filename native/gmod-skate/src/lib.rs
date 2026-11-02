@@ -355,6 +355,9 @@ lua_fn!(step, |lua| {
     if let Some(extra) = lua.numbers(4) {
         controls = input::merge(controls, &extra);
     }
+    // Buttons the skater must not see this step (the contextual menu keeps X
+    // and Y for itself while it is open).
+    controls.buttons &= !(lua.number(5).unwrap_or(0.) as u16);
     with_runtime(|r| {
         r.send(Job::Step {
             dt,

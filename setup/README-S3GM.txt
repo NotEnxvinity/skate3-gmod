@@ -65,8 +65,9 @@ Skate 3's own: A pushes, Y gets on and off the board, the right stick flicks
 tricks, triggers grab. B (R1) is the attack button: a board smack when the
 board is in your hand, punches without it. Hold L1 (Shift on keyboard) for the quick menu: D-pad
 down drops a session marker, hold D-pad up to go back to it, left interacts
-with what you're next to, right opens the games list. Switch weapons to
-leave skate mode.
+with what you're next to, Y opens the games list and X opens settings (D-pad up
+and down pick a row, left and right change a setting, B goes back). Switch
+weapons to leave skate mode.
 
 
 Settings

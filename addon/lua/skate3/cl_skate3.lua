@@ -474,7 +474,7 @@ hook.Add("Think", "skate3_step", function()
 		analog = analog or { 0, 0, 0, 0, 0, 0 }
 		for i = 1, 6 do analog[i] = math.max(analog[i] or 0, moreAnalog[i]) end
 	end
-	if not skip.step then Perf.Time("step", skate3.Step, FrameTime(), ScrW() / ScrH(), keys, analog) end
+	if not skip.step then Perf.Time("step", skate3.Step, FrameTime(), ScrW() / ScrH(), keys, analog, Menu.Mask()) end
 	-- The contextual menu reads the same buttons the simulation does (it never
 	-- takes L1 from it, so mach 1 works as ever). It says when it took the
 	-- skater to their marker, which restarts the ride.
