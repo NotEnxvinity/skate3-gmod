@@ -197,7 +197,7 @@ local view -- what to draw this frame, or nil
 local function MeatView(now)
 	local b, going = Meat.Current()
 	if not b then return nil end
-	local alpha = going and 1 or math.Clamp((HOLD + FADE - (now - b.endedAt)) / FADE, 0, 1)
+	local alpha = going and 1 or math.Clamp((Meat.AFTER + Meat.FADE - (now - b.endedAt)) / Meat.FADE, 0, 1)
 	if alpha <= 0 then return nil end
 	local points = math.floor(b.points + 0.5)
 	return {

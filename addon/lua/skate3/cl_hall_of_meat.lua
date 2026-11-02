@@ -156,6 +156,7 @@ local rideSeen = false
 -- Follows the skater every frame while riding.
 function Meat.Update(pose, ply)
 	local now = RealTime()
+	local prevPos = lastPos
 	lastBones = pose and pose.bones or nil
 	lastPos = pose and pose.pos or nil
 	-- The engine's Hall of Meat switch: it lets the camera do its broken-bone shot.
@@ -169,6 +170,23 @@ function Meat.Update(pose, ply)
 	end
 	local bailing = pose and pose.state and pose.state:find("^Wipeout") ~= nil
 	if pose and pose.state and not bailing then rideSeen = true end
+	-- A respawn or a teleport, whatever the pose's state says: the engine's
+	-- spawn invincibility is on, or the skater is suddenly somewhere far off.
+	-- Either way the bail they were in is over, and the wipeout the pose may
+	-- still read (the old ride's last) is not a new one.
+	local jumped = false
+	if pose and pose.pos and prevPos then
+		local dx, dy, dz = pose.pos[1] - prevPos[1], pose.pos[2] - prevPos[2], pose.pos[3] - prevPos[3]
+		jumped = dx * dx + dy * dy + dz * dz > 600 * 600
+	end
+	if pose and ((pose.invincible or 0) > 0 or jumped) then
+		if bail then
+			print(("[skate3] Hall of Meat: bail ended by a %s"):format(jumped and "teleport" or "respawn"))
+			last, bail = bail, nil
+			last.endedAt = now
+		end
+		if bailing then bailing, rideSeen = false, false end
+	end
 	-- The simulation's tick going backwards is a new ride (a marker, a respawn)
 	-- whatever else was reset: its bail is over.
 	if bail and lastTick and pose and pose.tick and pose.tick < lastTick then
@@ -238,6 +256,7 @@ function Meat.Current()
 end
 
 function Meat.Reset()
+	if bail or last then print("[skate3] Hall of Meat: cleared by a reset") end
 	bail, last, track, lastTick, hipsAt, lastBones, lastPos = nil, nil, {}, nil, nil, nil, nil
 	rideSeen = false
 end
@@ -256,7 +275,12 @@ local WHITE = Color(235, 235, 235)
 local YELLOW = Color(255, 210, 40)
 local RED = Color(255, 50, 40)
 local LEVEL_COLORS = { [0] = WHITE, YELLOW, RED }
-local SHOW_AFTER, FADE = 2.5, 0.5 -- as the score's
+-- How long the skeleton and the panel stay once the bail is over. The bail ends
+-- when the skater is back on their feet (the engine's respawn, or a marker), so
+-- they go with it at once, in a short fade, rather than lingering over the
+-- respawned skater.
+local SHOW_AFTER, FADE = 0, 0.35
+Meat.AFTER, Meat.FADE = SHOW_AFTER, FADE
 -- The bone pictures Edit Bones draws.
 local BONE = Material("widgets/bone.png", "unlitsmooth")
 local BONE_SMALL = Material("widgets/bone_small.png", "unlitsmooth")
