@@ -19,7 +19,7 @@ this cache isn't there.
     python audio_cache.py --game <extracted game folder> --out <audio-cache>
 """
 from pathlib import Path
-import argparse, hashlib, json, os, shutil, struct, subprocess, sys, tempfile
+import argparse, hashlib, json, shutil, struct, sys
 
 from audio import ARCHIVES, MIX_MAP, Big
 import audio_blobs

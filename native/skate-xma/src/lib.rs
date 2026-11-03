@@ -5,8 +5,8 @@
 //! packet payloads, the `xmaframes` packets it builds, FFmpeg 4.4's WMA Pro /
 //! XMA frame decoder as the rexglue-sdk (Xenia) fork compiles it (pure C
 //! paths, clang -O2 -ffp-model=strict), and the context's ConvertFrame
-//! (x 32767, cvtps2dq, saturating pack). See docs/AEMS.md "Exact XMA
-//! decoding".
+//! (x 32767, cvtps2dq, saturating pack). See SK8V's docs/AEMS.md "Exact XMA
+//! decoding" (https://github.com/becaring/SK8V).
 //!
 //! Two things to know:
 //! - The reference keeps one codec context per run and `xmaframes` has no

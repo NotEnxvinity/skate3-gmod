@@ -1,7 +1,7 @@
 """Builds tiny EA audio archives holding PCM sounds and reads them back; with
 vgmstream-cli available (SKATE3_VGMSTREAM or PATH) it runs the whole install."""
 from pathlib import Path
-import json, math, os, struct, tempfile, unittest, wave
+import json, math, struct, tempfile, unittest, wave
 
 import audio
 

@@ -1,6 +1,8 @@
 # Skate 3 mode for Garry's Mod: architecture plan
 
-Status: plan only, no code yet. Read 2026-10-02 from:
+Status: the original plan, written 2026-10-02 before any code. The mod has
+since grown well past it (the retail sound engine, parks, the Mac build,
+keyboard and mouse); the README describes what exists now. Read from:
 
 - `ckosmic/g64` @ HEAD (Lua addon) and `ckosmic/libsm64-gmod` (its C++ binary module, linked from G64's README)
 - `SK8-ENGINE/skate-3-rust-engine` @ `7ae67f2`

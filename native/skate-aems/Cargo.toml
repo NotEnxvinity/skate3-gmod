@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 license = "Apache-2.0"
-description = "Skate 3 AEMS (EA audio scripting) runtime, ported from the TU3 game code (docs/AEMS.md)"
+description = "Skate 3 AEMS (EA audio scripting) runtime, ported from the TU3 game code (SK8V's docs/AEMS.md)"
 
 [dependencies]
 
