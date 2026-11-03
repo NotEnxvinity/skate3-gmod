@@ -129,6 +129,8 @@ Without `--assets` it only builds the test park and prints the rails it found.
   this mod stays free. It always will be.
 - Headless host, collision handoff and rail finder: [chasmlol/2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)
   (Apache-2.0, text in [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)). See [NOTICE](NOTICE).
+- Skate 3's sound engine: [becaring/SK8V](https://github.com/becaring/SK8V) (Apache-2.0), the GTA V mod whose
+  port of the game's audio runtime this mod's retail sound engine is built on. See [NOTICE](NOTICE).
 - Module architecture: inspired by [ckosmic/g64](https://github.com/ckosmic/g64). No code taken.
 - Sound bank research: [doriangironde/skate-3-rust-macos](https://github.com/doriangironde/skate-3-rust-macos)
   and Hailey-Ross's audio work on SK8-ENGINE. Sounds are decoded on your machine by
