@@ -91,7 +91,7 @@ posed from the skater's skeleton. Other players see you skate: your game sends
 your pose and they draw a posed copy of your playermodel with the board
 (`skate3_others_body real` poses their real body instead, and
 `skate3_debug_others 1` shows what arrives from each skater). Multiplayer fix
-by undead_corporation.
+by undead_corporation ([@tummypics](https://github.com/tummypics)).
 
 Other players are solid. Every skater's simulation runs on their own computer,
 so each game checks its skater against the others and bails it when it runs
@@ -150,7 +150,7 @@ ideas that shaped this mod. Names are Discord display names, with the username i
 - LittleGusty (gust4v1tz)
 - Misanthropic (bmtr)
 - ms. game & watch (aybigdog)
-- undead_corporation
+- undead_corporation ([@tummypics](https://github.com/tummypics) on GitHub)
 - yuki (yukisxl)
 
 undead_corporation also fixed multiplayer (other riders drawn as a posed copy of their model),
