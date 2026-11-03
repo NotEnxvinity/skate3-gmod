@@ -134,6 +134,26 @@ Without `--assets` it only builds the test park and prints the rails it found.
   and Hailey-Ross's audio work on SK8-ENGINE. Sounds are decoded on your machine by
   [vgmstream](https://github.com/vgmstream/vgmstream).
 
+## Testers and contributors
+
+The Discord Contributor role: people who tested builds and gave the feedback and
+ideas that shaped this mod. Names are Discord display names, with the username in brackets.
+
+- a microwave (olda9991._77573)
+- bibi (.cheenis.)
+- Delamain (0528mari)
+- gumballegal
+- hitmann (thedeadmemelord)
+- IHATEREAL!TY (ihatereal1ty)
+- LittleGusty (gust4v1tz)
+- Misanthropic (bmtr)
+- ms. game & watch (aybigdog)
+- undead_corporation
+- yuki (yukisxl)
+
+undead_corporation also fixed multiplayer (other riders drawn as a posed copy of their model),
+and gumballegal tested maps.
+
 ## License
 
 GPL-3.0, see [LICENSE](LICENSE). Code ported from chasmlol's project stays under

@@ -112,6 +112,7 @@ Credits
 - Sound bank research: doriangironde/skate-3-rust-macos and Hailey-Ross's
   audio work on SK8-ENGINE. Sounds are decoded on your machine by vgmstream.
 - undead_corporation: the multiplayer board fix. gumballegal: map testing.
+- Testers and feedback (Discord Contributors): a microwave (olda9991._77573), bibi (.cheenis.), Delamain (0528mari), gumballegal, hitmann (thedeadmemelord), IHATEREAL!TY (ihatereal1ty), LittleGusty (gust4v1tz), Misanthropic (bmtr), ms. game & watch (aybigdog), undead_corporation, yuki (yukisxl).
 
 
 License
