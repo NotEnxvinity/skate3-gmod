@@ -72,56 +72,33 @@ jobs:
           name: windows-build
           path: out
 
-  # The setup app players run once: it carries the engine's converters and
-  # both modules, takes their own Skate 3 ISO and installs everything.
-  setup-app:
+  # The setup players run once: a plain folder of our own scripts (the .bat,
+  # .sh and .command launchers) with both modules, zipped. The launcher fetches
+  # the engine's converters and vgmstream on the player's machine. Never a
+  # PyInstaller exe: those get flagged as viruses. The Mac module is built by
+  # hand on a Mac, so the Mac zip is made and attached by hand.
+  setup-zip:
     needs: [linux, windows]
-    strategy:
-      matrix:
-        os: [windows-latest, ubuntu-22.04]
-    runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        shell: bash
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - uses: actions/download-artifact@v4
         with:
           path: builds
-      - name: Fetch the engine's converters
-        run: |
-          rev=$(sed -n 's/^ENGINE_REV=//p' setup/skate3-gmod-setup.sh)
-          git init -q engine
-          git -C engine remote add origin https://github.com/SK8-ENGINE/skate-3-rust-engine
-          git -C engine fetch -q --depth 1 origin "$rev"
-          git -C engine checkout -q FETCH_HEAD
-      - run: python -m pip install -q pyinstaller==6.19.0 numpy==2.2.6 Pillow==11.3.0
-      # Decodes the sounds on the player's disc. Windows gets the tagged
-      # release; the Linux CLI is only published as vgmstream's nightly.
-      - name: Fetch vgmstream
-        run: |
-          mkdir -p vgmstream
-          if [ "$RUNNER_OS" = Windows ]; then
-            curl -sSfL -o vgm.zip https://github.com/vgmstream/vgmstream/releases/download/r2117/vgmstream-win64.zip
-            unzip -q vgm.zip -d vgmstream
-          else
-            curl -sSfL -o vgm.tgz https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-linux-cli.tar.gz
-            tar xzf vgm.tgz -C vgmstream
-            curl -sSfL -o vgmstream/COPYING https://raw.githubusercontent.com/vgmstream/vgmstream/r2117/COPYING
-          fi
-          ls vgmstream
       - run: |
           mkdir -p modules
           cp builds/linux-build/gmcl_skate3_linux64.dll builds/windows-build/gmcl_skate3_win64.dll modules/
-          python setup/package.py --engine engine --modules modules --vgmstream vgmstream --out dist
-      - run: dist/skate3-gmod-setup --self-test
+          python3 setup/package.py --folder --modules modules --out dist/S3GM-setup
+          cp LICENSE NOTICE dist/S3GM-setup/
+          mkdir -p dist/S3GM-setup/LICENSES
+          cp LICENSES/Apache-2.0.txt dist/S3GM-setup/LICENSES/
+          cp native/skate-xma/COPYING.LGPL dist/S3GM-setup/LICENSES/LGPL-2.1-skate-xma.txt
+          chmod +x dist/S3GM-setup/*.sh dist/S3GM-setup/*.command
+          (cd dist && zip -q -r -X ../S3GM-setup.zip S3GM-setup)
       - uses: actions/upload-artifact@v4
         with:
-          name: skate3-gmod-setup-${{ runner.os }}
-          path: dist
+          name: S3GM-setup
+          path: S3GM-setup.zip
 
   # One download laid out like the game folder, plus the setup tools.
   package:
@@ -147,32 +124,24 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, setup-app]
+    needs: [test, setup-zip]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          pattern: skate3-gmod-setup-*
+          name: S3GM-setup
           path: builds
-      # Zipped here so the Linux app keeps its executable bit.
-      - run: |
-          for os in Windows Linux; do
-            dir=builds/skate3-gmod-setup-$os
-            chmod +x "$dir"/skate3-gmod-setup*
-            cp LICENSE NOTICE "$dir/"
-            (cd "$dir" && zip -q -r "$GITHUB_WORKSPACE/skate3-gmod-setup-$os.zip" .)
-          done
       # Publishing a release on GitHub's releases page makes the tag, so the
-      # release may already exist; then the downloads are added to it.
+      # release may already exist; then the download is added to it.
       - run: |
-          files="skate3-gmod-setup-Windows.zip skate3-gmod-setup-Linux.zip"
+          file="S3GM-$GITHUB_REF_NAME.zip"
+          mv builds/S3GM-setup.zip "$file"
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber $files
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber "$file"
           else
-            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skate 3 for Garry's Mod $GITHUB_REF_NAME" --generate-notes $files
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "Skate 3 for Garry's Mod $GITHUB_REF_NAME" --generate-notes "$file"
           fi
         env:
           GH_TOKEN: ${{ github.token }}
