@@ -38,9 +38,12 @@ The Skate 3 host is a git dependency on
 
 Prefer to watch it? There's a video walkthrough of the install: https://youtu.be/oGdIwMNwp14
 
-1. Get the **S3GM setup zip** for your computer. Releases are posted in the
-   **gmod-releases** channel of [Enxvinity's Atelier on Discord](https://discord.gg/QSZeuYtmkF) (Macs need the
-   Mac zip). Extract it anywhere; you get one folder, `S3GM-setup`.
+1. Get the **S3GM setup zip** for your computer from the
+   [latest release](https://github.com/NotEnxvinity/skate3-gmod/releases/latest)
+   (`S3GM-<version>.zip` for Windows, Linux and SteamOS, `S3GM-<version>-Mac.zip`
+   for Macs) or the **gmod-releases** channel of
+   [Enxvinity's Atelier on Discord](https://discord.gg/QSZeuYtmkF). Betas are
+   marked as pre-releases. Extract it anywhere; you get one folder, `S3GM-setup`.
 2. Run the setup for your system from that folder:
    - Windows: `S3GM-setup-Windows.bat` (or drag your `.iso` onto it)
    - Linux / SteamOS: `S3GM-setup-Linux.sh` (Desktop Mode; pick Execute/Run,
