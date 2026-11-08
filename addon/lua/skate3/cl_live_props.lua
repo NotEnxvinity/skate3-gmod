@@ -93,6 +93,8 @@ end
 
 local function Wanted(ent)
 	if ent:EntIndex() <= 0 then return false end
+	-- A loose deck is a toy: a skater rolls over it instead of crashing into it.
+	if ent:GetClass() == "skate3_deck" then return false end
 	if IsPiece(ent) then return ent.loadedId ~= nil end
 	if ent:IsPlayer() or ent:IsNPC() or ent:IsNextBot() or ent:IsWeapon() or ent:IsRagdoll() then return false end
 	local model = ent:GetModel()
