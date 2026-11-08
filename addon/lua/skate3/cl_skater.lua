@@ -181,6 +181,86 @@ function Skater.DrawBoard(pose)
 	return drawn > 0
 end
 
+-- The board lying at rest, for the spawnable deck (entities/skate3_deck.lua):
+-- every part under its bind pose, turned so its long way is x, and moved so
+-- the middle of the board is the origin and its wheels sit at `floorZ`.
+-- Cached until the board is built again.
+local rest
+
+local function RestBoard(floorZ)
+	if rest and rest.parts == parts and rest.floorZ == floorZ then return rest end
+	rest = nil
+	if not data then return nil end
+	if not parts then BuildBoard() end
+
+	local function Bounds(turn)
+		local lo, hi
+		for _, src in ipairs(data.parts) do
+			local m = bind[src.bone] and turn * bind[src.bone] or turn
+			local v = src.vertices
+			for o = 0, #v - 8, 8 do
+				local p = m * Vector(v[o + 1], v[o + 2], v[o + 3])
+				if not lo then
+					lo, hi = Vector(p), Vector(p)
+				else
+					lo.x, lo.y, lo.z = math.min(lo.x, p.x), math.min(lo.y, p.y), math.min(lo.z, p.z)
+					hi.x, hi.y, hi.z = math.max(hi.x, p.x), math.max(hi.y, p.y), math.max(hi.z, p.z)
+				end
+			end
+		end
+		return lo, hi
+	end
+
+	local turn = Matrix()
+	local lo, hi = Bounds(turn)
+	if not lo then return nil end
+	-- The board's long way along x, as it is on the skater.
+	if hi.y - lo.y > hi.x - lo.x then
+		turn:Rotate(Angle(0, -90, 0))
+		lo, hi = Bounds(turn)
+	end
+	local fix = Matrix()
+	fix:Translate(Vector(-(lo.x + hi.x) / 2, -(lo.y + hi.y) / 2, floorZ - lo.z))
+	fix = fix * turn
+
+	rest = { parts = parts, floorZ = floorZ, size = hi - lo, list = {} }
+	for i, part in ipairs(parts) do
+		local src = data.parts[i]
+		rest.list[i] = { part = part, matrix = bind[src.bone] and fix * bind[src.bone] or fix }
+	end
+	return rest
+end
+
+-- Draws the resting board under `world` (an entity's transform). Returns
+-- false when there's no board data to draw.
+function Skater.DrawRest(world, floorZ)
+	local board = RestBoard(floorZ)
+	if not board then return false end
+	local light = render.GetLightColor(world:GetTranslation() + Vector(0, 0, 8))
+	render.SuppressEngineLighting(true)
+	render.ResetModelLighting(light.x * 0.6 + 0.05, light.y * 0.6 + 0.05, light.z * 0.6 + 0.05)
+	render.SetModelLighting(BOX_TOP, light.x, light.y, light.z)
+	for _, item in ipairs(board.list) do
+		render.SetMaterial(item.part.material)
+		cam.PushModelMatrix(world * item.matrix)
+		for _, piece in ipairs(item.part.meshes) do piece:Draw() end
+		cam.PopModelMatrix()
+	end
+	render.SuppressEngineLighting(false)
+	return true
+end
+
+-- How big the resting board measures, to check the deck prop's box against.
+concommand.Add("skate3_deck_info", function()
+	local board = RestBoard(0)
+	if not board then
+		print("[skate3] no board data loaded, so the deck prop shows its plain stand-in (run the S3GM setup)")
+		return
+	end
+	print(("[skate3] the board at rest measures %.1f long, %.1f wide, %.1f tall (the deck prop's box is 32 x 8 x 4)"):format(
+		board.size.x, board.size.y, board.size.z))
+end)
+
 -- Where the board is this frame: its first bone the pose carries. Nil without one.
 function Skater.BoardPos(pose)
 	if not data or not pose or not pose.bones then return nil end
@@ -1321,5 +1401,8 @@ end
 function Skater.HasModel()
 	return IsValid(model) and (model.skate3Real and pose ~= nil or not model:GetNoDraw())
 end
+
+-- For the spawnable deck, which draws itself from its own entity file.
+S3GM_Skater = Skater
 
 return Skater
