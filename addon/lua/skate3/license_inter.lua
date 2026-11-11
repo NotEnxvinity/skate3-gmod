@@ -1,3 +1,6 @@
+--[[ Inter font (addon/resource/fonts/s3gm_sans_bold.ttf) license. Kept as a Lua comment because the
+     Workshop whitelist (gmad) refuses .txt files under resource/fonts. Never run or included.
+
 S3GM Sans Bold is Inter Bold (https://github.com/rsms/inter) converted to TrueType and renamed. Inter is licensed under the SIL Open Font License 1.1; the license text from the Debian fonts-inter package follows.
 
 Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
@@ -133,3 +136,4 @@ License: GPL-2+
  .
  On Debian systems, the complete text of the GNU General
  Public License version 2 can be found in "/usr/share/common-licenses/GPL-2".
+]]
