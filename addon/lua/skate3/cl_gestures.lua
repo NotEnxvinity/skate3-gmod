@@ -15,7 +15,9 @@ S3GM_Gestures = S3GM_Gestures or {}
 local G = S3GM_Gestures
 
 -- Skate 3's gesture catalog in table order (82F881D0, B_GSTR_* animation
--- prefixes): the module wants the 0-based index. Names are ours.
+-- prefixes): the module wants the 0-based index. The names shown are the
+-- disc's own (ID_GESTURE_* in its language tables, which the setup copies
+-- to data/skate3/gestures.json); ours below are only for before that.
 G.LIST = {
 	{ "airguitar", "Air Guitar" },
 	{ "airplane", "Airplane" },
@@ -58,6 +60,13 @@ G.LIST = {
 local BY_ID = {}
 for i, g in ipairs(G.LIST) do BY_ID[g[1]] = i end
 
+-- Each gesture's label in the disc's language tables, where it isn't just
+-- ID_GESTURE_ and the id in capitals.
+local LABELS = {
+	bruce_lee = "BRUCE", dble_gun = "DOUBLE_GUN", fonz_eh = "FONZ", fu_fist = "FU",
+	highpump = "PUMP_HI", lowpump = "PUMP_LO", point = "FINGERPOINT", point_sky = "SKY",
+}
+
 -- Up, Down, Left, Right, the order the module takes them in. Retail's
 -- default (ResetGestureSet 824FA730) is the catalog's first four.
 G.DIRECTIONS = {
@@ -93,9 +102,16 @@ function G.Picks()
 	return out
 end
 
+local discNames
 function G.Name(index)
 	local g = G.LIST[index]
-	return g and g[2] or "?"
+	if not g then return "?" end
+	if discNames == nil then
+		local t = util.JSONToTable(file.Read("skate3/gestures.json", "DATA") or "")
+		discNames = istable(t) and t or false
+	end
+	local name = discNames and discNames["ID_GESTURE_" .. (LABELS[g[1]] or string.upper(g[1]))]
+	return isstring(name) and name ~= "" and name or g[2]
 end
 
 function G.Enabled()
@@ -139,7 +155,7 @@ end
 
 concommand.Add("skate3_gesture_list", function()
 	print("Skate 3 gestures (set with skate3_gesture_up/down/left/right <name>):")
-	for i, g in ipairs(G.LIST) do print(string.format("  %2d  %-14s %s", i - 1, g[1], g[2])) end
+	for i, g in ipairs(G.LIST) do print(string.format("  %2d  %-14s %s", i - 1, g[1], G.Name(i))) end
 	local p = G.Picks()
 	print(string.format("Now: up %s, down %s, left %s, right %s%s", G.Name(p[1]), G.Name(p[2]),
 		G.Name(p[3]), G.Name(p[4]), G.Enabled() and "" or " (gestures are off: skate3_gestures 1)"))
