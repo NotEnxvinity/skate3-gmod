@@ -26,6 +26,7 @@ local Players = include("skate3/cl_players.lua")(Skater, Others, Score)
 include("skate3/cl_collision_report.lua")
 local Surfaces = include("skate3/cl_surfaces.lua")
 local Demo = include("skate3/cl_demo.lua")
+local Smooth = include("skate3/cl_smooth.lua")
 
 local MODULE = (jit.os == "Windows" and "gmcl_skate3_win64.dll" or jit.os == "OSX" and "gmcl_skate3_osx64.dll" or "gmcl_skate3_linux64.dll")
 
@@ -52,6 +53,10 @@ local lastRemount = -math.huge
 local resumeAt -- where a glitched ride ended, or the marker, for hopping back on
 local resumeYaw -- the heading to start at instead of the view's
 local pose
+-- The pose drawn this frame (the body, the board and the camera): between
+-- the simulation's last two steps, see cl_smooth.lua. Everything else (the
+-- menu, sounds, bails, what's sent to other players) reads `pose`, the newest.
+local drawn
 local rails
 local railsRevision -- the collision swap the rails above came from
 local status = {}
@@ -238,7 +243,8 @@ local function Stop()
 		net.SendToServer()
 	end
 	SetActive(false)
-	pose = nil
+	pose, drawn = nil, nil
+	Smooth.Reset()
 	lastTick = nil
 	recent, wasBailing = {}, false
 	Skater.HideModel()
@@ -320,7 +326,8 @@ net.Receive("skate3_state", function()
 		staleTick = latest and latest.tick or pose and pose.tick or staleTick
 		active = false
 		Keyboard.active = false
-		pose = nil
+		pose, drawn = nil, nil
+		Smooth.Reset()
 		lastTick = nil
 		recent, wasBailing = {}, false
 		Skater.HideModel()
@@ -526,7 +533,8 @@ hook.Add("Think", "skate3_step", function()
 		end
 		lastTick, tickAt = pose.tick, now
 	end
-	Perf.Time("body", Skater.UpdateModel, pose)
+	drawn = Smooth.Drawn(pose, FrameTime())
+	Perf.Time("body", Skater.UpdateModel, drawn)
 	if not skip.net then WatchBail(now, pose) end
 	if skip.sounds then Sounds.Stop() else Perf.Time("sounds", Sounds.Update, LocalPlayer(), pose, Skater.BoardPos(pose)) end
 	if pose and now >= nextSend and not skip.net then
@@ -569,6 +577,7 @@ concommand.Add("skate3_camera_cycle", function()
 end, nil, "Switch the skate camera between low, normal and high")
 
 hook.Add("CalcView", "skate3_view", function()
+	local pose = drawn or pose
 	if not active or not pose or not pose.camera or Skater.Skip.view then return end
 	-- Looking through something else, such as the camera tool's camera, so
 	-- leave the view to it.
