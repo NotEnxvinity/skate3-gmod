@@ -332,6 +332,9 @@ impl Engine {
     pub fn set_frame(&mut self, frame: &Frame) {
         self.driver.set_frame(frame);
         if self.active {
+            for key in &frame.ui_events {
+                self.driver.post_ui(*key);
+            }
             self.driver.update(&mut self.world, &mut self.voices, &mut self.grains, &mut self.splices, &self.cache_dir);
             self.grains.set_ground(frame.roughness, frame.loose_ground);
             for e in &frame.seam_events {

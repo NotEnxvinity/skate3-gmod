@@ -149,9 +149,12 @@ impl Runtime {
 
     pub fn send(&self, job: Job) {
         // A send only fails once the worker died, which Shared already reports.
-        if let Some(send) = &self.send {
-            let _ = send.send(job);
-        }
+        let _ = self.try_send(job);
+    }
+
+    /// Like `send`, saying whether the job reached the worker.
+    pub fn try_send(&self, job: Job) -> bool {
+        self.send.as_ref().is_some_and(|send| send.send(job).is_ok())
     }
 }
 
@@ -651,6 +654,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             driver.suspend(session);
                         }
                         crate::audio::deactivate();
+                        crate::audio::suspend_done();
                         set(&|s| s.active = false);
                     }
                 }

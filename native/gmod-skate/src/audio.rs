@@ -159,6 +159,65 @@ fn apply_ground(frame: &mut live::Frame) {
     ));
 }
 
+/// Front-end sound events Lua posted (name hash, the suspends that must have
+/// happened first, when posted). An event waits out every ride stop asked for
+/// before it, so the session marker's sound, posted as the ride restarts at
+/// the marker, plays on the new ride and isn't cut by the old one's end.
+static UI_EVENTS: Mutex<Vec<(u64, u32, std::time::Instant)>> = Mutex::new(Vec::new());
+/// Ride stops Lua asked for, and ones the simulation thread has carried out.
+static SUSPENDS_ASKED: AtomicU32 = AtomicU32::new(0);
+static SUSPENDS_DONE: AtomicU32 = AtomicU32::new(0);
+/// An event no ride picked up by then is dropped.
+const UI_EVENT_LIFE: Duration = Duration::from_secs(2);
+
+/// Lua asked the ride to stop (on Lua's thread, before the job is sent).
+pub fn suspend_asked() {
+    SUSPENDS_ASKED.fetch_add(1, Ordering::SeqCst);
+}
+
+/// The simulation thread stopped the ride Lua asked it to.
+pub fn suspend_done() {
+    SUSPENDS_DONE.fetch_add(1, Ordering::SeqCst);
+}
+
+/// Plays a front-end sound event (retail's GlobalFEPlaySound) by its name, on
+/// the next simulation tick of a ride. False when the engine isn't playing,
+/// so Lua plays its own.
+pub fn post_event(name: &str) -> bool {
+    if !ready() || name.is_empty() {
+        return false;
+    }
+    let key = skate_aems::glue::seams::name_hash(name.as_bytes());
+    let after = SUSPENDS_ASKED.load(Ordering::SeqCst);
+    if let Ok(mut q) = UI_EVENTS.lock() {
+        q.retain(|e| e.2.elapsed() < UI_EVENT_LIFE);
+        if q.len() < 16 {
+            q.push((key, after, std::time::Instant::now()));
+        }
+    }
+    true
+}
+
+/// The events whose ride this is.
+fn take_events(frame: &mut live::Frame) {
+    let done = SUSPENDS_DONE.load(Ordering::SeqCst);
+    if let Ok(mut q) = UI_EVENTS.lock() {
+        if q.is_empty() {
+            return;
+        }
+        q.retain(|e| {
+            if e.2.elapsed() >= UI_EVENT_LIFE {
+                false
+            } else if done.wrapping_sub(e.1) as i32 >= 0 {
+                frame.ui_events.push(e.0);
+                false
+            } else {
+                true
+            }
+        });
+    }
+}
+
 /// Called after every simulation tick: reads the session's audio state
 /// (read-only) and queues it for the audio thread.
 pub fn on_tick(session: &skate_bridge::bridge::Session, state: &mut map::State) {
@@ -167,6 +226,7 @@ pub fn on_tick(session: &skate_bridge::bridge::Session, state: &mut map::State) 
     };
     let mut frame = state.frame(session);
     apply_ground(&mut frame);
+    take_events(&mut frame);
     if let Ok(mut g) = s.published.lock() {
         g.push(Published {
             active: true,
@@ -686,6 +746,27 @@ mod tests {
         mixer.clear();
         let after = mixer.mix(&block, 1.0, space, 0.0, 2.0);
         assert!(after.iter().all(|f| f[0].abs() < 1e-9));
+    }
+
+    #[test]
+    fn an_event_posted_with_a_restart_waits_for_the_new_ride() {
+        // The marker: Lua stops the ride, starts it at the marker, posts the
+        // sound. The old ride's last tick must not take it.
+        suspend_asked();
+        let key = skate_aems::glue::seams::name_hash(b"cellphone_goto_marker");
+        assert_eq!(key, 0x7f13_5f9f_d28f_7f21);
+        let after = SUSPENDS_ASKED.load(Ordering::SeqCst);
+        UI_EVENTS.lock().unwrap().push((key, after, std::time::Instant::now()));
+        let mut old = live::Frame::default();
+        take_events(&mut old);
+        assert!(old.ui_events.is_empty());
+        suspend_done();
+        let mut new = live::Frame::default();
+        take_events(&mut new);
+        assert_eq!(new.ui_events, vec![key]);
+        let mut next = live::Frame::default();
+        take_events(&mut next);
+        assert!(next.ui_events.is_empty());
     }
 
     #[test]
