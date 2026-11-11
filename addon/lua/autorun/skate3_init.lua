@@ -35,6 +35,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_ui.lua")
 	AddCSLuaFile("skate3/cl_glyphs.lua")
 	AddCSLuaFile("skate3/cl_marker.lua")
+	AddCSLuaFile("skate3/cl_marker_static.lua")
 	AddCSLuaFile("skate3/cl_contextmenu.lua")
 	AddCSLuaFile("skate3/cl_gestures.lua")
 	AddCSLuaFile("skate3/cl_customize.lua")

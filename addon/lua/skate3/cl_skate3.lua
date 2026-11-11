@@ -392,8 +392,8 @@ concommand.Add("skate3_gc", function()
 end)
 
 -- Session markers live in cl_marker.lua and the menu that drives them in
--- cl_contextmenu.lua. This is how they read the skater and take them back to
--- a marker (a fresh ride there, on the board).
+-- cl_contextmenu.lua. This is how they read the skater, take them back to
+-- a marker (a fresh ride there, on the board) and play its sounds.
 Marker.Bind({
 	pose = function() return pose end,
 	teleport = function(at, yaw)
@@ -401,6 +401,7 @@ Marker.Bind({
 		resumeAt, resumeYaw = at, yaw
 		Start()
 	end,
+	sound = Sounds.Frontend,
 })
 
 net.Receive("skate3_watched", function()

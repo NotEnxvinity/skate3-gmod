@@ -18,7 +18,7 @@ local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
 local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_retail_audio", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
-	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_hud", "skate3_melee", "skate3_update_notices", "skate3_hom_look", "skate3_ui_hd" }
+	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_marker_static", "skate3_hud", "skate3_melee", "skate3_update_notices", "skate3_hom_look", "skate3_ui_hd" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
 	DEFAULTS[#DEFAULTS + 1] = p.color
@@ -173,6 +173,8 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:CheckBox("Trick score beside the skater, not on screen", "skate3_ui_world")
 		panel:CheckBox("Contextual menu (hold L1 or Shift)", "skate3_menu")
 		panel:ControlHelp("Hold L1 for the menu: D-pad down places your marker, hold up goes back to it, left interacts, right customizes, Y opens games and X opens settings (up and down pick a row, left and right change a setting, B goes back).")
+		panel:CheckBox("Static going back to the marker", "skate3_marker_static")
+		panel:ControlHelp("Skate 3's TV static fades in while you hold the way back and fills the screen as you go. It flickers: turn it off if flashing images bother you.")
 		local Gestures = S3GM_Gestures
 		if Gestures then
 			panel:CheckBox("D-pad gestures", "skate3_gestures")

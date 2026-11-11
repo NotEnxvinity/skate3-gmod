@@ -195,6 +195,7 @@ local SETTINGS = {
 	{ "Look", "skate3_ui_style", { { "Skate 3", "skate3" }, { "Minimal", "minimal" }, { "Half-Life 2", "hl2" } } },
 	{ "Button pictures", "skate3_ui_glyphs", { { "Automatic", "auto" }, { "Xbox", "xbox" }, { "PlayStation", "playstation" } } },
 	{ "Score beside the skater", "skate3_ui_world", ONOFF },
+	{ "Marker static", "skate3_marker_static", ONOFF },
 	{ "Hall of Meat", "skate3_hall_of_meat", ONOFF },
 	{ "Hall of Meat bones", "skate3_hom_look", { { "Skeleton", "skeleton" }, { "X-ray", "xray" } },
 		after = function(value)
@@ -350,11 +351,13 @@ function Menu.Update(now, pose, buttons)
 			Menu.Back()
 		end
 		hold = nil
+		Marker.Hold(0)
 		return false
 	end
 
 	if not rootShown then
 		hold = nil
+		Marker.Hold(0)
 		return false
 	end
 
@@ -384,10 +387,12 @@ function Menu.Update(now, pose, buttons)
 			if hold.progress >= 1 then
 				hold = nil
 				ignore = bor(ignore, UP)
+				Marker.Hold(0)
 				if Marker.GoTo() then return true end
 			end
 		end
 	end
+	Marker.Hold(hold and hold.progress or 0)
 	return false
 end
 
@@ -625,9 +630,6 @@ local function DrawRoot(look, pose, style)
 			local alpha = (r.enabled == false) and 0.3 or 1
 			look.Icon(r.icon, 99, top, alpha)
 			look.Text(r.label, 158, top + 11, 20, alpha)
-			if hold and r.bit == hold.bit and hold.progress and hold.progress > 0 then
-				UI.Rect(158, top + 36, math.max(look.Width(r.label, 20), 20) * hold.progress, 2, CREAM, 0.9)
-			end
 			top = top + PITCH
 		end
 	end

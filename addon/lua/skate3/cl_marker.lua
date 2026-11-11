@@ -9,11 +9,14 @@
 S3GM_Marker = S3GM_Marker or {}
 local Marker = S3GM_Marker
 
-local marker -- { pos = Vector, yaw = number }
-local host   -- what cl_skate3.lua gives us: pose(), teleport(pos, yaw)
+local Static = include("skate3/cl_marker_static.lua")
 
--- cl_skate3.lua says how to read the skater's pose and how to take them
--- somewhere (which restarts the ride there).
+local marker -- { pos = Vector, yaw = number }
+local host   -- what cl_skate3.lua gives us: pose(), teleport(pos, yaw), sound(name)
+
+-- cl_skate3.lua says how to read the skater's pose, how to take them
+-- somewhere (which restarts the ride there) and how to play one of Skate 3's
+-- interface sounds by its record name (false when it couldn't).
 function Marker.Bind(functions)
 	host = functions
 end
@@ -26,6 +29,37 @@ end
 function Marker.Get()
 	if not marker then return nil end
 	return { pos = Vector(marker.pos.x, marker.pos.y, marker.pos.z), yaw = marker.yaw }
+end
+
+-- Skate 3's own sounds for the marker (retail posts these front-end events
+-- from UpdateSessionMarker, SK8-ENGINE session_marker/mod.rs), and what plays
+-- without the disc's.
+local SOUNDS = {
+	place = { "cellphone_place_marker", "buttons/blip1.wav" },
+	refused = { "cellphone_marker_error", "buttons/button10.wav" },
+	go = { "cellphone_goto_marker", "s3gm_marker_static" },
+}
+
+-- Without the disc: a short burst of static, made here.
+local generated
+local function Generate()
+	if generated ~= nil then return generated end
+	generated = pcall(sound.Generate, "s3gm_marker_static", 22050, 0.3, function(t)
+		local left = 1 - t / (22050 * 0.3)
+		return (math.random() * 2 - 1) * 0.35 * left * left
+	end)
+	return generated
+end
+
+local function Sound(which)
+	local s = SOUNDS[which]
+	if host and host.sound and host.sound(s[1]) then return end
+	local cv = GetConVar("skate3_volume")
+	local volume = cv and cv:GetFloat() or 1
+	local ply = LocalPlayer()
+	if volume <= 0 or not IsValid(ply) then return end
+	if s[2] == "s3gm_marker_static" and not Generate() then return end
+	ply:EmitSound(s[2], 0, 100, math.Clamp(volume, 0, 1))
 end
 
 local function Tell(pos, yaw)
@@ -53,11 +87,13 @@ end
 function Marker.SetHere()
 	local pos, yaw = Marker.Here()
 	if not pos then
+		Sound("refused")
 		S3GM_UI.Toast(yaw)
 		return false
 	end
 	marker = { pos = pos, yaw = yaw }
 	Tell(pos, yaw)
+	Sound("place")
 	S3GM_UI.Toast("Marker set")
 	return true
 end
@@ -78,11 +114,19 @@ function Marker.HoldTime()
 	return math.Clamp(0.2 + (metres - 100) * 0.8 / 900, 0.2, 1)
 end
 
--- Takes the skater to the marker (a fresh ride there, on the board).
+-- How far along the hold to go back is, 0 to 1, each frame the menu runs:
+-- the static fades in with it (Skate 3 shows no bar).
+function Marker.Hold(progress)
+	Static.Hold(progress)
+end
+
+-- Takes the skater to the marker (a fresh ride there, on the board), in a
+-- moment of full static with Skate 3's sound.
 function Marker.GoTo()
 	if not marker or not host then return false end
+	Static.Flash()
 	host.teleport(marker.pos, marker.yaw)
-	S3GM_UI.Toast("Back at marker")
+	Sound("go")
 	return true
 end
 

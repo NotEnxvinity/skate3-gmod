@@ -1220,6 +1220,25 @@ local function MultiplierSound(n)
 	ent:EmitSound(HL2_MULTIPLIER, 0, math.Clamp(100 + (n - 2) * 15, 60, 200), 0.6 * volume)
 end
 
+-- One of Skate 3's interface sounds by its front-end record's name (the
+-- session marker's "cellphone_goto_marker", say). False when the disc's
+-- sounds aren't in use or the record isn't installed, so the caller can play
+-- something else. Sounds are off: true, nothing to play.
+function Sounds.Frontend(name)
+	if cv_pack:GetString() == "off" then return true end
+	local ent = LocalPlayer()
+	if not IsValid(ent) or not Disc() then return false end
+	local fe = Frontend()
+	local record = fe and fe[name]
+	if not record then
+		Debug("front-end record %s isn't installed", name)
+		return false
+	end
+	if not PlayId("menu", record[1], ent, 0.5, math.Clamp(record[2] or 1, 0, 1), 1, nil, true, 0) then return false end
+	Debug("front-end %s: menu id %d", name, record[1])
+	return true
+end
+
 -- Each frame: a bigger multiplier than the last frame's is a chime. A line
 -- over, or a bail, starts it again from x1.
 local function Multiplier(pose, kind)

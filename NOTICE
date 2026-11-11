@@ -38,6 +38,12 @@ setup/audio_tuning.py ports the part of its tools/asset_pipeline/audio_export.py
 that reads the collision tuning from the player's own disc (GPL-3.0, the same
 licence as this project).
 
+The session marker's static in addon/lua/skate3/cl_marker_static.lua is a
+port of SK8-ENGINE's crates/skate-game session_marker/effect.rs, effect.wgsl
+and noise.rs (GPL-3.0): retail's noise generator, texture and postfx noise
+pass, redone with render targets; the marker's sounds are the front-end
+events its session_marker/mod.rs posts.
+
 The pop, landing and take-off whoosh rules, the seam clicks, the choice of
 Skate 3's material for a surface and the name of the multiplier chimes in the
 same file follow how SK8V (https://github.com/becaring/SK8V, Apache-2.0) plays
