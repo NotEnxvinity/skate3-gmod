@@ -224,6 +224,11 @@ impl Driver {
         self.ui.update(&self.skater, &self.tuning, splices, 1. / 60.);
     }
 
+    /// Queues a front-end sound event by name hash; the next `update` plays it.
+    pub fn post_ui(&mut self, key: u64) {
+        self.ui.post(&self.tuning, key);
+    }
+
     pub fn release_all(&mut self, world: &mut World, vs: &mut Voices) {
         for c in &mut self.components {
             let slots: Vec<u32> = c.objects.keys().copied().collect();

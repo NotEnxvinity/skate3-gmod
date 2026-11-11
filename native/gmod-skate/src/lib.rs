@@ -427,6 +427,16 @@ lua_fn!(audio_ground, |lua| {
     0
 });
 
+// AudioEvent(name): plays one of Skate 3's front-end sound events (retail's
+// GlobalFEPlaySound, e.g. "cellphone_goto_marker") through the engine, on the
+// ride's next tick (after any ride stop asked for before it). False when the
+// engine isn't playing.
+lua_fn!(audio_event, |lua| {
+    let posted = lua.string(1).is_some_and(|name| audio::post_event(&name));
+    lua.push_bool(posted);
+    1
+});
+
 // AudioGrind(row): the material of the rail or ledge being ground; nothing clears it.
 lua_fn!(audio_grind, |lua| {
     audio::set_grind(lua.number(1).filter(|r| *r >= 0.).map(|r| r as u32));
@@ -485,7 +495,10 @@ lua_fn!(audio_status, |lua| {
 });
 
 lua_fn!(suspend, |lua| {
-    with_runtime(|r| r.send(Job::Suspend));
+    // Counted only when the worker will carry it out (audio events wait for it).
+    if with_runtime(|r| r.try_send(Job::Suspend)) == Some(true) {
+        audio::suspend_asked();
+    }
     let _ = lua;
     0
 });
@@ -805,6 +818,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"AudioStop", audio_stop),
         (c"AudioGround", audio_ground),
         (c"AudioGrind", audio_grind),
+        (c"AudioEvent", audio_event),
         (c"AudioSpace", audio_space),
         (c"AudioReverb", audio_reverb),
         (c"AudioVolume", audio_volume),

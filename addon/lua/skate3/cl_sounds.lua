@@ -1221,11 +1221,16 @@ local function MultiplierSound(n)
 end
 
 -- One of Skate 3's interface sounds by its front-end record's name (the
--- session marker's "cellphone_goto_marker", say). False when the disc's
--- sounds aren't in use or the record isn't installed, so the caller can play
--- something else. Sounds are off: true, nothing to play.
+-- session marker's "cellphone_goto_marker", say). Skate 3's own sound engine
+-- plays it when it's running (the whole record, as retail does); otherwise
+-- the record's sounds from the disc. False when neither can, so the caller
+-- can play something else. Sounds are off: true, nothing to play.
 function Sounds.Frontend(name)
 	if cv_pack:GetString() == "off" then return true end
+	if Retail() and skate3.AudioEvent and skate3.AudioEvent(name) then
+		Debug("front-end %s: through the sound engine", name)
+		return true
+	end
 	local ent = LocalPlayer()
 	if not IsValid(ent) or not Disc() then return false end
 	local fe = Frontend()

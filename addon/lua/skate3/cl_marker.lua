@@ -31,11 +31,11 @@ function Marker.Get()
 	return { pos = Vector(marker.pos.x, marker.pos.y, marker.pos.z), yaw = marker.yaw }
 end
 
--- Skate 3's own sounds for the marker (retail posts these front-end events
--- from UpdateSessionMarker, SK8-ENGINE session_marker/mod.rs), and what plays
--- without the disc's.
+-- Skate 3's own sounds for the marker (front-end events retail posts from
+-- UpdateSessionMarker, SK8-ENGINE session_marker/mod.rs), and what plays
+-- without the disc's. Placing one is silent: SK8-ENGINE posts
+-- "cellphone_place_marker" there, but Skate 3 plays nothing (Enx, test 1).
 local SOUNDS = {
-	place = { "cellphone_place_marker", "buttons/blip1.wav" },
 	refused = { "cellphone_marker_error", "buttons/button10.wav" },
 	go = { "cellphone_goto_marker", "s3gm_marker_static" },
 }
@@ -93,7 +93,6 @@ function Marker.SetHere()
 	end
 	marker = { pos = pos, yaw = yaw }
 	Tell(pos, yaw)
-	Sound("place")
 	S3GM_UI.Toast("Marker set")
 	return true
 end
