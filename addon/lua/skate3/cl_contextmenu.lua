@@ -213,7 +213,7 @@ do
 	local Gestures = S3GM_Gestures
 	if Gestures then
 		local choices = {}
-		for _, g in ipairs(Gestures.LIST) do choices[#choices + 1] = { g[2], g[1] } end
+		for i, g in ipairs(Gestures.LIST) do choices[#choices + 1] = { Gestures.Name(i), g[1] } end
 		for i = #SETTINGS, 1, -1 do
 			if SETTINGS[i][2] == "skate3_gestures" then
 				for k, d in ipairs(Gestures.DIRECTIONS) do

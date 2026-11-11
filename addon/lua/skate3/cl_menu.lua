@@ -179,7 +179,7 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			panel:ControlHelp("Tap the D-pad (no L1) while skating or on foot for one of Skate 3's 37 gestures; hold it to keep it going. They use whichever hand is free. Pick yours below, or in the L1 menu's Settings.")
 			for _, d in ipairs(Gestures.DIRECTIONS) do
 				local list = {}
-				for _, g in ipairs(Gestures.LIST) do list[#list + 1] = { g[2], g[1] } end
+				for i, g in ipairs(Gestures.LIST) do list[#list + 1] = { Gestures.Name(i), g[1] } end
 				Choices(panel, "D-pad " .. d[2]:lower(), "skate3_gesture_" .. d[1], list)
 			end
 		end

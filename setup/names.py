@@ -1,8 +1,10 @@
 """Skate 3's own trick names. The engine names tricks by localisation ID, such
 as ID_TRICK_FLIP_NOLLIE_KICKFLIP; the game's language tables on the disc say
 what each one reads as. This pulls the trick entries out into
-garrysmod/data/skate3/tricks.json for the score widget, read with the
-engine's own front-end tools (tools/vendor/skate3_ui)."""
+garrysmod/data/skate3/tricks.json for the score widget, and the D-pad
+gestures' names (ID_GESTURE_*, as the Create-a-Skater gesture picker shows
+them) into gestures.json, read with the engine's own front-end tools
+(tools/vendor/skate3_ui)."""
 from pathlib import Path
 import json, sys, tempfile
 
@@ -32,8 +34,8 @@ def tables(engine, game):
     return found[LABELS], found[ENGLISH]
 
 
-def tricks(engine, labels, english):
-    """ID_TRICK_ label to its English text."""
+def tricks(engine, labels, english, prefix='ID_TRICK_'):
+    """ID_TRICK_ (or `prefix`) label to its English text."""
     from tools.vendor.skate3_ui.language import pair_language_tables
     with tempfile.TemporaryDirectory() as tmp:
         paths = Path(tmp) / 'labels.bin', Path(tmp) / 'english.bin'
@@ -43,15 +45,18 @@ def tricks(engine, labels, english):
     out = {}
     for entry in pairs['entries']:
         label, value = entry['label'], entry['value']
-        if label.startswith('ID_TRICK_') and value and label not in out:
+        if label.startswith(prefix) and value and label not in out:
             out[label] = value.strip()
     return out
 
 
 def install(engine, game, out, report):
-    names = tricks(engine, *tables(engine, game))
+    found = tables(engine, game)
+    names = tricks(engine, *found)
     out = Path(out)
     out.mkdir(parents=True, exist_ok=True)
     (out / 'tricks.json').write_text(json.dumps(names, ensure_ascii=False, sort_keys=True), encoding='utf-8')
     report(f'Installed {len(names)} trick names')
+    gestures = tricks(engine, *found, prefix='ID_GESTURE_')
+    (out / 'gestures.json').write_text(json.dumps(gestures, ensure_ascii=False, sort_keys=True), encoding='utf-8')
     return len(names)

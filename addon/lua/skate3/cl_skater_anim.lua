@@ -119,6 +119,15 @@ local function Pos(rest, i)
 	return i and rest[i] and rest[i]:GetTranslation()
 end
 
+-- The signed angle (radians) from `prev` to `nxt`, positive when it bends
+-- towards `palm`.
+local function Bend(prev, nxt, palm)
+	local k = prev:Cross(palm)
+	if k:Length() < 1e-4 then return 0 end
+	k:Normalize()
+	return math.atan2(prev:Cross(nxt):Dot(k), prev:Dot(nxt))
+end
+
 -- A hand's fingers, and which side its palm faces, from the rest pose.
 local function FindHand(ent, rest, side)
 	local hand = Bone(ent, side .. "_Hand")
@@ -170,7 +179,25 @@ local function FindHand(ent, rest, side)
 		local axis = dir:Cross(palm)
 		if axis:Length() > 1e-3 then axes[f] = toHand * axis:GetNormalized() end
 	end
-	return { hand = hand, fingers = fingers, axes = axes, vote = vote,
+	-- How far each finger already curls in the model's rest pose (many
+	-- playermodels rest with half-closed hands). A gesture's shape is
+	-- measured from straight, so this comes off first: otherwise the two
+	-- raised fingers of a peace sign stay as curled as the rest.
+	local restBend = {}
+	for f, c in pairs(fingers) do
+		local b = {}
+		local prev = f == 0 and (Pos(rest, c[1]) - handPos):GetNormalized() or forward
+		for j = 1, #c - 1 do
+			local d = (Pos(rest, c[j + 1]) - Pos(rest, c[j])):GetNormalized()
+			-- Kept sane: an odd rest pose shouldn't fling the finger round.
+			b[j] = math.Clamp(math.deg(Bend(prev, d, palm)), -30, 90)
+			prev = d
+		end
+		-- The last joint has no tip to measure: assume it bends like the one before.
+		b[#c] = b[#c - 1] or 0
+		restBend[f] = b
+	end
+	return { hand = hand, fingers = fingers, axes = axes, vote = vote, restBend = restBend,
 		curl = { 0, 0 }, wanted = 0 }
 end
 
@@ -632,7 +659,10 @@ local function Hands(info, world, pose)
 								or Lerp(hand.now - 1, relaxed, grip)
 							deg = Lerp(hand.carry or 0, deg, set.carry[j] or 0)
 							local g = hand.gestureShape and hand.gestureShape[f]
-							if g and g[j] then deg = Lerp(hand.gesture, deg, g[j]) end
+							if g and g[j] then
+								local already = hand.restBend and hand.restBend[f] and hand.restBend[f][j] or 0
+								deg = Lerp(hand.gesture, deg, g[j] - already)
+							end
 							if world[i] and deg ~= 0 then
 								local r = AxisAngle(axis, math.rad(deg * scale))
 								local at = world[i]:GetTranslation()
