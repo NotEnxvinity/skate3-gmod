@@ -1,0 +1,203 @@
+diff --git a/skate/crates/skate-core/src/input/gameplay_gestures.rs b/skate/crates/skate-core/src/input/gameplay_gestures.rs
+new file mode 100644
+index 0000000..797234d
+--- /dev/null
++++ b/skate/crates/skate-core/src/input/gameplay_gestures.rs
+@@ -0,0 +1,83 @@
++//! Skate 3 TU3 gameplay D-pad gestures, Fill helper 8259BF50.
++//! These are emote intents, independent of trick-stick gesture recognition.
++use super::{controller::DerivedControllerInput, riding_intentions::RidingIntent};
++
++pub fn produce(controller: &DerivedControllerInput) -> Vec<RidingIntent> {
++    let words = controller.words();
++    let previous = words[6];
++    let current = words[13];
++    if current & ((1 << 29) | (1 << 28)) != 0 {
++        return Vec::new();
++    }
++    let directions = [
++        (26, "GestureDownStart", "GestureDownHeld"),
++        (25, "GestureLeftStart", "GestureLeftHeld"),
++        (24, "GestureRightStart", "GestureRightHeld"),
++        (27, "GestureUpStart", "GestureUpHeld"),
++    ];
++    let mut out = Vec::with_capacity(8);
++    // The native producer emits all starts before held intents.
++    for (bit, start, _) in directions {
++        if current & (1 << bit) != 0 && previous & (1 << bit) == 0 {
++            out.push(RidingIntent {
++                name: start,
++                value: 1.,
++            });
++        }
++    }
++    for (bit, _, held) in directions {
++        if current & (1 << bit) != 0 {
++            out.push(RidingIntent {
++                name: held,
++                value: 1.,
++            });
++        }
++    }
++    out
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    fn intents(previous: u32, current: u32) -> Vec<&'static str> {
++        let mut words = [0; 26];
++        words[6] = previous;
++        words[13] = current;
++        produce(&DerivedControllerInput::from_words(words))
++            .into_iter()
++            .map(|i| i.name)
++            .collect()
++    }
++    #[test]
++    fn gameplay_gestures_preserve_direction_edges_holds_and_release() {
++        for (bit, name) in [(27, "Up"), (26, "Down"), (25, "Left"), (24, "Right")] {
++            let pressed = intents(0, 1 << bit);
++            assert_eq!(
++                pressed,
++                [format!("Gesture{name}Start"), format!("Gesture{name}Held")]
++            );
++            assert_eq!(intents(1 << bit, 1 << bit), [format!("Gesture{name}Held")]);
++            assert!(intents(1 << bit, 0).is_empty());
++        }
++    }
++    #[test]
++    fn bumpers_suppress_gestures_without_synthesizing_a_new_edge_on_release() {
++        for bumper in [1 << 28, 1 << 29] {
++            assert!(intents(0, bumper | (1 << 27)).is_empty());
++            assert_eq!(intents(bumper | (1 << 27), 1 << 27), ["GestureUpHeld"]);
++        }
++        assert_eq!(
++            intents(0, 0x0f00_0000),
++            [
++                "GestureDownStart",
++                "GestureLeftStart",
++                "GestureRightStart",
++                "GestureUpStart",
++                "GestureDownHeld",
++                "GestureLeftHeld",
++                "GestureRightHeld",
++                "GestureUpHeld"
++            ]
++        );
++    }
++}
+diff --git a/skate/crates/skate-core/src/input/mod.rs b/skate/crates/skate-core/src/input/mod.rs
+index 2b9e12d..5db4fd2 100644
+--- a/skate/crates/skate-core/src/input/mod.rs
++++ b/skate/crates/skate-core/src/input/mod.rs
+@@ -23,3 +23,5 @@ pub mod body_flip_signal;
+ 
+ pub mod wipeout_intentions;
+ pub mod offboard_intentions;
++
++pub mod gameplay_gestures;
+diff --git a/skate/crates/skate-host/src/graph_host/motion_execute_leaf.rs b/skate/crates/skate-host/src/graph_host/motion_execute_leaf.rs
+index b4a08cf..21c0dfc 100644
+--- a/skate/crates/skate-host/src/graph_host/motion_execute_leaf.rs
++++ b/skate/crates/skate-host/src/graph_host/motion_execute_leaf.rs
+@@ -105,9 +105,8 @@ pub(super) fn execute(
+                             suppress_up: physical.suppress_up,
+                             force_brake_bypass: physical.force_brake_bypass,
+                         };
+-                    if let Some(output) = state.update(&mut host.animation, inputs)? {
+-                        host.gesture_publication = Some(output);
+-                    }
++                    // An inactive CharacterGesture must retire the previous publication.
++                    host.gesture_publication = state.update(&mut host.animation, inputs)?;
+                 }
+             }
+             (MotionOperation::EndGesture, _) => {
+diff --git a/skate/crates/skate-host/src/physics.rs b/skate/crates/skate-host/src/physics.rs
+index 117c2c0..842c79c 100644
+--- a/skate/crates/skate-host/src/physics.rs
++++ b/skate/crates/skate-host/src/physics.rs
+@@ -206,7 +206,10 @@ mod exchange_tests {
+ 
+ impl GamePhysics {
+     pub(crate) fn set_gesture_preferences(&mut self, gestures: Option<[u32; 4]>) {
+-        self.animation_profile.gesture_selections = gestures.filter(|g| g.iter().all(|v| *v < 37));
++        // ResetGestureSet824FA730 selects the first four in table order
++        // (Up, Down, Left, Right) until the player picks their own.
++        self.animation_profile.gesture_selections =
++            Some(gestures.filter(|g| g.iter().all(|v| *v < 37)).unwrap_or([0, 1, 2, 3]));
+     }
+     pub(crate) fn set_equipment_preferences(&mut self, truck: f32, wheel: f32) {
+         if truck.is_finite() && wheel.is_finite() {
+diff --git a/skate/crates/skate-host/src/physics/animation_phase_packet.rs b/skate/crates/skate-host/src/physics/animation_phase_packet.rs
+index 84907da..d58792d 100644
+--- a/skate/crates/skate-host/src/physics/animation_phase_packet.rs
++++ b/skate/crates/skate-host/src/physics/animation_phase_packet.rs
+@@ -56,7 +56,7 @@ impl AnimationProfile {
+             ignore_respawn_reset_button: 0,
+             force_braking: false,
+             suppress_transition: false,
+-            gesture_selections: None,
++            gesture_selections: Some([0, 1, 2, 3]),
+             //82B988B8 returns false when its optional context is absent.
+             suppress_up_gesture: false,
+             gesture_force_brake_bypass: false,
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 8bfd326..7569e2c 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -54,6 +54,9 @@ pub struct Pose {
+     pub invincible: f32,
+     /// What asked for the last wipeout; empty before the first.
+     pub bail: String,
++    /// The D-pad gesture playing, as (catalog index 0..36, hands): hands is
++    /// 0 for both, 1 for the right only, 2 for the left only.
++    pub gesture: Option<(u32, u8)>,
+ }
+ impl Session {
+     pub fn new(
+@@ -198,6 +201,21 @@ impl Session {
+     pub fn set_stance(&mut self, goofy: bool) {
+         self.skater.animation.set_customisation(u32::from(goofy), 0);
+     }
++    /// The player's D-pad gestures, as Skate 3's profile keeps them: catalog
++    /// indices (0..36) for Up, Down, Left and Right. None, or any index out
++    /// of range, puts back the retail default (the first four).
++    pub fn set_gestures(&mut self, gestures: Option<[u32; 4]>) {
++        self.physics.set_gesture_preferences(gestures);
++    }
++    fn gesture(&self) -> Option<(u32, u8)> {
++        let motion = &self.skater.animation.motion;
++        let publication = motion.gesture_publication?;
++        let channels = &motion.animation.channels;
++        let hands = ["GestureBoth", "GestureRight", "GestureLeft"]
++            .iter()
++            .position(|name| channels.has(name))?;
++        Some((publication.gesture, hands as u8))
++    }
+     pub fn pose(&self) -> Pose {
+         let v = self.physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()]
+             .rates
+@@ -225,6 +243,7 @@ impl Session {
+             state: format!("{:?}", self.skater.player_state.current()),
+             invincible: self.skater.wipeout.state.grace,
+             bail: self.skater.wipeout.last.clone(),
++            gesture: self.gesture(),
+         }
+     }
+ }
+diff --git a/skate/crates/skate-host/src/physics/controls.rs b/skate/crates/skate-host/src/physics/controls.rs
+index f104b87..18001fb 100644
+--- a/skate/crates/skate-host/src/physics/controls.rs
++++ b/skate/crates/skate-host/src/physics/controls.rs
+@@ -160,6 +160,10 @@ impl PlayerControls {
+                 &self.controller,
+                 self.actor_flags,
+             ));
++        // Skate 3's D-pad gestures (Fill helper 8259BF50): emote intents,
++        // held off while either bumper is down (the contextual menu's L1).
++        self.intents
++            .extend(skate_core::input::gameplay_gestures::produce(&self.controller));
+         self.intents.extend(wipeout_intentions::produce(
+             &self.controller,
+             self.actor_flags,

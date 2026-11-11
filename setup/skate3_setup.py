@@ -26,7 +26,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
-import audio, audio_cache, convert, names, park, skeleton, ui, xdvdfs  # noqa: E402
+import audio, audio_cache, convert, gestures, names, park, skeleton, ui, xdvdfs  # noqa: E402
 from syncdir import same_bytes, sync_tree, write_if_changed  # noqa: E402
 
 MODULES = ('gmcl_skate3_win64.dll', 'gmcl_skate3_linux64.dll', 'gmcl_skate3_osx64.dll')
@@ -427,6 +427,12 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
         except Exception as error:
             traceback.print_exc()
             report(f'Couldn\'t read Hall of Meat\'s skeleton ({error}); Hall of Meat will show the X-ray bone lines.')
+        # The D-pad gestures' hand shapes (peace signs, horns), from the converted gesture previews.
+        try:
+            gestures.export(engine_dir(), data / 'assets/private/stock/data/anim', data / 'assets/gestures', report)
+        except Exception as error:
+            traceback.print_exc()
+            report(f'Couldn\'t read the gestures\' hand shapes ({error}); gestures will play with relaxed hands.')
         # The disc's own Futura as a real font, so the text is sharp at any resolution.
         try:
             ui.export_fonts(xex.parent, gmod / 'resource/fonts', report)

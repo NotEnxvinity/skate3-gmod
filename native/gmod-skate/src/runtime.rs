@@ -32,6 +32,9 @@ pub enum Job {
         aspect: f32,
     },
     Suspend,
+    /// The player's D-pad gestures: Skate 3 catalog indices for Up, Down,
+    /// Left and Right, or None for the retail default. Kept for later rides.
+    Gestures { picks: Option<[u32; 4]> },
     /// Objects on top of the map, such as spawned props, in Source units.
     Props { extra: Vec<[Vec3; 3]> },
     /// Where the map's moving brush entities (doors...) stand now.
@@ -79,6 +82,9 @@ pub struct Pose {
     /// Every bone of the skater and board, in Source space.
     pub bones: Vec<(String, Mat4)>,
     pub score: Score,
+    /// The D-pad gesture playing: (catalog index, hands), hands 0 = both,
+    /// 1 = right only, 2 = left only.
+    pub gesture: Option<(u32, u8)>,
 }
 
 /// The trick score, as the engine keeps it for its HUD.
@@ -320,6 +326,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     // Set once the simulation failed: some of its state may be non-finite
     // beyond what a teleport resets, so the next ride starts a fresh session.
     let mut broken = false;
+    // The player's D-pad gestures, applied to every session built.
+    let mut gestures: Option<[u32; 4]> = None;
     // Prop collision: built on its own thread, one build at a time, with the
     // newest set of props waiting its turn. Builds for a map since replaced
     // are dropped.
@@ -571,6 +579,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         }
                         let session = session.as_mut().ok_or("the map isn't loaded yet")?;
                         session.set_stance(goofy);
+                        session.set_gestures(gestures);
                         record(&mut recording, &mut recording_full, Event::Stance { goofy });
                         let spawn = collision::to_skate(pos).to_array();
                         let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
@@ -630,6 +639,12 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         }
                     }
                     Job::Props { .. } | Job::Doors { .. } | Job::Surfaces { .. } => {}
+                    Job::Gestures { picks } => {
+                        gestures = picks;
+                        if let Some(session) = session.as_mut() {
+                            session.set_gestures(gestures);
+                        }
+                    }
                     Job::Suspend => {
                         if let Some(session) = session.as_mut().filter(|_| !broken) {
                             record(&mut recording, &mut recording_full, Event::Suspend);
@@ -786,6 +801,7 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
                 .collect()
         },
         score: Score::default(),
+        gesture: p.gesture,
     })
 }
 

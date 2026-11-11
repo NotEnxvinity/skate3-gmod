@@ -24,6 +24,7 @@ for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.color
 end
 for _, name in ipairs(Keyboard.CONVARS) do DEFAULTS[#DEFAULTS + 1] = name end
+for _, name in ipairs(S3GM_Gestures and S3GM_Gestures.CONVARS or {}) do DEFAULTS[#DEFAULTS + 1] = name end
 
 -- The settings also live in data/skate3/settings.json, written on every
 -- change. Garry's Mod only saves its own copy when the game closes normally,
@@ -171,7 +172,17 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 		panel:ControlHelp("Automatic goes by your controller's name. Steam Input can make a PlayStation pad look like an Xbox one, so pick PlayStation here if it guesses wrong.")
 		panel:CheckBox("Trick score beside the skater, not on screen", "skate3_ui_world")
 		panel:CheckBox("Contextual menu (hold L1 or Shift)", "skate3_menu")
-		panel:ControlHelp("Hold L1 for the menu: D-pad down places your marker, hold up goes back to it, left interacts, Y opens games and X opens settings (up and down pick a row, left and right change a setting, B goes back).")
+		panel:ControlHelp("Hold L1 for the menu: D-pad down places your marker, hold up goes back to it, left interacts, right customizes, Y opens games and X opens settings (up and down pick a row, left and right change a setting, B goes back).")
+		local Gestures = S3GM_Gestures
+		if Gestures then
+			panel:CheckBox("D-pad gestures", "skate3_gestures")
+			panel:ControlHelp("Tap the D-pad (no L1) while skating or on foot for one of Skate 3's 37 gestures; hold it to keep it going. They use whichever hand is free. Pick yours below, or in the L1 menu's Settings.")
+			for _, d in ipairs(Gestures.DIRECTIONS) do
+				local list = {}
+				for _, g in ipairs(Gestures.LIST) do list[#list + 1] = { g[2], g[1] } end
+				Choices(panel, "D-pad " .. d[2]:lower(), "skate3_gesture_" .. d[1], list)
+			end
+		end
 		panel:CheckBox("Tell me about new releases", "skate3_update_notices")
 		panel:ControlHelp("Looks at GitHub shortly after you join a game (about once every six hours) and, if S3GM has a newer release, shows a small card once and an \"Update available\" line in the menu's Settings. Off means no check at all. Console: skate3_update_check checks right now.")
 		panel:CheckBox("Show the status line", "skate3_hud")

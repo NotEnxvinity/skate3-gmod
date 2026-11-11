@@ -32,6 +32,8 @@ local cv_reach = CreateClientConVar("skate3_hand_reach", "shoulder", true, false
 	"Where the hands reach while skating: shoulder (default; from the model's own shoulder, scaled to its arm length, so long-legged models keep bent arms) or skater (the older way: the skater's exact hand spot, straight arms on tall models)")
 local cv_soles = CreateClientConVar("skate3_foot_clear", "1", true, false,
 	"Tip feet up so toes don't sink through the board (0 = off)")
+local cv_gesture_fingers = CreateClientConVar("skate3_gesture_fingers", "1", true, false,
+	"During a D-pad gesture the playermodel's hands make Skate 3's shape (peace signs, horns...); 0 = our own hand shapes only")
 local cv_face = CreateClientConVar("skate3_face", "1", true, false,
 	"Blinking, and a hurt face on bails (0 = off)")
 
@@ -553,6 +555,24 @@ end
 
 -- Degrees per finger joint, base to tip: relaxed, gripping the board, and
 -- carrying it (fingers mostly straight, tips hooked over the deck, thumb curled over).
+-- A D-pad gesture's hand shape for one of the playermodel's hands: Skate 3's
+-- own, read by the setup from the disc's Create-a-Skater gesture previews
+-- (the gameplay skeleton has no fingers). { [finger 0-4] = { j1, j2, j3 } } in
+-- degrees towards the palm, or nil.
+local function GestureFingers(pose, side)
+	local Gestures = S3GM_Gestures
+	local shape = Gestures and Gestures.HandShape and Gestures.HandShape(pose.gesture + 1)
+	local hand = shape and shape[side]
+	if not hand then return nil end
+	local out = {}
+	for f = 0, 4 do
+		local j = hand[f + 1]
+		-- Retail's "straight" bends a little backwards; keep that small.
+		if j then out[f] = { math.max(j[1], -15), math.max(j[2], -15), math.max(j[3], -15) } end
+	end
+	return out
+end
+
 local CURL = {
 	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 }, carry = { 20, 30, 22 } },
 	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 }, carry = { 30, 45, 35 } },
@@ -571,6 +591,9 @@ local function Hands(info, world, pose)
 	-- carrying it stays relaxed like the other one: a fist only looks right
 	-- on grab tricks.
 	local onFoot = pose.state and pose.state:find("^Biped") ~= nil
+	-- Which of the playermodel's hands a D-pad gesture is using (0 both,
+	-- 1 right only, 2 left only).
+	local gesturing = pose.gesture and cv_gesture_fingers:GetBool() and pose.gesture_hands
 	for side, hand in pairs(info.hands) do
 		local hm = hand and world[hand.hand]
 		if hm then
@@ -589,6 +612,13 @@ local function Hands(info, world, pose)
 				local rate = hand.wanted > (hand.now or 1) and 18 or 8
 				hand.now = Lerp(1 - math.exp(-rate * dt), hand.now or 1, hand.wanted)
 				hand.carry = Lerp(1 - math.exp(-12 * dt), hand.carry or 0, carrying)
+				-- The gesture's fingers: copied while it plays, then eased
+				-- back into our own hand shapes from where it left them.
+				local mine = gesturing and (gesturing == 0 or gesturing == (side == "R" and 1 or 2))
+				local shape = mine and GestureFingers(pose, side)
+				if shape then hand.gestureShape = shape end
+				hand.gesture = Lerp(1 - math.exp(-(shape and 25 or 12) * dt), hand.gesture or 0, shape and 1 or 0)
+				if hand.gesture < 0.01 and not shape then hand.gesture, hand.gestureShape = 0, nil end
 			end
 			if scale ~= 0 then
 				local turn = Turn(hm)
@@ -601,6 +631,8 @@ local function Hands(info, world, pose)
 							local deg = hand.now <= 1 and relaxed * hand.now
 								or Lerp(hand.now - 1, relaxed, grip)
 							deg = Lerp(hand.carry or 0, deg, set.carry[j] or 0)
+							local g = hand.gestureShape and hand.gestureShape[f]
+							if g and g[j] then deg = Lerp(hand.gesture, deg, g[j]) end
 							if world[i] and deg ~= 0 then
 								local r = AxisAngle(axis, math.rad(deg * scale))
 								local at = world[i]:GetTranslation()
