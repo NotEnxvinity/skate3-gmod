@@ -81,8 +81,9 @@ def main():
     parser.add_argument('--out', type=Path, required=True)
     parser.add_argument('--folder', action='store_true')
     args = parser.parse_args()
-    # The folder may lack the Mac module; the executable needs all three.
-    for m in MODULES if not args.folder else MODULES[:2]:
+    # The Mac module is built by hand on a Mac, not in CI, so a download or
+    # executable made without it is fine: only Windows and Linux are required.
+    for m in MODULES[:2]:
         if not (args.modules / m).is_file():
             raise SystemExit(f'missing {args.modules / m}')
     if args.folder:
@@ -98,7 +99,8 @@ def main():
         bin_dir = Path(tmp) / 'bin'
         bin_dir.mkdir()
         for m in MODULES:
-            shutil.copy2(args.modules / m, bin_dir / m)
+            if (args.modules / m).is_file():
+                shutil.copy2(args.modules / m, bin_dir / m)
         # The audio cache's decoder and executable reader, when built.
         for tool in ('skate-xma', 'skate-xex'):
             for name in (tool, tool + '.exe'):
