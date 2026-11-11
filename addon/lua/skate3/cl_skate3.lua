@@ -5,6 +5,7 @@ local Marker = include("skate3/cl_marker.lua")
 local Skater = include("skate3/cl_skater.lua")
 local Sounds = include("skate3/cl_sounds.lua")
 local Score = include("skate3/cl_score.lua")
+local Gestures = include("skate3/cl_gestures.lua")
 local Menu = include("skate3/cl_contextmenu.lua")
 -- Hall of Meat's X-ray skeleton is posed like the body the skater shows.
 Score.Meat.Body = Skater.BodyEntity
@@ -272,6 +273,8 @@ local function Start()
 	local ply = LocalPlayer()
 	if not ply:Alive() or ply:InVehicle() then return end
 	local pos = at or ply:GetPos()
+	-- The player's D-pad gestures (the module keeps them; cheap to resend).
+	Gestures.Push()
 	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, yaw or ply:EyeAngles().y, ScrW() / ScrH(),
 		cv_stance:GetString() == "regular" and 0 or 1)
 	if not ok then

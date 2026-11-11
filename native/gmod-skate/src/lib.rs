@@ -484,6 +484,17 @@ lua_fn!(audio_status, |lua| {
     2
 });
 
+// The player's D-pad gestures, Skate 3 catalog indices 0..36 for Up, Down,
+// Left and Right. No arguments (or any out of range) = the retail default.
+lua_fn!(set_gestures, |lua| {
+    let picks: Option<Vec<u32>> = (1..=4)
+        .map(|i| lua.number(i).filter(|v| (0. ..37.).contains(v)).map(|v| v as u32))
+        .collect();
+    let picks = picks.map(|p| [p[0], p[1], p[2], p[3]]);
+    with_runtime(|r| r.send(Job::Gestures { picks }));
+    0
+});
+
 lua_fn!(suspend, |lua| {
     with_runtime(|r| r.send(Job::Suspend));
     let _ = lua;
@@ -516,6 +527,12 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"bail");
     lua.push_number(p.tick as f64);
     lua.set_field(-2, c"tick");
+    if let Some((gesture, hands)) = p.gesture {
+        lua.push_number(f64::from(gesture));
+        lua.set_field(-2, c"gesture");
+        lua.push_number(f64::from(hands));
+        lua.set_field(-2, c"gesture_hands");
+    }
     // Only the bones Lua draws or retargets; the rest are fingers and faces.
     if let Ok(wanted) = WANTED_BONES.lock() {
         lua.new_table();
@@ -801,6 +818,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Activate", activate),
         (c"Step", step),
         (c"Suspend", suspend),
+        (c"SetGestures", set_gestures),
         (c"AudioStart", audio_start),
         (c"AudioStop", audio_stop),
         (c"AudioGround", audio_ground),
