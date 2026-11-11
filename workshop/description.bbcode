@@ -10,20 +10,23 @@ Source code (GPL-3.0) and bug reports: [url=https://github.com/NotEnxvinity/skat
 [b]Setup video:[/b] [url=https://youtu.be/oGdIwMNwp14]https://youtu.be/oGdIwMNwp14[/url]
 Discord: Enxvinity's Atelier, channel gmod-releases.
 
-[h2]What's new in v2.3.1[/h2]
+[h2]What's new in v2.4.0[/h2]
 [list]
-[*][b]Chibi and giant playermodels[/b]: the skater and board scale to the model, so small models no longer float above the board. [b]skate3_scale_to_model 0[/b] turns it off.
-[*][b]Hall of Meat is on by default[/b] for new installs (Spawn menu > Utilities > Skate 3 to turn it off).
-[*]With Hall of Meat off, a bail no longer flashes "Bailed" in the score.
-[*]Windows setup copes with a broken or leftover Python ("No module named encodings").
+[*][b]In-game phone menu[/b]: hold L1 for a Skate 2 phone-style menu with Skate 3's look: markers, Interact, Games and all your Settings, even during a bail.
+[*][b]Player and board customizer[/b]: D-pad right in the menu opens Customize to switch playermodels and pick your deck, trucks and wheels (works with Enhanced PlayerModel Selector).
+[*][b]Hall of Meat uses Skate 3's real bail skeleton[/b], read from your own disc by setup (the old X-ray look is still an option).
+[*][b]Spawnable Skate 3 Skateboard[/b] (Entities > Skate 3), drawn with your own board, that skaters roll over.
+[*]Fixed: Hall of Meat staying up after a respawn or marker teleport, the skeleton lagging behind the skater, thin lines on the edges of UI panels, and clipped g/j/p/y letters.
+[*]Update checker: the menu tells you when a new release is out (skate3_update_notices 0 turns it off).
 [/list]
+[b]Updating? Run the new setup again[/b] so it can read the skeleton and the new menu pictures off your disc.
 
 [h2]Features[/h2]
 [list]
 [*]Skate 3's physics and trick system, driven from a controller like the real thing.
 [*]Your own playermodel rides the board, posed by Skate 3's animations, and other players see you skate.
 [*]Skate 3's own sound engine (beta), ported from becaring/SK8V and fed from your disc: pops and landings by surface, grind and wheel loops, seam clicks, bails and the real x2/x3 chimes, quieter and panned when they're far from you, with echo in reverb areas. The older Skate 3 sounds (or Half-Life 2's) are the fallback.
-[*]Skate 3's HUD and menus: score, LINE, trick stack, FAKIE, the Hall of Meat bail panel, and the L1 quick menu (session marker, Interact, games).
+[*]Skate 3's HUD and menus: score, LINE, trick stack, FAKIE, the Hall of Meat bail panel with Skate 3's skeleton, and the L1 phone menu (session marker, Interact, games, settings, customize).
 [*]Seven skatepark maps (gm_skate3_*) that build their parks from your disc when you load them, plus tool gun placement for park pieces.
 [*]Skaters hit each other: crashes, punches and board smacks (B / R1). Spawned props you don't freeze can be skated too.
 [*]Trick score in three styles: minimal, floating beside you, or Half-Life 2.
