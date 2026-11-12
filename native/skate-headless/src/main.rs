@@ -257,6 +257,17 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
         rec.rails.len(),
         rec.events.len()
     );
+    // Older builds restarted the recording when prop or door collision was
+    // swapped in mid-ride, so the replay never rode and always came back clean.
+    if !matches!(
+        rec.events.iter().find(|e| matches!(e, Event::Activate { .. } | Event::Step { .. })),
+        None | Some(Event::Activate { .. })
+    ) {
+        println!("this ride starts mid-way (recorded before collision swaps were saved), so it can't replay the glitch");
+        return Ok(());
+    }
+    let mut triangles = rec.triangles.clone();
+    let mut rails = rec.rails.clone();
     let mut session = Session::new(
         std::path::Path::new(assets),
         rec.triangles,
@@ -271,7 +282,7 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
     // tick that breaks.
     let mut ticks = 0u64;
     for (i, event) in rec.events.iter().enumerate() {
-        let result = match *event {
+        let result = match event.clone() {
             Event::Activate {
                 spawn,
                 heading,
@@ -308,6 +319,27 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
             Event::Suspend => {
                 driver.suspend(&mut session);
                 println!("event {i}: suspended");
+                Ok(())
+            }
+            Event::Collision {
+                triangles: t,
+                rails: r,
+            } => t.apply(&triangles).and_then(|t| {
+                triangles = t;
+                rails = r.apply(&rails)?;
+                let prepared = session
+                    .collision_builder()
+                    .build(triangles.clone(), rails.clone())?;
+                session.install_collision(prepared)?;
+                println!(
+                    "event {i}: collision swapped ({} triangles, {} rails)",
+                    triangles.len(),
+                    rails.len()
+                );
+                Ok(())
+            }),
+            Event::Gestures { picks } => {
+                session.set_gestures(picks);
                 Ok(())
             }
         };
