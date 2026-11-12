@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use glam::{Mat3, Mat4, Vec3};
 use skate_bridge::bridge::{Controls, Session};
-use skate_bridge::repro::{Driver, Event, Recording};
+use skate_bridge::repro::{Driver, Event, Recording, Splice};
 use skate_bridge::surfaces::{Fitted, Surfaces};
 use skate_bridge::{collision, world};
 
@@ -396,9 +396,17 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             map.fitted = r.fitted;
                             map.base_gen = r.generation;
                         }
-                        // A ride recorded from here replays on the new collision.
-                        recording = Some(Recording::new(done.triangles.clone(), done.rails.clone()));
-                        recording_full = false;
+                        // The swap goes into the recording at the frame it
+                        // happened, so a replay swaps it in at the same point.
+                        // (Restarting the recording here left rides that began
+                        // mid-way, which replayed as a skater who never rode.)
+                        if recording.is_some() {
+                            let event = Event::Collision {
+                                triangles: Splice::between(&map.triangles, &done.triangles),
+                                rails: Splice::between(&map.rails, &done.rails),
+                            };
+                            record(&mut recording, &mut recording_full, event);
+                        }
                         map.triangles = done.triangles;
                         map.rails = done.rails;
                     }
@@ -580,6 +588,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         let session = session.as_mut().ok_or("the map isn't loaded yet")?;
                         session.set_stance(goofy);
                         session.set_gestures(gestures);
+                        record(&mut recording, &mut recording_full, Event::Gestures { picks: gestures });
                         record(&mut recording, &mut recording_full, Event::Stance { goofy });
                         let spawn = collision::to_skate(pos).to_array();
                         let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
@@ -643,6 +652,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         gestures = picks;
                         if let Some(session) = session.as_mut() {
                             session.set_gestures(gestures);
+                            record(&mut recording, &mut recording_full, Event::Gestures { picks });
                         }
                     }
                     Job::Suspend => {
