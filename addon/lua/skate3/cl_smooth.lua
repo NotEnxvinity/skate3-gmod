@@ -165,7 +165,20 @@ local function Blend(a, b, t)
 end
 
 -- How far behind the newest step the clock sits, for skate3_smooth_report.
-local behindSum, behindCount, heldCount = 0, 0, 0
+local behindSum, behindCount, heldCount, lostCount = 0, 0, 0, 0
+
+-- The most the simulation catches up on in one frame (its own limit).
+local CATCH_UP = 0.15
+-- The most the clock is sped up or slowed down to get back to its place.
+local NUDGE = 0.05
+-- Ahead of the newest step by more than this many steps, or behind it by
+-- more than LOST_BEHIND, the clock has lost the simulation (it stopped, or
+-- runs at another rate than the clock was told) and starts over from it.
+local LOST_AHEAD, LOST_BEHIND = 10, 4
+-- Ahead of the newest step for this long (seconds) is the same thing: after
+-- a long frame the simulation is only ever a frame or two late.
+local AHEAD_FOR = 0.12
+local aheadFor = 0
 
 -- The pose to draw this frame, given the newest one the simulation gave
 -- (raw) and this frame's length. Raw itself when smoothing is off.
@@ -175,8 +188,8 @@ function Smooth.Drawn(raw, dt)
 		return raw
 	end
 	local newest = steps[#steps]
-	-- A new ride or a respawn starts the count again (or skips far ahead).
-	if newest and (raw.tick < newest.tick or raw.tick > newest.tick + GAP) then
+	-- A new ride or a respawn starts the count again.
+	if newest and raw.tick < newest.tick then
 		Smooth.Reset()
 		newest = nil
 	end
@@ -188,20 +201,45 @@ function Smooth.Drawn(raw, dt)
 		steps[#steps] = raw
 	end
 	local top = raw.tick
-	dt = math.Clamp(dt or 0, 0, 0.25)
-	if not clock then clock = top - BEHIND end
-	clock = clock + dt / STEP
-	clock = clock + (top - BEHIND - clock) * (1 - math.exp(-SETTLE * dt))
+	-- The simulation's step, which Skate 3's slow motion stretches.
+	local step = raw.period and raw.period > 1e-4 and raw.period or STEP
+	dt = math.Clamp(dt or 0, 0, CATCH_UP)
+	local advance = dt / step
+	if not clock then clock, aheadFor = top - BEHIND, 0 end
+	-- The clock runs on by exactly what the simulation was given, long
+	-- frames included. A frame that hitched (Lua's collector, a prop swap)
+	-- hands the simulation several steps at once, and they arrive a frame
+	-- late: the clock is then ahead of the newest step for that one frame.
+	-- It used to be pulled back to it there, which threw the cushion away:
+	-- a stutter, then half a second of running slow to get it back, after
+	-- every hitch. Now only what's drawn waits; the clock keeps its place.
+	clock = clock + advance
 	if clock > top then
-		clock = top
+		aheadFor = aheadFor + dt
+	else
+		aheadFor = 0
+		-- Eased back to its place behind the newest step, by a few percent of
+		-- its speed at most, and only on frames where the simulation has
+		-- caught up (its late steps say nothing about where the clock should be).
+		local fix = (top - BEHIND - clock) * (1 - math.exp(-SETTLE * dt))
+		local most = NUDGE * advance
+		clock = clock + math.Clamp(fix, -most, most)
+	end
+	if clock > top + LOST_AHEAD or clock < top - LOST_BEHIND or aheadFor > AHEAD_FOR then
+		clock, aheadFor = top - BEHIND, 0
+		lostCount = lostCount + 1
+	end
+	local at = clock
+	if at > top then
+		at = top
 		heldCount = heldCount + 1
 	end
-	clock = math.max(clock, top - 2, steps[1].tick)
-	behindSum, behindCount = behindSum + (top - clock), behindCount + 1
-	-- The two steps either side of the clock.
+	at = math.max(at, steps[1].tick)
+	behindSum, behindCount = behindSum + (top - at), behindCount + 1
+	-- The two steps either side of it.
 	local a, b
 	for i = #steps, 1, -1 do
-		if steps[i].tick <= clock then
+		if steps[i].tick <= at then
 			a, b = steps[i], steps[i + 1]
 			break
 		end
@@ -209,7 +247,7 @@ function Smooth.Drawn(raw, dt)
 	if not a then return raw end
 	if not b then return a end
 	if b.tick - a.tick > GAP or Far(a.pos, b.pos) or (b.state or ""):find("^Teleport") then return b end
-	local t = (clock - a.tick) / (b.tick - a.tick)
+	local t = (at - a.tick) / (b.tick - a.tick)
 	if t <= 0 then return a end
 	if t >= 1 then return b end
 	return Blend(a, b, t)
@@ -220,9 +258,9 @@ concommand.Add("skate3_smooth_report", function()
 		print("[skate3] smoothing: nothing drawn yet (ride first; skate3_smooth is " .. cv:GetString() .. ")")
 		return
 	end
-	print(("[skate3] smoothing %s: drawn %.2f steps behind the newest on average, held on the newest %.1f%% of frames (%d frames)"):format(
-		cv:GetBool() and "on" or "off", behindSum / behindCount, heldCount / behindCount * 100, behindCount))
-	behindSum, behindCount, heldCount = 0, 0, 0
+	print(("[skate3] smoothing %s: drawn %.2f steps behind the newest on average, waited on the newest %.1f%% of frames, lost the simulation and started over %d times (%d frames)"):format(
+		cv:GetBool() and "on" or "off", behindSum / behindCount, heldCount / behindCount * 100, lostCount, behindCount))
+	behindSum, behindCount, heldCount, lostCount = 0, 0, 0, 0
 end, nil, "How far behind the simulation your skater is drawn, and how often it had to wait for a step")
 
 return Smooth

@@ -85,6 +85,9 @@ pub struct Pose {
     /// The D-pad gesture playing: (catalog index, hands), hands 0 = both,
     /// 1 = right only, 2 = left only.
     pub gesture: Option<(u32, u8)>,
+    /// Seconds of frame time one simulation step takes now: a sixtieth,
+    /// longer while Skate 3's slow motion plays. For drawing between steps.
+    pub period: f32,
 }
 
 /// The trick score, as the engine keeps it for its HUD.
@@ -606,7 +609,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         );
                         last_pos = Some(pos);
                         let pose = driver.activate(session, spawn, heading, aspect)?;
-                        let pose = convert(&pose)?;
+                        let mut pose = convert(&pose)?;
+                        pose.period = session.period();
                         set(&|s| {
                             s.active = true;
                             s.error = None;
@@ -641,6 +645,7 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             let mut pose = convert(&session.pose())?;
                             last_pos = Some(pose.pos);
                             pose.score = session.score();
+                            pose.period = session.period();
                             if states.last().is_none_or(|(state, _)| *state != pose.state) {
                                 if states.len() == 6 {
                                     states.remove(0);
@@ -816,6 +821,7 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
         },
         score: Score::default(),
         gesture: p.gesture,
+        period: 1. / 60.,
     })
 }
 

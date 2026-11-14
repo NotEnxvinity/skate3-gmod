@@ -540,6 +540,8 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"bail");
     lua.push_number(p.tick as f64);
     lua.set_field(-2, c"tick");
+    lua.push_number(f64::from(p.period));
+    lua.set_field(-2, c"period");
     if let Some((gesture, hands)) = p.gesture {
         lua.push_number(f64::from(gesture));
         lua.set_field(-2, c"gesture");
