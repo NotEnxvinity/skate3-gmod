@@ -86,6 +86,14 @@ local function Finite(x)
 	return x == x and x > -1e9 and x < 1e9
 end
 
+-- The length of one of a matrix's three axes (1 forward, 2 left, 3 up),
+-- read as plain numbers: asking for the axis as a vector made a throwaway
+-- vector per axis per bone per body setup.
+local function AxisLength(m, c)
+	local x, y, z = m:GetField(1, c), m:GetField(2, c), m:GetField(3, c)
+	return math.sqrt(x * x + y * y + z * z)
+end
+
 -- The turn and position of m with any scale taken out, or nil when there's
 -- no turn left to read (a bone scaled to nothing, or NaNs). Some playermodels
 -- scale bones in their animation (to hide a part, or for their proportions),
@@ -252,14 +260,17 @@ function Body.Conv()
 	return conv
 end
 
+local anglesOut = { 0, 0, 0 }
 -- The manipulation angle that makes the engine turn a bone by R.
 function Body.AnglesFor(R)
 	local m = conv.inverse and R:GetInverseTR() or R
+	-- The angle read off the matrix is a fresh one: it's reordered in place
+	-- and handed back (this runs for every bone, a few times a frame).
 	local q = m:GetAngles()
-	local qv = { q.p, q.y, q.r }
-	local a = {}
-	for k = 1, 3 do a[conv.perm[k]] = qv[k] end
-	return Angle(a[1], a[2], a[3])
+	local a, perm = anglesOut, conv.perm
+	a[perm[1]], a[perm[2]], a[perm[3]] = q.p, q.y, q.r
+	q.p, q.y, q.r = a[1], a[2], a[3]
+	return q
 end
 
 -- A bone's world matrix from its parent's, its local in the frozen frame,
@@ -431,8 +442,39 @@ local function Local(p, i)
 	local L = p.base.locals[i]
 	local m = L and p.measured and p.measured[i]
 	if not m then return L end
-	local r = Matrix(m)
-	r:SetTranslation(L:GetTranslation())
+	-- Made once per reading and kept: this is asked for every bone on every
+	-- solve. Nothing changes the matrix it hands back.
+	local c = p.localOf
+	if not c or c.base ~= p.base then
+		c = { base = p.base, from = {}, made = {} }
+		p.localOf = c
+	end
+	if c.from[i] ~= m then
+		local r = Matrix(m)
+		r:SetTranslation(L:GetTranslation())
+		c.from[i], c.made[i] = m, r
+	end
+	return c.made[i]
+end
+
+-- The turn of a bone's local matrix and that turn undone, kept per matrix
+-- for the same reason (locals live as long as the model's frame does).
+local turnOf = setmetatable({}, { __mode = "k" })
+local turnBackOf = setmetatable({}, { __mode = "k" })
+local function TurnOf(L)
+	local r = turnOf[L]
+	if not r then
+		r = RotOnly(L)
+		turnOf[L] = r
+	end
+	return r
+end
+local function TurnBackOf(L)
+	local r = turnBackOf[L]
+	if not r then
+		r = TurnOf(L):GetInverseTR()
+		turnBackOf[L] = r
+	end
 	return r
 end
 
@@ -459,14 +501,13 @@ function SolveTimed(ply, p, E)
 			local want = f.rots[i] and face * f.rots[i]
 			-- Bones at the top of the skeleton stay with the skater too,
 			-- wherever the engine has the player.
-			if par < 0 and not want then want = face * RotOnly(L) end
+			if par < 0 and not want then want = face * TurnOf(L) end
 			local R
 			if want then
-				local lr = RotOnly(L)
 				if conv.pre then
-					R = RotOnly(Fp):GetInverseTR() * want * lr:GetInverseTR()
+					R = RotOnly(Fp):GetInverseTR() * want * TurnBackOf(L)
 				else
-					R = (RotOnly(Fp) * lr):GetInverseTR() * want
+					R = (RotOnly(Fp) * TurnOf(L)):GetInverseTR() * want
 				end
 				turns[i] = R
 			end
@@ -533,12 +574,12 @@ local GIVE_UP = 300
 -- A bone matrix worth reading: real numbers, axes about unit length (a
 -- bone the engine skipped can hold zeros or junk).
 local function Sane(m)
-	for _, v in ipairs({ m:GetForward(), m:GetUp(), m:GetRight() }) do
-		local l = v:Length()
+	for c = 1, 3 do
+		local l = AxisLength(m, c)
 		if not (l > 0.5 and l < 2) then return false end
 	end
-	local t = m:GetTranslation()
-	return t.x == t.x and math.abs(t.x) + math.abs(t.y) + math.abs(t.z) < 1e6
+	local x, y, z = m:GetField(1, 4), m:GetField(2, 4), m:GetField(3, 4)
+	return x == x and math.abs(x) + math.abs(y) + math.abs(z) < 1e6
 end
 
 -- Forearms, hands and fingers aren't read: Gmod's own IK moves them after
@@ -669,13 +710,15 @@ end)
 -- Whether m is a bone matrix worth writing near at (no NaNs, no endless
 -- scale, not miles away).
 local function Placeable(m, at)
-	local t = m:GetTranslation()
-	if not (Finite(t.x) and Finite(t.y) and Finite(t.z)) then return false end
-	for _, v in ipairs({ m:GetForward(), m:GetUp(), m:GetRight() }) do
-		local l = v:Length()
+	local x, y, z = m:GetField(1, 4), m:GetField(2, 4), m:GetField(3, 4)
+	if not (Finite(x) and Finite(y) and Finite(z)) then return false end
+	for c = 1, 3 do
+		local l = AxisLength(m, c)
 		if not (Finite(l) and l < 20) then return false end
 	end
-	return not at or t:DistToSqr(at) < REACH * REACH
+	if not at then return true end
+	local dx, dy, dz = x - at.x, y - at.y, z - at.z
+	return dx * dx + dy * dy + dz * dz < REACH * REACH
 end
 
 local function Bad(ply, p, i, why)
@@ -703,6 +746,7 @@ end
 Body.Stats = { place = 0, places = 0, solve = 0, solves = 0 }
 local Stats = Body.Stats
 
+local placeOld, placeNew, placeInvs = {}, {}, {}
 local PlaceAllTimed
 local function PlaceAll(ply, count)
 	local s = SysTime()
@@ -714,8 +758,13 @@ function PlaceAllTimed(ply, count)
 	local p = posed[ply]
 	if not (p and p.base) then return end
 	local n = math.min(count, p.base.count)
-	local old = {}
-	for i = 0, n - 1 do old[i] = ply:GetBoneMatrix(i) end
+	-- The same three lists every setup (a few run each frame), emptied as
+	-- they're filled.
+	local old, new, invs = placeOld, placeNew, placeInvs
+	for i = 0, n - 1 do
+		old[i] = ply:GetBoneMatrix(i)
+		new[i], invs[i] = nil, nil
+	end
 	-- What the engine made of the body is read right here, from this very
 	-- setup: where it really put the player, and how it holds its frame.
 	-- (An extra setup of our own each frame to read it, as before, ran the
@@ -737,7 +786,6 @@ function PlaceAllTimed(ply, count)
 	local guard = cv_guard:GetBool()
 	local at = p.frame and p.frame.origin
 	local carry, carryOn = p.base.carry or {}, cv_carry:GetBool()
-	local new, invs = {}, {}
 	for i = 0, n - 1 do
 		local was = old[i]
 		if was then

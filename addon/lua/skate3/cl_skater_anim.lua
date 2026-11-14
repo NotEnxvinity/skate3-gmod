@@ -38,13 +38,16 @@ local cv_face = CreateClientConVar("skate3_face", "1", true, false,
 	"Blinking, and a hurt face on bails (0 = off)")
 
 -- Rows of a 3x4 transform, as the module returns them.
+-- One set of rows is filled in again for every matrix made (Matrix() copies
+-- the numbers out): a fresh table of tables each time was thousands of
+-- throwaway tables a second, and Lua's clean-up of them froze the game.
+local ROWS = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 1 } }
+local ROW1, ROW2, ROW3 = ROWS[1], ROWS[2], ROWS[3]
 local function Mat(t)
-	return Matrix({
-		{ t[1], t[2], t[3], t[4] },
-		{ t[5], t[6], t[7], t[8] },
-		{ t[9], t[10], t[11], t[12] },
-		{ 0, 0, 0, 1 },
-	})
+	ROW1[1], ROW1[2], ROW1[3], ROW1[4] = t[1], t[2], t[3], t[4]
+	ROW2[1], ROW2[2], ROW2[3], ROW2[4] = t[5], t[6], t[7], t[8]
+	ROW3[1], ROW3[2], ROW3[3], ROW3[4] = t[9], t[10], t[11], t[12]
+	return Matrix(ROWS)
 end
 
 -- The rotation of `angle` radians about unit vector `axis`.
@@ -52,12 +55,10 @@ local function AxisAngle(axis, angle)
 	local x, y, z = axis.x, axis.y, axis.z
 	local s, c = math.sin(angle), math.cos(angle)
 	local t = 1 - c
-	return Matrix({
-		{ t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0 },
-		{ t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0 },
-		{ t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0 },
-		{ 0, 0, 0, 1 },
-	})
+	ROW1[1], ROW1[2], ROW1[3], ROW1[4] = t * x * x + c, t * x * y - s * z, t * x * z + s * y, 0
+	ROW2[1], ROW2[2], ROW2[3], ROW2[4] = t * x * y + s * z, t * y * y + c, t * y * z - s * x, 0
+	ROW3[1], ROW3[2], ROW3[3], ROW3[4] = t * x * z - s * y, t * y * z + s * x, t * z * z + c, 0
+	return Matrix(ROWS)
 end
 
 -- The rotation taking unit vector a onto unit vector b.
@@ -76,10 +77,13 @@ local function Turn(m)
 	return r
 end
 
--- `m` turned by rotation `r` about the point `p`.
-local function TurnAbout(m, r, p)
-	local out = r * m
-	out:SetTranslation(r * (m:GetTranslation() - p) + p)
+-- Turning by rotation `r` about the point `p`, as one matrix: About(r, p) * m
+-- is `m` turned. Made once and multiplied onto every bone it turns (a whole
+-- arm, fingers and all), where each bone used to cost five throwaway
+-- matrices and vectors.
+local function About(r, p)
+	local out = Matrix(r)
+	out:SetTranslation(p - r * p)
 	return out
 end
 
@@ -380,6 +384,23 @@ end
 
 -- Two-bone reach: turn thigh and calf so the ankle lands on `target`,
 -- bending the knee the way it already bends, and keep the foot's own turn.
+-- Which of a leg's (or arm's) three bones each bone hangs below, as a sum:
+-- 1 the thigh, 2 the calf, 4 the foot. Worked out once per leg.
+local function Parts(leg, below)
+	local class, list = {}, {}
+	for n, bone in ipairs({ leg.thigh, leg.calf, leg.foot }) do
+		for _, i in ipairs(below(bone)) do
+			if not class[i] then
+				class[i] = 0
+				list[#list + 1] = i
+			end
+			class[i] = class[i] + 2 ^ (n - 1)
+		end
+	end
+	leg.parts = { class = class, list = list }
+	return leg.parts
+end
+
 local function Reach(world, leg, target, below, pole)
 	local h, k, a = world[leg.thigh], world[leg.calf], world[leg.foot]
 	if not (h and k and a) then return end
@@ -409,20 +430,33 @@ local function Reach(world, leg, target, below, pole)
 	bend:Normalize()
 	local cosHip = math.Clamp((l1 * l1 + dist * dist - l2 * l2) / (2 * l1 * dist), -1, 1)
 	local knee = h + dir * (l1 * cosHip) + bend * (l1 * math.sqrt(1 - cosHip * cosHip))
-	local r1 = Arc((k - h):GetNormalized(), (knee - h):GetNormalized())
-	for _, i in ipairs(below(leg.thigh)) do
-		if world[i] then world[i] = TurnAbout(world[i], r1, h) end
-	end
-	local ankle = world[leg.foot]:GetTranslation()
-	local r2 = Arc((ankle - knee):GetNormalized(), (h + dir * dist - knee):GetNormalized())
-	for _, i in ipairs(below(leg.calf)) do
-		if world[i] then world[i] = TurnAbout(world[i], r2, knee) end
-	end
-	-- The foot keeps the turn it had before the leg moved.
-	local undo = footTurn * Turn(world[leg.foot]):GetInverse()
-	local at = world[leg.foot]:GetTranslation()
-	for _, i in ipairs(below(leg.foot)) do
-		if world[i] then world[i] = TurnAbout(world[i], undo, at) end
+	-- Three turns: the thigh onto the new knee, the calf onto the target,
+	-- and the foot back to the turn it had before the leg moved. Each bone
+	-- gets them as one matrix, by which of the three it hangs below.
+	local parts = leg.parts or Parts(leg, below)
+	local class = parts.class
+	local foot = world[leg.foot]
+	local own = class[leg.foot] or 0
+	local t1 = About(Arc((k - h):GetNormalized(), (knee - h):GetNormalized()), h)
+	if own % 2 >= 1 then foot = t1 * foot end
+	local ankle = foot:GetTranslation()
+	local t2 = About(Arc((ankle - knee):GetNormalized(), (h + dir * dist - knee):GetNormalized()), knee)
+	if own % 4 >= 2 then foot = t2 * foot end
+	local t3 = About(footTurn * Turn(foot):GetInverse(), foot:GetTranslation())
+	local t21, t31, t32, t321
+	for _, i in ipairs(parts.list) do
+		local m = world[i]
+		if m then
+			local c = class[i]
+			if c == 1 then m = t1 * m
+			elseif c == 2 then m = t2 * m
+			elseif c == 3 then t21 = t21 or t2 * t1 m = t21 * m
+			elseif c == 4 then m = t3 * m
+			elseif c == 5 then t31 = t31 or t3 * t1 m = t31 * m
+			elseif c == 6 then t32 = t32 or t3 * t2 m = t32 * m
+			else t321 = t321 or t3 * t2 * t1 m = t321 * m end
+			world[i] = m
+		end
 	end
 end
 
@@ -469,8 +503,9 @@ local function Clear(world, leg, floor, up, below)
 		if short <= 0.25 then break end
 	end
 	if not r then return end
+	local t = About(r, ankle)
 	for _, i in ipairs(bones) do
-		if world[i] then world[i] = TurnAbout(world[i], r, ankle) end
+		if world[i] then world[i] = t * world[i] end
 	end
 end
 
@@ -665,9 +700,9 @@ local function Hands(info, world, pose)
 							end
 							if world[i] and deg ~= 0 then
 								local r = AxisAngle(axis, math.rad(deg * scale))
-								local at = world[i]:GetTranslation()
+								local t = About(r, world[i]:GetTranslation())
 								for _, k in ipairs(info.below(i)) do
-									if world[k] then world[k] = TurnAbout(world[k], r, at) end
+									if world[k] then world[k] = t * world[k] end
 								end
 							end
 						end
@@ -836,8 +871,9 @@ local function Twist(info, world)
 	local _, _, _, w = KeyAt(KEYS[0], t)
 	if w <= 0 then return end
 	local r = AxisAngle(Vector(0, 0, 1), math.rad((strike.side == "L" and -TWIST or TWIST) * w))
+	local t = About(r, at)
 	for _, i in ipairs(info.below(bone)) do
-		if world[i] then world[i] = TurnAbout(world[i], r, at) end
+		if world[i] then world[i] = t * world[i] end
 	end
 end
 
