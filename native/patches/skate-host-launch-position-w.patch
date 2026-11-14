@@ -1,0 +1,19 @@
+diff --git a/skate/crates/skate-host/src/physics/biped_ground/sync.rs b/skate/crates/skate-host/src/physics/biped_ground/sync.rs
+index 6d8c7f4..edd6da2 100644
+--- a/skate/crates/skate-host/src/physics/biped_ground/sync.rs
++++ b/skate/crates/skate-host/src/physics/biped_ground/sync.rs
+@@ -47,6 +47,14 @@ impl Owner {
+                 frame[1][i].mul_add(point[1], frame[0][i].mul_add(point[0], frame[3][i])),
+             )
+         });
++        // The frame's unused fourth lanes can hold NaN on the PC host (the
++        // 360's vector unit never reads them here). This runs after produce's
++        // own fourth-lane cleanup, so clean the body point's too, or the
++        // selector's finiteness check fails the jump on that lane alone
++        // (Enx's v2.5.0 test 3: "bad position_32.w", every other lane fine).
++        if !packet.position_32[3].is_finite() {
++            packet.position_32[3] = 0.0;
++        }
+         Ok(Some(packet))
+     }
+ }
