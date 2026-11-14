@@ -494,6 +494,14 @@ lua_fn!(audio_status, |lua| {
     2
 });
 
+// Arms drawn from the animation (1, the default) or from the spring-driven
+// body as Skate 3 simulates it (0).
+lua_fn!(set_calm_limbs, |lua| {
+    let on = lua.number(1).is_none_or(|v| v != 0.);
+    runtime::CALM_LIMBS.store(on, std::sync::atomic::Ordering::Relaxed);
+    0
+});
+
 // The player's D-pad gestures, Skate 3 catalog indices 0..36 for Up, Down,
 // Left and Right. No arguments (or any out of range) = the retail default.
 lua_fn!(set_gestures, |lua| {
@@ -834,6 +842,7 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Step", step),
         (c"Suspend", suspend),
         (c"SetGestures", set_gestures),
+        (c"SetCalmLimbs", set_calm_limbs),
         (c"AudioStart", audio_start),
         (c"AudioStop", audio_stop),
         (c"AudioGround", audio_ground),

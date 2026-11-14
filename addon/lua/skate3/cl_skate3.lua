@@ -37,6 +37,17 @@ S3GM_BUILD = "v2.5.0-test-2"
 print("[skate3] lua build: " .. S3GM_BUILD)
 local cv_hud = CreateClientConVar("skate3_hud", "0", true, false, "Show the skate status line")
 local cv_input = CreateClientConVar("skate3_debug_input", "0", false, false, "Show the controller input the skate module receives")
+-- Skate 3 drives the skater's body toward its animation with springs, and
+-- on a fast move (the on-foot jump's arm swing, a gesture, a flail) the
+-- arms overshoot and snap back: rubber arms on a playermodel. With this on
+-- the module hands out the arms as animated, on the body's chest; a hand
+-- at the board and everything in a bail stay the body's.
+local cv_calm = CreateClientConVar("skate3_calm_limbs", "1", true, false,
+	"Arms follow Skate 3's animation instead of overshooting it on fast moves (0 = the springy body, as the simulation has it)")
+local function SendCalm()
+	if skate3 and skate3.SetCalmLimbs then skate3.SetCalmLimbs(cv_calm:GetBool() and 1 or 0) end
+end
+cvars.AddChangeCallback("skate3_calm_limbs", SendCalm, "skate3_calm_limbs")
 local cv_stance = CreateClientConVar("skate3_stance", "goofy", true, false, "Skating stance, regular or goofy; applies the next time you get on")
 
 -- Equipping this weapon starts skate mode on the board; Y gets off and on
@@ -281,6 +292,7 @@ local function Start()
 	local pos = at or ply:GetPos()
 	-- The player's D-pad gestures (the module keeps them; cheap to resend).
 	Gestures.Push()
+	SendCalm()
 	local ok, err = skate3.Activate(pos.x, pos.y, pos.z, yaw or ply:EyeAngles().y, ScrW() / ScrH(),
 		cv_stance:GetString() == "regular" and 0 or 1)
 	if not ok then

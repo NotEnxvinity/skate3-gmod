@@ -334,6 +334,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     let mut broken = false;
     // The player's D-pad gestures, applied to every session built.
     let mut gestures: Option<[u32; 4]> = None;
+    // Arms drawn from the animation instead of the spring-driven body.
+    let mut calm = skate_bridge::calm::Calm::default();
     // Prop collision: built on its own thread, one build at a time, with the
     // newest set of props waiting its turn. Builds for a map since replaced
     // are dropped.
@@ -642,7 +644,20 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             crate::audio::on_tick(s, &mut audio_state)
                         })?;
                         if advanced {
-                            let mut pose = convert(&session.pose())?;
+                            let raw = session.pose();
+                            let mut pose = convert(&raw)?;
+                            if CALM_LIMBS.load(std::sync::atomic::Ordering::Relaxed) {
+                                // The animation's pose, placed like the bones are.
+                                let root = crate::skater::to_source(Mat4::from_cols_array(&raw.root.to_cols_array()));
+                                let animation: Vec<Mat4> = session
+                                    .animation_globals()
+                                    .iter()
+                                    .map(|m| root * crate::skater::to_source(Mat4::from_cols_array(m)))
+                                    .collect();
+                                calm.apply(&mut pose.bones, &animation, &pose.state, 1. / 0.0254);
+                            } else {
+                                calm = skate_bridge::calm::Calm::default();
+                            }
                             last_pos = Some(pose.pos);
                             pose.score = session.score();
                             pose.period = session.period();
@@ -824,6 +839,11 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
         period: 1. / 60.,
     })
 }
+
+/// Whether the arms are drawn from the animation (skate3_calm_limbs): the
+/// body the engine simulates overshoots fast arm swings. Only what is drawn
+/// changes; the simulation is the same either way.
+pub static CALM_LIMBS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// A vertical field of view as Source's horizontal one at a 4:3 aspect.
 fn source_fov(vertical_degrees: f32) -> f32 {
