@@ -50,6 +50,15 @@ class GestureTest(unittest.TestCase):
         shape = gestures.held_shape(track, hands(20), [ahead] * 3 + [up] * 6)
         self.assertEqual(shape['aimL'][2][1], [0.0, 0.0, 1.0])
 
+    def test_everyday_poses_need_every_source(self):
+        aims = [[[(1.0, 0.0, 0.0)] * 3] * 5] * 2
+        shapes = {'fists': {'aimR': 1, 'aimL': 2}, 'airplane': {'aimR': 3, 'aimL': 4}}
+        poses = gestures.everyday_poses(shapes, {'fists': [aims], 'airplane': [aims]})
+        self.assertEqual(set(poses), {'relaxed', 'grip', 'open'})
+        self.assertEqual(poses['grip'], {'aimR': 1, 'aimL': 2})
+        self.assertEqual(gestures.everyday_poses({'fists': shapes['fists']}, {'fists': [aims]}), {})
+        self.assertEqual(gestures.everyday_poses(shapes, {'fists': [None]}), {})
+
     def test_shapes_are_clamped(self):
         shape = gestures.held_shape([hands(20), hands(170), hands(170)], hands(20))
         self.assertEqual(shape['L'][0], [120.0, 120.0, 120.0])
@@ -58,7 +67,8 @@ class GestureTest(unittest.TestCase):
     def test_real_disc_peace_sign_has_two_fingers_up(self):
         with tempfile.TemporaryDirectory() as out:
             self.assertTrue(gestures.export(ENGINE, ANIM, out, lambda _: None))
-            shapes = json.loads((Path(out) / 'hands.json').read_text())['gestures']
+            made = json.loads((Path(out) / 'hands.json').read_text())
+            shapes, poses = made['gestures'], made['poses']
         self.assertEqual(len(shapes), 37)
         thumb, index, middle, ring, pinky = shapes['peace']['R']
         self.assertLess(max(index + middle), 20)
@@ -73,6 +83,16 @@ class GestureTest(unittest.TestCase):
         thumb, index = shapes['fonz_eh']['aimR'][:2]
         self.assertLess(max(j[1] for j in thumb), -0.7)
         self.assertLess(index[1][0], -0.8)
+        # The everyday hands: an open hand points every finger ahead, a grip
+        # curls them back into the palm, relaxed sits in between.
+        for side in ('aimR', 'aimL'):
+            for finger in poses['open'][side][1:]:
+                self.assertGreater(min(j[0] for j in finger), 0.9)
+            for finger in poses['grip'][side][1:]:
+                self.assertLess(finger[1][0], -0.5)
+            for finger in poses['relaxed'][side][1:]:
+                self.assertGreater(finger[0][0], 0.6)
+                self.assertGreater(finger[2][2], 0.2)
         for side in ('aimR', 'aimL'):
             for finger in shapes['shaka'][side]:
                 for x, y, z in finger:

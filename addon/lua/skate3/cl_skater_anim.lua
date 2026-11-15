@@ -638,15 +638,12 @@ local function Arms(info, world, pose)
 	carrying, carryAt = onFoot and carried or false, RealTime()
 end
 
--- Degrees per finger joint, base to tip: relaxed, gripping the board, and
--- carrying it (fingers mostly straight, tips hooked over the deck, thumb curled over).
 -- A D-pad gesture's hand shape for one of the playermodel's hands: Skate 3's
 -- own, read by the setup from the disc's Create-a-Skater gesture previews
--- (the gameplay skeleton has no fingers). { [finger 0-4] = { j1, j2, j3 } } in
--- degrees towards the palm, or nil.
--- A gesture's hand shape for one side: bends per finger and joint and,
--- when the setup could read them, where each finger bone points in the
--- hand's frame. Made once per gesture and side.
+-- (the gameplay skeleton has no fingers). Bends per finger and joint
+-- ({ [finger 0-4] = { j1, j2, j3 } } in degrees towards the palm) and, when
+-- the setup could read them, where each finger bone points in the hand's
+-- frame. Made once per gesture and side.
 local shapeCache = {}
 local function GestureFingers(pose, side)
 	local key = pose.gesture * 2 + (side == "R" and 0 or 1)
@@ -683,6 +680,54 @@ local function GestureFingers(pose, side)
 	return out, aim
 end
 
+-- Skate 3's everyday hands for one side (relaxed, grip, open; see
+-- cl_gestures' HandPoses), checked once; nil before the setup has made them.
+local everydayCache = {}
+local function EverydayHands(side)
+	local cached = everydayCache[side]
+	if cached ~= nil then return cached or nil end
+	local Gestures = S3GM_Gestures
+	if not (Gestures and Gestures.HandPoses) then return nil end
+	local p = Gestures.HandPoses(side)
+	local ok = istable(p)
+	for _, name in ipairs({ "relaxed", "grip", "open" }) do
+		for f = 1, 5 do
+			local joints = ok and p[name][f]
+			ok = ok and istable(joints)
+			for j = 1, 3 do
+				local v = ok and joints[j]
+				ok = ok and istable(v) and isnumber(v[1]) and isnumber(v[2]) and isnumber(v[3])
+			end
+		end
+	end
+	everydayCache[side] = ok and p or false
+	return ok and p or nil
+end
+
+-- The direction `t` of the way from unit direction `a` to `b` (both { x, y,
+-- z }), written into `out` (which may be `a`). Plain numbers: this runs for
+-- every finger joint every frame.
+local function Slerp(a, b, t, out)
+	local ax, ay, az, bx, by, bz = a[1], a[2], a[3], b[1], b[2], b[3]
+	local angle = math.acos(math.Clamp(ax * bx + ay * by + az * bz, -1, 1))
+	local wa, wb = 1 - t, t
+	if angle > 1e-3 and angle < 3.1 then
+		local s = math.sin(angle)
+		wa, wb = math.sin((1 - t) * angle) / s, math.sin(t * angle) / s
+	end
+	local x, y, z = ax * wa + bx * wb, ay * wa + by * wb, az * wa + bz * wb
+	local l = math.sqrt(x * x + y * y + z * z)
+	if l < 1e-6 then x, y, z, l = bx, by, bz, 1 end
+	out[1], out[2], out[3] = x / l, y / l, z / l
+	return out
+end
+
+-- Carrying the board: this far from relaxed towards the grip.
+local CARRY = 0.4
+
+-- Degrees per finger joint, base to tip: relaxed, gripping the board, and
+-- carrying it (fingers mostly straight, tips hooked over the deck, thumb
+-- curled over). Only used before the setup has made Skate 3's own hands.
 local CURL = {
 	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 }, carry = { 20, 30, 22 } },
 	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 }, carry = { 30, 45, 35 } },
@@ -730,8 +775,69 @@ local function Hands(info, world, pose)
 				if shape then hand.gestureShape, hand.gestureAim = shape, aim end
 				hand.gesture = Lerp(1 - math.exp(-(shape and 25 or 12) * dt), hand.gesture or 0, shape and 1 or 0)
 				if hand.gesture < 0.01 and not shape then hand.gesture, hand.gestureShape, hand.gestureAim = 0, nil, nil end
+				-- Where every finger bone points this frame, in the hand's
+				-- frame: Skate 3's own hands (open in a bail, relaxed,
+				-- gripping), the board carried, then any gesture over it.
+				local everyday = hand.point and EverydayHands(side)
+				if everyday then
+					local target, tmp = hand.target or {}, hand.carryAim or { 0, 0, 0 }
+					hand.target, hand.carryAim = target, tmp
+					local now, carry, g = hand.now, hand.carry or 0, hand.gesture
+					for f = 0, 4 do
+						local tf = target[f] or {}
+						target[f] = tf
+						local relaxed, grip, open = everyday.relaxed[f + 1], everyday.grip[f + 1], everyday.open[f + 1]
+						local ga = g > 0 and hand.gestureAim and hand.gestureAim[f]
+						for j = 1, 3 do
+							local out = tf[j] or { 0, 0, 0 }
+							tf[j] = out
+							if now <= 1 then
+								Slerp(open[j], relaxed[j], math.Clamp(now, 0, 1), out)
+							else
+								Slerp(relaxed[j], grip[j], math.min(now - 1, 1), out)
+							end
+							if carry > 0.001 then Slerp(out, Slerp(relaxed[j], grip[j], CARRY, tmp), carry, out) end
+							if ga and ga[j] then Slerp(out, ga[j], g, out) end
+						end
+					end
+				else
+					hand.target = nil
+				end
 			end
-			if scale ~= 0 then
+			if hand.target and scale > 0 and hand.axesOfHand then
+				-- Every finger bone pointed where Skate 3's points, in this
+				-- model's own hand frame (whatever angle its fingers rest at).
+				-- skate3_finger_curl below 1 points them only part of the way.
+				local turn = Turn(hm)
+				local hx, hy, hz = turn * hand.axesOfHand[1], turn * hand.axesOfHand[2], turn * hand.axesOfHand[3]
+				hx:Normalize() hy:Normalize() hz:Normalize()
+				local weight = math.min(scale, 1)
+				for f, chain in pairs(hand.fingers) do
+					local tf, point = hand.target[f], hand.point[f]
+					if tf and point then
+						for j, i in ipairs(chain) do
+							local t, a = tf[j] or tf[3], point[j]
+							if t and a and world[i] then
+								local want = Vector(hx.x * t[1] + hy.x * t[2] + hz.x * t[3],
+									hx.y * t[1] + hy.y * t[2] + hz.y * t[3], hx.z * t[1] + hy.z * t[2] + hz.z * t[3])
+								want:Normalize()
+								local at = world[i]:GetTranslation()
+								local now = world[i] * a - at
+								now:Normalize()
+								local axis = now:Cross(want)
+								local s = axis:Length()
+								if s > 1e-4 then
+									axis:Mul(1 / s)
+									local r = About(AxisAngle(axis, math.atan2(s, now:Dot(want)) * weight), at)
+									for _, k in ipairs(info.below(i)) do
+										if world[k] then world[k] = r * world[k] end
+									end
+								end
+							end
+						end
+					end
+				end
+			elseif scale ~= 0 then
 				local turn = Turn(hm)
 				-- The hand's frame now, for aiming gesture fingers.
 				local aims = hand.gestureAim and hand.gesture > 0 and hand.axesOfHand and hand.gestureAim

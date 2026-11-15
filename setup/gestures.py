@@ -23,10 +23,17 @@ pose, which the clips don't carry: it comes from the Create-a-Skater arm
 model (cas_db/Arm/*.rx2), whose bones the clips' rotations turn (a clip's
 rotation is applied after the bone's bind rotation).
 
+The same aims also give the everyday hands (version 3), so riding,
+grabbing and bailing hands match the gestures' on every playermodel:
+relaxed is the hands every preview starts from (averaged), grip is the
+Fists Up fist (grabs, punches, swinging the board) and open is the
+Airplane's flat hand (flailing in a bail).
+
     assets/gestures/hands.json
-    {"version": 2, "gestures": {"<id>": {"R": [[t1, t2, t3], [i1, i2, i3],
+    {"version": 3, "gestures": {"<id>": {"R": [[t1, t2, t3], [i1, i2, i3],
         [m...], [r...], [p...]], "L": [...],
-        "aimR": [[[x, y, z] x3 joints] x5 fingers], "aimL": [...]}}}
+        "aimR": [[[x, y, z] x3 joints] x5 fingers], "aimL": [...]}},
+     "poses": {"relaxed" | "grip" | "open": {"aimR": [...], "aimL": [...]}}}
 
 ids are cl_gestures.lua's (the gesture catalog's B_GSTR_* names). Nothing
 here is distributed: it is made on the player's machine like the rest.
@@ -53,7 +60,9 @@ FINGERS = ('THUMB', 'INDEX', 'MIDDLE', 'RING', 'PINKY')
 # Ring and pinky hang off a palm bone each.
 PALM_BONES = {'RING': 'INHANDRING', 'PINKY': 'INHANDPINKY'}
 SIDES = (('R', 'RIGHT'), ('L', 'LEFT'))
-VERSION = 2
+VERSION = 3
+# The everyday hands: which gesture's held hands make the grip and the open hand.
+POSE_FROM = {'grip': 'fists', 'open': 'airplane'}
 # Total degrees, over all 30 finger joints: a frame this close to the last
 # one is the hands keeping still, and a held shape is this far from relaxed.
 STEP = 12.0
@@ -273,7 +282,8 @@ def held_shape(track, relaxed, pointing=None):
 
 
 def build(engine, anim):
-    """{id: shape} for every gesture whose preview clip is there."""
+    """({id: shape} for every gesture whose preview clip is there, {id:
+    frames()'s aims per frame})."""
     A = decoder(engine)
     try:
         bind = arm_bind(engine, anim)
@@ -288,9 +298,29 @@ def build(engine, anim):
                 tracks[gid], pointing[gid] = frames(A, path, bind)
                 break
     if not tracks:
-        return {}
+        return {}, {}
     relaxed = relaxed_hands(list(tracks.values()))
-    return {gid: held_shape(t, relaxed, pointing[gid]) for gid, t in tracks.items()}
+    return {gid: held_shape(t, relaxed, pointing[gid]) for gid, t in tracks.items()}, pointing
+
+
+def mean_aims(frames):
+    """Per side, finger and joint, the average of several frames' aims."""
+    return [[[[round(x, 3) for x in unit(tuple(sum(fr[s][f][j][k] for fr in frames) for k in range(3)))]
+              for j in range(3)] for f in range(5)] for s in range(len(SIDES))]
+
+
+def everyday_poses(shapes, pointing):
+    """{'relaxed' | 'grip' | 'open': {'aimR': ..., 'aimL': ...}} from the
+    gestures (see the top), or {} without aims."""
+    firsts = [p[0] for p in pointing.values() if p and p[0]]
+    if not firsts:
+        return {}
+    poses = {'relaxed': {'aim' + key: side for (key, _), side in zip(SIDES, mean_aims(firsts))}}
+    for name, gid in POSE_FROM.items():
+        shape = shapes.get(gid, {})
+        if 'aimR' in shape and 'aimL' in shape:
+            poses[name] = {'aimR': shape['aimR'], 'aimL': shape['aimL']}
+    return poses if len(poses) == 1 + len(POSE_FROM) else {}
 
 
 def export(engine, anim, out, report):
@@ -300,11 +330,15 @@ def export(engine, anim, out, report):
     if not (Path(anim) / 'gesture').is_dir():
         report("This copy of the game has no gesture previews, so gestures keep relaxed hands.")
         return False
-    shapes = build(engine, anim)
+    shapes, pointing = build(engine, anim)
     if not shapes:
         report("Couldn't find the gesture previews, so gestures keep relaxed hands.")
         return False
-    text = json.dumps({'version': VERSION, 'gestures': shapes}, sort_keys=True, separators=(',', ':'))
+    out_json = {'version': VERSION, 'gestures': shapes}
+    poses = everyday_poses(shapes, pointing)
+    if poses:
+        out_json['poses'] = poses
+    text = json.dumps(out_json, sort_keys=True, separators=(',', ':'))
     write_if_changed(Path(out) / 'hands.json', text.encode('utf-8'))
     aimed = sum(1 for s in shapes.values() if 'aimR' in s)
     report(f"Read the hand shapes of {len(shapes)} of Skate 3's {len(CLIPS)} gestures"

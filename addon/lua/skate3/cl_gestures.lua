@@ -124,17 +124,36 @@ end
 -- aimR / aimL: where each of those bones points in the hand's frame ({ to
 -- the knuckles, across them to the pinky, out of the palm }), which
 -- cl_skater_anim uses instead of the bends when it's there. Nil per gesture
--- until the setup has run; the hands stay relaxed then.
+-- until the setup has run; the hands stay relaxed then. Since version 3 it
+-- also has the everyday hands aimed the same way (G.HandPoses).
 local HANDS = "skate3/assets/gestures/hands.json"
-local shapes
+local shapes, poses
+local function LoadHands()
+	if shapes ~= nil then return end
+	local t = util.JSONToTable(file.Read(HANDS, "DATA") or "")
+	shapes = istable(t) and istable(t.gestures) and t.gestures or false
+	poses = istable(t) and istable(t.poses) and t.poses or false
+	if not shapes then print("[skate3] no gesture hand shapes yet (run the S3GM setup again); hands stay relaxed") end
+end
 function G.HandShape(index)
-	if shapes == nil then
-		local t = util.JSONToTable(file.Read(HANDS, "DATA") or "")
-		shapes = istable(t) and istable(t.gestures) and t.gestures or false
-		if not shapes then print("[skate3] no gesture hand shapes yet (run the S3GM setup again); hands stay relaxed") end
-	end
+	LoadHands()
 	local g = shapes and G.LIST[index]
 	return g and shapes[g[1]]
+end
+
+-- Skate 3's everyday hands for one side, aimed like the gestures':
+-- { relaxed = aims, grip = aims, open = aims }, each [finger 1-5][joint 1-3]
+-- = { x, y, z } in the hand's frame; nil before the setup has made them.
+function G.HandPoses(side)
+	LoadHands()
+	if not poses then return nil end
+	local out = {}
+	for _, name in ipairs({ "relaxed", "grip", "open" }) do
+		local p = istable(poses[name]) and poses[name]["aim" .. side]
+		if not istable(p) then return nil end
+		out[name] = p
+	end
+	return out
 end
 
 -- The module's copy. Kept across rides; sent again whenever a pick changes.
