@@ -141,19 +141,40 @@ function G.HandShape(index)
 	return g and shapes[g[1]]
 end
 
--- Skate 3's everyday hands for one side, aimed like the gestures':
--- { relaxed = aims, grip = aims, open = aims }, each [finger 1-5][joint 1-3]
--- = { x, y, z } in the hand's frame; nil before the setup has made them.
+-- Enx's own hands for riding, grabbing, carrying and bailing, posed in
+-- Blender on a playermodel and measured the same way (cl_hand_poses.lua):
+-- Skate 3's riding and grab animations carry no fingers at all.
+local OURS = include("skate3/cl_hand_poses.lua")
+
+-- The everyday hands for one side, aimed like the gestures': { relaxed =
+-- aims, grip = aims, open = aims, carry = aims or nil }, each [finger
+-- 1-5][joint 1-3] = { x, y, z } in the hand's frame. Enx's poses where there
+-- is one, else the setup's stand-ins from the gestures; nil without either.
 function G.HandPoses(side)
 	LoadHands()
-	if not poses then return nil end
 	local out = {}
 	for _, name in ipairs({ "relaxed", "grip", "open" }) do
-		local p = istable(poses[name]) and poses[name]["aim" .. side]
-		if not istable(p) then return nil end
-		out[name] = p
+		local p = poses and istable(poses[name]) and poses[name]["aim" .. side]
+		if istable(p) then out[name] = p end
 	end
+	if istable(OURS) then
+		out.relaxed = OURS.riding or out.relaxed
+		out.grip = OURS.grab or out.grip
+		out.open = OURS.bail or out.open
+		out.carry = OURS.carry
+	end
+	out.open = out.open or out.relaxed
+	if not (out.relaxed and out.grip) then return nil end
 	return out
+end
+
+-- How far Enx turned the wrist from where the game holds it, for carrying
+-- the board ("carry") or grabbing it ("grab"): { x, y, z, radians }, an axis
+-- in the hand frame { to the knuckles, the second axis, knuckles x (index ->
+-- pinky) }, or nil when there's no such fix.
+function G.WristTurn(name, side)
+	local w = istable(OURS) and istable(OURS.wrist) and istable(OURS.wrist[name]) and OURS.wrist[name][side]
+	if istable(w) and isnumber(w[1]) and isnumber(w[2]) and isnumber(w[3]) and isnumber(w[4]) then return w end
 end
 
 -- The module's copy. Kept across rides; sent again whenever a pick changes.
