@@ -18,6 +18,59 @@ local cv_score = CreateClientConVar("skate3_score_hud", "1", true, false, "Show 
 -- Retired: the look is skate3_ui_style now (with skate3_ui_world for where).
 CreateClientConVar("skate3_score_style", "world", true, false, "Old setting, no longer used")
 
+-- Skate 2's landing thump: on a hard landing the whole score block drops and
+-- springs back. Measured off retail Skate 2 at 60 fps (RPCS3, 720p): it slides
+-- straight down 9.86 px a frame for 5 frames (49.3 px, 6.8% of the screen's
+-- height), holds a frame, then eases home losing a third of what's left every
+-- frame (x0.675 a frame, gone in about 0.2 s). No sideways motion, no scale,
+-- no overshoot. Every thump in the clip was the same size, big drop or small;
+-- a 360 flip on flat ground got none, so it's a threshold, not a scale.
+-- skate3_ui_thump: 0 off, 1 Skate 2's (same size every time), 2 sized by the hit.
+local cv_thump = CreateClientConVar("skate3_ui_thump", "1", true, false,
+	"Skate 2's score thump on hard landings (0 off, 1 Skate 2's: same size every time, 2 bigger for bigger hits)")
+local cv_thump_min = CreateClientConVar("skate3_ui_thump_min", "4.5", true, false,
+	"How fast (m/s, falling) a landing must hit to thump the score")
+local THUMP_DROP, THUMP_FRAMES, THUMP_HOLD, THUMP_KEEP = 49.3, 5, 1, 0.675
+local THUMP_UNITS = 39.37 -- map units per metre
+local thumpAt, thumpSize, thumpVz, thumpLast = -math.huge, 1, 0, nil
+
+-- How far down (canvas pixels, 720 high) the score is this frame.
+function Score.Thump(now)
+	local f = ((now or RealTime()) - thumpAt) * 60
+	if f < 0 then return 0 end
+	local d
+	if f <= THUMP_FRAMES then
+		d = THUMP_DROP * f / THUMP_FRAMES
+	elseif f <= THUMP_FRAMES + THUMP_HOLD then
+		d = THUMP_DROP
+	else
+		d = THUMP_DROP * THUMP_KEEP ^ (f - THUMP_FRAMES - THUMP_HOLD)
+		if d < 0.05 then return 0 end
+	end
+	return d * thumpSize
+end
+
+-- Watches for the landing: the last frame in the air says how fast the skater
+-- was falling. A bail straight off the jump isn't a landing.
+local function WatchLanding(pose, now)
+	local state = pose.state or ""
+	local kind = state:find("^Grind") and "grind" or state:find("^Wipeout") and "bail"
+		or (state:find("^Biped") or state == "OffBoardPushing") and "foot"
+		or state:find("Air") and "air" or "ground"
+	if kind == "air" then
+		local v = pose.velocity
+		thumpVz = v and -v[3] / THUMP_UNITS or 0
+	elseif kind == "ground" and thumpLast == "air" and cv_thump:GetInt() > 0 then
+		local min = cv_thump_min:GetFloat()
+		if thumpVz >= min then
+			thumpAt = now
+			-- Sized by the hit: two thirds at the line, full at 1.5x it, 1.4x at most.
+			thumpSize = cv_thump:GetInt() == 2 and math.Clamp(thumpVz / (min * 1.5), 0.66, 1.4) or 1
+		end
+	end
+	thumpLast = kind
+end
+
 -- How long a finished line stays on screen, and how long it fades.
 local HOLD = 2.5
 local FADE = 0.5
@@ -270,6 +323,7 @@ local function Update(pose)
 	local sc = pose.score
 	local now = RealTime()
 	local bailing = pose.state and pose.state:find("^Wipeout") ~= nil
+	WatchLanding(pose, now)
 	if Meat.Enabled() then
 		view = MeatView(now)
 		if view then
@@ -471,13 +525,16 @@ function Score.Draw(pose)
 	end
 	if style == "skate3" then
 		-- On screen the score sits bottom left; in the world it's drawn by DrawWorld.
-		UI.BeginBottomLeft()
+		local sc = UI.BeginBottomLeft()
+		local drop = view and not view.meat and Score.Thump(view.now) or 0
+		if drop > 0 then UI.Begin(0, ScrH() - 720 * sc + drop * sc, sc) end
 		if view and not menu and not UI.World() then Skate3.Draw(view) end
 		local text, alpha = UI.CurrentToast()
 		if text then Skate3.Toast(text, alpha) end
 	else
 		local s = ScrH() / 1080
 		local cx, cy = 150 * s, ScrH() - 150 * s
+		if view and not view.meat then cy = cy + Score.Thump(view.now) * ScrH() / 720 end
 		if view and not menu and not UI.World() then Minimal(view, cx, cy, s) end
 		MinimalToast(cx - 34 * s, cy - 56 * s, s)
 	end
@@ -498,7 +555,7 @@ function Score.DrawWorld(pos)
 	if UI.Style() == "skate3" then
 		-- The disc's centre at the plane's origin.
 		cam.Start3D2D(pos + worldOffset, Angle(0, yaw - 90, 90), 0.1)
-		UI.Begin(-164, -604, 1, true)
+		UI.Begin(-164, -604 + (view.meat and 0 or Score.Thump(view.now)), 1, true)
 		Skate3.Draw(view)
 	else
 		local s = ScrH() / 1080
@@ -515,6 +572,7 @@ function Score.Reset()
 	tricks, trickAt, lastLabel, lastSeq, wasLive = {}, {}, "", 0, false
 	scoreAt, multAt, lastMult, tierAt = -math.huge, -math.huge, 1, -math.huge
 	readouts, airFrom, manualLast = {}, nil, nil
+	thumpAt, thumpSize, thumpVz, thumpLast = -math.huge, 1, 0, nil
 end
 
 return Score
