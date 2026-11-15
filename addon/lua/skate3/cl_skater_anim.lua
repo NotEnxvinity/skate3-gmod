@@ -660,8 +660,16 @@ local function Hands(info, world, pose)
 							deg = Lerp(hand.carry or 0, deg, set.carry[j] or 0)
 							local g = hand.gestureShape and hand.gestureShape[f]
 							if g and g[j] then
-								local already = hand.restBend and hand.restBend[f] and hand.restBend[f][j] or 0
-								deg = Lerp(hand.gesture, deg, g[j] - already)
+								local want, already = g[j], hand.restBend and hand.restBend[f] and hand.restBend[f][j] or 0
+								if f == 0 and j == 1 then
+									-- The thumb's root sits at a different angle on every
+									-- model (along the palm, out to the side, under it), so
+									-- its rest bend says little: taking it off swung thumbs
+									-- into the fist or out sideways. It only leans the
+									-- retail way a little, from where the model has it.
+									want, already = want * 0.5, 0
+								end
+								deg = Lerp(hand.gesture, deg, want - already)
 							end
 							if world[i] and deg ~= 0 then
 								local r = AxisAngle(axis, math.rad(deg * scale))
