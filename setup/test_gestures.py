@@ -38,6 +38,18 @@ class GestureTest(unittest.TestCase):
         self.assertEqual(set(shape), {'R', 'L'})
         self.assertEqual(shape['R'][1], [-5.0, -5.0, -5.0])
 
+    def test_a_frame_without_the_bind_pose_has_no_aim(self):
+        track = [hands(20)] * 3 + [hands(80)] * 6
+        shape = gestures.held_shape(track, hands(20), [None] * len(track))
+        self.assertNotIn('aimR', shape)
+
+    def test_aims_are_averaged_over_the_held_frames(self):
+        track = [hands(20)] * 3 + [hands(80)] * 6
+        up = [[[(0.0, 0.0, 1.0)] * 3] * 5] * 2
+        ahead = [[[(1.0, 0.0, 0.0)] * 3] * 5] * 2
+        shape = gestures.held_shape(track, hands(20), [ahead] * 3 + [up] * 6)
+        self.assertEqual(shape['aimL'][2][1], [0.0, 0.0, 1.0])
+
     def test_shapes_are_clamped(self):
         shape = gestures.held_shape([hands(20), hands(170), hands(170)], hands(20))
         self.assertEqual(shape['L'][0], [120.0, 120.0, 120.0])
@@ -51,6 +63,20 @@ class GestureTest(unittest.TestCase):
         thumb, index, middle, ring, pinky = shapes['peace']['R']
         self.assertLess(max(index + middle), 20)
         self.assertGreater(min(ring + pinky), 45)
+        # Where the bones point, in the hand's frame (x to the knuckles, y
+        # across them to the pinky, z out of the palm): a peace sign's index
+        # and middle point ahead, ring and pinky dive into the palm.
+        thumb, index, middle, ring, pinky = shapes['peace']['aimR']
+        self.assertGreater(min(index[0][0], middle[0][0], middle[2][0]), 0.8)
+        self.assertGreater(min(ring[0][2], pinky[0][2]), 0.8)
+        # Thumbs up: the thumb sticks out on the index side over a fist.
+        thumb, index = shapes['fonz_eh']['aimR'][:2]
+        self.assertLess(max(j[1] for j in thumb), -0.7)
+        self.assertLess(index[1][0], -0.8)
+        for side in ('aimR', 'aimL'):
+            for finger in shapes['shaka'][side]:
+                for x, y, z in finger:
+                    self.assertAlmostEqual(x * x + y * y + z * z, 1, places=2)
 
 
 if __name__ == '__main__':
