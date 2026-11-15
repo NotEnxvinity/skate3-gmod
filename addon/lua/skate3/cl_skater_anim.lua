@@ -786,9 +786,9 @@ local function Hands(info, world, pose)
 								local s = turnAxis:Length()
 								if s > 1e-4 then
 									turnAxis:Mul(1 / s)
-									local r = AxisAngle(turnAxis, math.atan2(s, now:Dot(want)) * hand.gesture)
+									local r = About(AxisAngle(turnAxis, math.atan2(s, now:Dot(want)) * hand.gesture), at)
 									for _, k in ipairs(info.below(i)) do
-										if world[k] then world[k] = TurnAbout(world[k], r, at) end
+										if world[k] then world[k] = r * world[k] end
 									end
 								end
 							end
