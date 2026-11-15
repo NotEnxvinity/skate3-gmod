@@ -120,8 +120,11 @@ end
 
 -- Hand shapes, made by the setup from the disc (setup/gestures.py): per
 -- gesture id, { R = { thumb, index, middle, ring, pinky }, L = ... }, each
--- finger { j1, j2, j3 } in degrees towards the palm. Nil per gesture until
--- the setup has run; the hands stay relaxed then.
+-- finger { j1, j2, j3 } in degrees towards the palm, and since version 2
+-- aimR / aimL: where each of those bones points in the hand's frame ({ to
+-- the knuckles, across them to the pinky, out of the palm }), which
+-- cl_skater_anim uses instead of the bends when it's there. Nil per gesture
+-- until the setup has run; the hands stay relaxed then.
 local HANDS = "skate3/assets/gestures/hands.json"
 local shapes
 function G.HandShape(index)

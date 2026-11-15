@@ -145,7 +145,9 @@ local function FindHand(ent, rest, side)
 		end
 		if #chain >= 2 then fingers[f] = chain end
 	end
-	local base1, base4 = fingers[1] or fingers[2], fingers[4] or fingers[3]
+	-- Some models share one chain between fingers (the Daedric armour has
+	-- a thumb, an index and one for the other three).
+	local base1, base4 = fingers[1] or fingers[2], fingers[4] or fingers[3] or fingers[2]
 	if not (base1 and base4) or base1 == base4 then return nil, "no finger bones" end
 	local handPos = Pos(rest, hand)
 	local knuckles, n = Vector(0, 0, 0), 0
@@ -201,8 +203,29 @@ local function FindHand(ent, rest, side)
 		b[#c] = b[#c - 1] or 0
 		restBend[f] = b
 	end
+	-- For aiming gesture fingers: the hand's frame (towards the knuckles,
+	-- across them from index to pinky, out of the palm) in the hand bone's
+	-- own frame, and which way each finger bone points in its own frame.
+	-- A bone points at the next joint; the last one has no next joint, so
+	-- it points along the same axis of its own frame as the bone before it
+	-- (finger bones share their axes), unless that would bend it sharply
+	-- from its parent in the rest pose, when it carries straight on.
+	local frame = { toHand * forward, toHand * across, toHand * palm }
+	local point = {}
+	for f, c in pairs(fingers) do
+		local p, last = {}, nil
+		for j = 1, #c - 1 do
+			last = (Pos(rest, c[j + 1]) - Pos(rest, c[j])):GetNormalized()
+			p[j] = Turn(rest[c[j]]):GetInverse() * last
+		end
+		local tip = c[#c]
+		local same = Turn(rest[tip]) * p[#c - 1]
+		same:Normalize()
+		p[#c] = same:Dot(last) > 0.25 and Vector(p[#c - 1]) or Turn(rest[tip]):GetInverse() * last
+		point[f] = p
+	end
 	return { hand = hand, fingers = fingers, axes = axes, vote = vote, restBend = restBend,
-		curl = { 0, 0 }, wanted = 0 }
+		axesOfHand = frame, point = point, curl = { 0, 0 }, wanted = 0 }
 end
 
 -- One leg's chain and how high its ankle sits off the floor, for matching
@@ -621,18 +644,43 @@ end
 -- own, read by the setup from the disc's Create-a-Skater gesture previews
 -- (the gameplay skeleton has no fingers). { [finger 0-4] = { j1, j2, j3 } } in
 -- degrees towards the palm, or nil.
+-- A gesture's hand shape for one side: bends per finger and joint and,
+-- when the setup could read them, where each finger bone points in the
+-- hand's frame. Made once per gesture and side.
+local shapeCache = {}
 local function GestureFingers(pose, side)
+	local key = pose.gesture * 2 + (side == "R" and 0 or 1)
+	local cached = shapeCache[key]
+	if cached ~= nil then return cached and cached[1], cached and cached[2] end
 	local Gestures = S3GM_Gestures
 	local shape = Gestures and Gestures.HandShape and Gestures.HandShape(pose.gesture + 1)
 	local hand = shape and shape[side]
-	if not hand then return nil end
+	if not hand then
+		-- No hand shapes yet: don't keep asking (HandShape caches its file).
+		if Gestures and Gestures.HandShape then shapeCache[key] = false end
+		return nil
+	end
 	local out = {}
 	for f = 0, 4 do
 		local j = hand[f + 1]
 		-- Retail's "straight" bends a little backwards; keep that small.
 		if j then out[f] = { math.max(j[1], -15), math.max(j[2], -15), math.max(j[3], -15) } end
 	end
-	return out
+	local aim, ok = {}, istable(shape["aim" .. side])
+	for f = 0, 4 do
+		local joints = ok and shape["aim" .. side][f + 1]
+		if istable(joints) then
+			aim[f] = {}
+			for j, v in ipairs(joints) do
+				if istable(v) and isnumber(v[1]) and isnumber(v[2]) and isnumber(v[3]) then
+					aim[f][j] = { v[1], v[2], v[3] }
+				end
+			end
+		end
+	end
+	if not next(aim) then aim = nil end
+	shapeCache[key] = { out, aim }
+	return out, aim
 end
 
 local CURL = {
@@ -677,15 +725,28 @@ local function Hands(info, world, pose)
 				-- The gesture's fingers: copied while it plays, then eased
 				-- back into our own hand shapes from where it left them.
 				local mine = gesturing and (gesturing == 0 or gesturing == (side == "R" and 1 or 2))
-				local shape = mine and GestureFingers(pose, side)
-				if shape then hand.gestureShape = shape end
+				local shape, aim
+				if mine then shape, aim = GestureFingers(pose, side) end
+				if shape then hand.gestureShape, hand.gestureAim = shape, aim end
 				hand.gesture = Lerp(1 - math.exp(-(shape and 25 or 12) * dt), hand.gesture or 0, shape and 1 or 0)
-				if hand.gesture < 0.01 and not shape then hand.gesture, hand.gestureShape = 0, nil end
+				if hand.gesture < 0.01 and not shape then hand.gesture, hand.gestureShape, hand.gestureAim = 0, nil, nil end
 			end
 			if scale ~= 0 then
 				local turn = Turn(hm)
+				-- The hand's frame now, for aiming gesture fingers.
+				local aims = hand.gestureAim and hand.gesture > 0 and hand.axesOfHand and hand.gestureAim
+				local hx, hy, hz
+				if aims then
+					hx, hy, hz = turn * hand.axesOfHand[1], turn * hand.axesOfHand[2], turn * hand.axesOfHand[3]
+					hx:Normalize() hy:Normalize() hz:Normalize()
+				end
 				for f, chain in pairs(hand.fingers) do
 					local axis = hand.axes[f] and turn * hand.axes[f]
+					-- Pointing each bone where Skate 3's does, in this
+					-- model's own hand frame: the same whatever angle the
+					-- model's fingers rest at. Our own curl goes on first
+					-- and the aim eases in over it.
+					local aim = aims and aims[f] and hand.point[f]
 					if axis then
 						local set = f == 0 and CURL.thumb or CURL.finger
 						for j, i in ipairs(chain) do
@@ -693,7 +754,7 @@ local function Hands(info, world, pose)
 							local deg = hand.now <= 1 and relaxed * hand.now
 								or Lerp(hand.now - 1, relaxed, grip)
 							deg = Lerp(hand.carry or 0, deg, set.carry[j] or 0)
-							local g = hand.gestureShape and hand.gestureShape[f]
+							local g = not aim and hand.gestureShape and hand.gestureShape[f]
 							if g and g[j] then
 								local want, already = g[j], hand.restBend and hand.restBend[f] and hand.restBend[f][j] or 0
 								if f == 0 and j == 1 then
@@ -711,6 +772,24 @@ local function Hands(info, world, pose)
 								local t = About(r, world[i]:GetTranslation())
 								for _, k in ipairs(info.below(i)) do
 									if world[k] then world[k] = t * world[k] end
+								end
+							end
+							local a = aim and aims[f][j] and aim[j]
+							if a and world[i] then
+								local t = aims[f][j]
+								local want = hx * t[1] + hy * t[2] + hz * t[3]
+								want:Normalize()
+								local at = world[i]:GetTranslation()
+								local now = world[i] * a - at
+								now:Normalize()
+								local turnAxis = now:Cross(want)
+								local s = turnAxis:Length()
+								if s > 1e-4 then
+									turnAxis:Mul(1 / s)
+									local r = AxisAngle(turnAxis, math.atan2(s, now:Dot(want)) * hand.gesture)
+									for _, k in ipairs(info.below(i)) do
+										if world[k] then world[k] = TurnAbout(world[k], r, at) end
+									end
 								end
 							end
 						end
