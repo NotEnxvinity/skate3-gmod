@@ -32,17 +32,17 @@ Prefer to watch it? There's a video walkthrough of the install: https://youtu.be
    on the Steam Workshop. That's the Lua
    addon; the Workshop can't carry the native skate engine, so that comes from
    the setup app (the way [G64](https://github.com/ckosmic/g64) does it).
-2. Download **skate3-gmod-setup-Windows.zip** or **skate3-gmod-setup-Linux.zip**
-   from the [latest release](https://github.com/NotEnxvinity/skate3-gmod/releases/latest)
-   and unzip it.
-3. Run `skate3-gmod-setup` and pick your Skate 3 (Xbox 360) disc image
-   (`.iso`), or `default.xex` in an extracted copy. It finds Garry's Mod,
-   installs the skate module into `garrysmod/lua/bin`, converts what the mod
-   needs from your disc into `garrysmod/data/skate3`, and decodes the disc's
-   skate sounds (with [vgmstream](https://github.com/vgmstream/vgmstream))
-   into `garrysmod/sound/skate3`. Run the new release's setup after each
-   update. Without a window:
-   `skate3-gmod-setup --game <iso or default.xex> [--gmod <garrysmod folder>]`.
+2. Download the **S3GM-vX.Y.Z.zip** for your computer (Windows/Linux, or the
+   Mac one) from the [latest release](https://github.com/NotEnxvinity/skate3-gmod/releases/latest)
+   and extract it. You get one folder, `S3GM-setup`.
+3. In it, run the setup for your computer: `S3GM-setup-Windows.bat`,
+   `S3GM-setup-Linux.sh` or `S3GM-setup-Mac.command`, and pick your Skate 3
+   (Xbox 360) disc image (`.iso`), or `default.xex` in an extracted copy. It
+   finds Garry's Mod, installs the skate module into `garrysmod/lua/bin`,
+   converts what the mod needs from your disc into `garrysmod/data/skate3`,
+   and decodes the disc's skate sounds (with
+   [vgmstream](https://github.com/vgmstream/vgmstream)) into
+   `garrysmod/sound/skate3`. Run the new release's setup after each update.
 4. Use 64-bit Garry's Mod: Steam → Garry's Mod → Properties → Betas →
    **x86-64**. Native Linux loads the `linux64` module, Proton the `win64` one.
 5. Plug in a controller, load a map, and equip the **Skateboard** (spawn menu →
