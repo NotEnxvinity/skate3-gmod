@@ -18,8 +18,9 @@ return {
 	},
 	-- How far Enx turned the wrist from where the game had it, holding the
 	-- board: per side, an axis in the hand frame { to the knuckles, the
-	-- second axis, knuckles x (index -> pinky) } and an angle in radians.
+	-- second axis, knuckles x (index -> pinky) } and an angle in radians,
+	-- then how far the hand moved in that frame, in hand lengths.
 	wrist = {
-		carry = { R = { 0.9699, 0.2397, 0.0439, 0.6279 }, L = { -0.9699, -0.2397, 0.0439, 0.6279 } }, -- 36.0 degrees
+		carry = { R = { 0.9699, 0.2397, 0.0439, 0.6279, 0, 0, -0 }, L = { -0.9699, -0.2397, 0.0439, 0.6279, 0, 0, 0 } }, -- 36.0 degrees
 	},
 }
