@@ -91,7 +91,7 @@ posed from the skater's skeleton. Other players see you skate: your game sends
 your pose and they draw a posed copy of your playermodel with the board
 (`skate3_others_body real` poses their real body instead, and
 `skate3_debug_others 1` shows what arrives from each skater). Multiplayer fix
-by undead_corporation.
+by undead_corporation ([@tummypics](https://github.com/tummypics)).
 
 Other players are solid. Every skater's simulation runs on their own computer,
 so each game checks its skater against the others and bails it when it runs
@@ -129,10 +129,32 @@ Without `--assets` it only builds the test park and prints the rails it found.
   this mod stays free. It always will be.
 - Headless host, collision handoff and rail finder: [chasmlol/2010-rust-rewrite-mashup](https://github.com/chasmlol/2010-rust-rewrite-mashup)
   (Apache-2.0, text in [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt)). See [NOTICE](NOTICE).
+- Skate 3's sound engine: [becaring/SK8V](https://github.com/becaring/SK8V) (Apache-2.0), the GTA V mod whose
+  port of the game's audio runtime this mod's retail sound engine is built on. See [NOTICE](NOTICE).
 - Module architecture: inspired by [ckosmic/g64](https://github.com/ckosmic/g64). No code taken.
 - Sound bank research: [doriangironde/skate-3-rust-macos](https://github.com/doriangironde/skate-3-rust-macos)
   and Hailey-Ross's audio work on SK8-ENGINE. Sounds are decoded on your machine by
   [vgmstream](https://github.com/vgmstream/vgmstream).
+
+## Testers and contributors
+
+The Discord Contributor role: people who tested builds and gave the feedback and
+ideas that shaped this mod. Names are Discord display names, with the username in brackets.
+
+- a microwave (olda9991._77573)
+- bibi (.cheenis.)
+- Delamain (0528mari)
+- gumballegal
+- hitmann (thedeadmemelord)
+- IHATEREAL!TY (ihatereal1ty)
+- LittleGusty (gust4v1tz)
+- Misanthropic (bmtr)
+- ms. game & watch (aybigdog)
+- undead_corporation ([@tummypics](https://github.com/tummypics) on GitHub)
+- yuki (yukisxl)
+
+undead_corporation also fixed multiplayer (other riders drawn as a posed copy of their model),
+and gumballegal tested maps.
 
 ## License
 
