@@ -23,6 +23,11 @@ FROZEN = getattr(sys, 'frozen', False)
 # The packaged app carries the engine's converters and the modules here.
 ROOT = Path(getattr(sys, '_MEIPASS', Path(__file__).resolve().parent))
 HERE = Path(__file__).resolve().parent
+# The folder the player opened: in the download this file sits in
+# S3GM-setup/setup-files, and only the launchers and README are above it.
+TOP = HERE.parent if HERE.name == 'setup-files' else HERE
+# No __pycache__ folders left behind in the download.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(HERE))
 
@@ -241,7 +246,7 @@ def launcher():
     """The script that fetches the converters and starts this, for this OS."""
     if os.name == 'nt':
         return 'S3GM-setup-Windows.bat'
-    return 'S3GM-setup-Mac.command' if sys.platform == 'darwin' else 'skate3-setup.sh'
+    return 'S3GM-setup-Mac.command' if sys.platform == 'darwin' else 'S3GM-setup-Linux.sh'
 
 
 def relaunch():
@@ -440,7 +445,7 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
             traceback.print_exc()
             report(f'Couldn\'t install the disc\'s Futura font ({error}); the text stays soft above 720p.')
         # The PlayStation button pictures, if a PS3 copy of the game is lying around.
-        ps3 = ui.find_ps3(HERE)
+        ps3 = ui.find_ps3(TOP)
         if ps3 is not None and (ui_folder / 'ui.json').is_file():
             try:
                 report(f'Found a PS3 copy of Skate 3 in {ps3}')
@@ -449,7 +454,7 @@ def install(selected, gmod, report, with_addon=True, audio_engine=False):
                 traceback.print_exc()
                 report(f'Couldn\'t read the PS3 copy\'s button art ({error}); the PlayStation buttons will be the mod\'s own drawn ones.')
         # An upscaled copy of the UI art, if one is lying around.
-        pack = ui.find_hd(HERE)
+        pack = ui.find_hd(TOP)
         if pack is not None:
             try:
                 report(f'Found the HD UI images in {pack}')
@@ -547,6 +552,10 @@ def window(gmod, game=None, web=False):
     import tkinter as tk
     from tkinter import filedialog, messagebox, ttk
     version = s3gm_version()
+    # Linux: this Tk can only draw the X server's own fonts, and after a
+    # SteamOS/KDE update those are just bitmap ones; lend it the desktop's.
+    import xfonts
+    xfonts.install()
     root = tk.Tk()
     try:
         # A Tk built without Xft only lists the X server's fonts; take a readable one if it has it.
@@ -554,17 +563,31 @@ def window(gmod, game=None, web=False):
         have = {name.lower(): name for name in tkfont.families(root)}
         for wanted in ('dejavu sans', 'noto sans', 'liberation sans', 'helvetica', 'arial'):
             if wanted in have:
-                for named in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont'):
-                    tkfont.nametofont(named).configure(family=have[wanted], size=11)
+                for named in ('TkDefaultFont', 'TkTextFont', 'TkMenuFont', 'TkHeadingFont', 'TkCaptionFont'):
+                    tkfont.nametofont(named).configure(family=have[wanted], size=10)
+                break
+        for wanted in ('dejavu sans mono', 'noto sans mono', 'liberation mono'):
+            if wanted in have:
+                tkfont.nametofont('TkFixedFont').configure(family=have[wanted], size=10)
                 break
     except Exception:
         pass
+    # How the window ended, for the launcher: 0 closes its terminal too, 1 (an
+    # install that stopped with an error) keeps it open with the log.
+    outcome = {'code': 0}
     root.title(f'S3GM {version} setup'.replace('  ', ' '))
     root.geometry('760x540')
     root.minsize(600, 440)
     frame = ttk.Frame(root, padding=20)
     frame.pack(fill='both', expand=True)
-    ttk.Label(frame, text=f'S3GM {version}'.strip(), font=('TkDefaultFont', 18, 'bold')).pack(anchor='w')
+    try:
+        # The heading in the window's own font (a plain 'TkDefaultFont' tuple would be a family of that name).
+        from tkinter import font as tkfont
+        heading = tkfont.nametofont('TkDefaultFont').copy()
+        heading.configure(size=18, weight='bold')
+    except Exception:
+        heading = ('TkDefaultFont', 18, 'bold')
+    ttk.Label(frame, text=f'S3GM {version}'.strip(), font=heading).pack(anchor='w')
     ttk.Label(frame, justify='left', wraplength=680, text=(
         'Check your Garry\'s Mod folder and your own Skate 3 (Xbox 360) disc image below, then press Install. '
         'Setup installs the S3GM addon and skate engine and converts what it needs from your disc. '
@@ -641,6 +664,29 @@ def window(gmod, game=None, web=False):
                 messages.put(('error', str(error)))
         threading.Thread(target=work, daemon=True).start()
 
+    def finished(text):
+        """The "All set" box: Finish closes the setup and its terminal window."""
+        box = tk.Toplevel(root)
+        box.title('S3GM setup')
+        box.transient(root)
+        box.resizable(False, False)
+        body = ttk.Frame(box, padding=20)
+        body.pack(fill='both', expand=True)
+        ttk.Label(body, text=text, justify='left', wraplength=460).pack(anchor='w')
+        buttons = ttk.Frame(body)
+        buttons.pack(fill='x', pady=(16, 0))
+        finish = ttk.Button(buttons, text='Finish', command=root.destroy)
+        finish.pack(side='right')
+        ttk.Button(buttons, text='Back to setup', command=box.destroy).pack(side='right', padx=(0, 8))
+        box.bind('<Return>', lambda _: root.destroy())
+        box.bind('<Escape>', lambda _: box.destroy())
+        box.update_idletasks()
+        x = root.winfo_rootx() + (root.winfo_width() - box.winfo_reqwidth()) // 2
+        y = root.winfo_rooty() + (root.winfo_height() - box.winfo_reqheight()) // 3
+        box.geometry(f'+{max(x, 0)}+{max(y, 0)}')
+        finish.focus_set()
+        box.grab_set()
+
     def poll():
         while not messages.empty():
             kind, text = messages.get()
@@ -654,11 +700,13 @@ def window(gmod, game=None, web=False):
                         # A step that was skipped must not hide in the log.
                         messagebox.showwarning('S3GM setup', 'Installed, but not everything worked:\n\n'
                                                + '\n\n'.join(text))
+                    outcome['code'] = 0
                     note = '\n\n' + WORKSHOP_NOTE if workshop_copy(target.get()) else ''
-                    messagebox.showinfo('S3GM setup', f'All set! S3GM {version} is installed.'.replace('  ', ' ') +
-                                        '\n\nStart Garry\'s Mod, load a map and equip the Skateboard '
-                                        '(spawn menu > Weapons > Skate 3).' + note)
+                    finished(f'All set! S3GM {version} is installed.'.replace('  ', ' ') +
+                             '\n\nStart Garry\'s Mod, load a map and equip the Skateboard '
+                             '(spawn menu > Weapons > Skate 3).' + note)
                 else:
+                    outcome['code'] = 1
                     say('ERROR: ' + text)
                     messagebox.showerror('S3GM setup', text)
         root.after(100, poll)
@@ -668,6 +716,7 @@ def window(gmod, game=None, web=False):
         say('Garry\'s Mod wasn\'t found automatically. Press Browse next to it to pick its garrysmod folder.')
     poll()
     root.mainloop()
+    return outcome['code']
 
 
 def main():
@@ -706,8 +755,7 @@ def main():
     else:
         gmod = find_gmod()
     if args.window or args.game is None:
-        window(gmod, args.game, args.web)
-        return 0
+        return window(gmod, args.game, args.web) or 0
     if gmod is None:
         print('error: Garry\'s Mod not found; pass --gmod <garrysmod folder>', file=sys.stderr)
         return 2

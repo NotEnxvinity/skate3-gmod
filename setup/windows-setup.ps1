@@ -53,6 +53,11 @@ $EngineZip = "https://github.com/SK8-ENGINE/skate-3-rust-engine/archive/$EngineR
 $VgmstreamZip = 'https://github.com/vgmstream/vgmstream-releases/releases/download/nightly/vgmstream-win64.zip'
 
 $here = $PSScriptRoot
+# The folder the player opened: the download keeps this script in
+# S3GM-setup\setup-files, with only the launcher and README above it.
+$top = $here
+if ((Split-Path $here -Leaf) -eq 'setup-files') { $top = Split-Path $here -Parent }
+$env:PYTHONDONTWRITEBYTECODE = '1'
 # The S3GM version this setup installs, shown in its windows.
 $version = ''
 try { $version = (Get-Content -LiteralPath (Join-Path $here 'VERSION') -Raw -ErrorAction Stop).Trim() } catch {}
@@ -122,8 +127,8 @@ for ($i = 0; $i -lt $args.Count; $i++) {
     else { $rest += $args[$i] }
 }
 if (-not $game) {
-    $parent = Split-Path $here -Parent
-    $beside = @(Get-ChildItem -LiteralPath $here, $parent -File -ErrorAction SilentlyContinue |
+    $parent = Split-Path $top -Parent
+    $beside = @(Get-ChildItem -LiteralPath $top, $parent -File -ErrorAction SilentlyContinue |
         Where-Object { $_.Extension -eq '.iso' -or $_.Name -eq 'default.xex' })
     # An extracted game in a folder of its own beside the setup.
     $beside += @(Get-ChildItem -LiteralPath $parent -Directory -ErrorAction SilentlyContinue |
