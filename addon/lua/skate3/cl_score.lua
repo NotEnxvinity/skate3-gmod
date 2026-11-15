@@ -24,15 +24,17 @@ CreateClientConVar("skate3_score_style", "world", true, false, "Old setting, no 
 -- height), holds a frame, then eases home losing a third of what's left every
 -- frame (x0.675 a frame, gone in about 0.2 s). No sideways motion, no scale,
 -- no overshoot. Every thump in the clip was the same size, big drop or small;
--- a 360 flip on flat ground got none, so it's a threshold, not a scale.
+-- the one flat-ground trick that got none was a weak pop (about 0.27 m: 0.47 s
+-- in the air), while good pops on flat thump too. So it's a threshold on how
+-- far the skater fell from the top of the jump, not a scale.
 -- skate3_ui_thump: 0 off, 1 Skate 2's (same size every time), 2 sized by the hit.
 local cv_thump = CreateClientConVar("skate3_ui_thump", "1", true, false,
 	"Skate 2's score thump on hard landings (0 off, 1 Skate 2's: same size every time, 2 bigger for bigger hits)")
-local cv_thump_min = CreateClientConVar("skate3_ui_thump_min", "4.5", true, false,
-	"How fast (m/s, falling) a landing must hit to thump the score")
+local cv_thump_min = CreateClientConVar("skate3_ui_thump_min", "0.4", true, false,
+	"How far (metres) the skater must fall from the top of the jump to the landing to thump the score")
 local THUMP_DROP, THUMP_FRAMES, THUMP_HOLD, THUMP_KEEP = 49.3, 5, 1, 0.675
 local THUMP_UNITS = 39.37 -- map units per metre
-local thumpAt, thumpSize, thumpVz, thumpLast = -math.huge, 1, 0, nil
+local thumpAt, thumpSize, thumpTop, thumpLast = -math.huge, 1, nil, nil
 
 -- How far down (canvas pixels, 720 high) the score is this frame.
 function Score.Thump(now)
@@ -50,23 +52,27 @@ function Score.Thump(now)
 	return d * thumpSize
 end
 
--- Watches for the landing: the last frame in the air says how fast the skater
--- was falling. A bail straight off the jump isn't a landing.
+-- Watches the jump: its highest point, and how far below that the board lands.
+-- A high pop on flat ground or a drop off something both count. A bail
+-- straight off the jump isn't a landing.
 local function WatchLanding(pose, now)
 	local state = pose.state or ""
 	local kind = state:find("^Grind") and "grind" or state:find("^Wipeout") and "bail"
 		or (state:find("^Biped") or state == "OffBoardPushing") and "foot"
 		or state:find("Air") and "air" or "ground"
+	local z = pose.pos and pose.pos[3]
 	if kind == "air" then
-		local v = pose.velocity
-		thumpVz = v and -v[3] / THUMP_UNITS or 0
-	elseif kind == "ground" and thumpLast == "air" and cv_thump:GetInt() > 0 then
-		local min = cv_thump_min:GetFloat()
-		if thumpVz >= min then
-			thumpAt = now
-			-- Sized by the hit: two thirds at the line, full at 1.5x it, 1.4x at most.
-			thumpSize = cv_thump:GetInt() == 2 and math.Clamp(thumpVz / (min * 1.5), 0.66, 1.4) or 1
+		if z and (not thumpTop or z > thumpTop) then thumpTop = z end
+	else
+		if kind == "ground" and thumpLast == "air" and thumpTop and z and cv_thump:GetInt() > 0 then
+			local fall, min = (thumpTop - z) / THUMP_UNITS, math.max(cv_thump_min:GetFloat(), 0.01)
+			if fall >= min then
+				thumpAt = now
+				-- Sized by the fall: two thirds at the line, full at twice it, 1.4x at most.
+				thumpSize = cv_thump:GetInt() == 2 and math.Clamp(0.66 + 0.34 * (fall - min) / min, 0.66, 1.4) or 1
+			end
 		end
+		thumpTop = nil
 	end
 	thumpLast = kind
 end
@@ -572,7 +578,7 @@ function Score.Reset()
 	tricks, trickAt, lastLabel, lastSeq, wasLive = {}, {}, "", 0, false
 	scoreAt, multAt, lastMult, tierAt = -math.huge, -math.huge, 1, -math.huge
 	readouts, airFrom, manualLast = {}, nil, nil
-	thumpAt, thumpSize, thumpVz, thumpLast = -math.huge, 1, 0, nil
+	thumpAt, thumpSize, thumpTop, thumpLast = -math.huge, 1, nil, nil
 end
 
 return Score
