@@ -224,8 +224,14 @@ local function FindHand(ent, rest, side)
 		p[#c] = same:Dot(last) > 0.25 and Vector(p[#c - 1]) or Turn(rest[tip]):GetInverse() * last
 		point[f] = p
 	end
+	-- The frame Enx's wrist fixes are measured in (s3gm_board_capture.lua):
+	-- to the knuckles, then knuckles x (index -> pinky) whichever way that
+	-- points on this side, then the third; square, in the hand bone's frame.
+	local wz = forward:Cross(across):GetNormalized()
+	local wy = wz:Cross(forward):GetNormalized()
+	local wrist = { toHand * forward, toHand * wy, toHand * wz }
 	return { hand = hand, fingers = fingers, axes = axes, vote = vote, restBend = restBend,
-		axesOfHand = frame, point = point, curl = { 0, 0 }, wanted = 0 }
+		axesOfHand = frame, wrist = wrist, point = point, curl = { 0, 0 }, wanted = 0 }
 end
 
 -- One leg's chain and how high its ankle sits off the floor, for matching
@@ -680,8 +686,8 @@ local function GestureFingers(pose, side)
 	return out, aim
 end
 
--- Skate 3's everyday hands for one side (relaxed, grip, open; see
--- cl_gestures' HandPoses), checked once; nil before the setup has made them.
+-- The everyday hands for one side (relaxed, grip, open and maybe carry;
+-- see cl_gestures' HandPoses), checked once; nil without any.
 local everydayCache = {}
 local function EverydayHands(side)
 	local cached = everydayCache[side]
@@ -690,9 +696,11 @@ local function EverydayHands(side)
 	if not (Gestures and Gestures.HandPoses) then return nil end
 	local p = Gestures.HandPoses(side)
 	local ok = istable(p)
-	for _, name in ipairs({ "relaxed", "grip", "open" }) do
+	for _, name in ipairs({ "relaxed", "grip", "open", "carry" }) do
+		-- carrying the board has a pose of its own only when Enx made one
+		if name == "carry" and ok and p.carry == nil then break end
 		for f = 1, 5 do
-			local joints = ok and p[name][f]
+			local joints = ok and istable(p[name]) and p[name][f]
 			ok = ok and istable(joints)
 			for j = 1, 3 do
 				local v = ok and joints[j]
@@ -722,7 +730,8 @@ local function Slerp(a, b, t, out)
 	return out
 end
 
--- Carrying the board: this far from relaxed towards the grip.
+-- Carrying the board without a carry pose of its own: this far from
+-- relaxed towards the grip.
 local CARRY = 0.4
 
 -- Degrees per finger joint, base to tip: relaxed, gripping the board, and
@@ -732,6 +741,32 @@ local CURL = {
 	finger = { relaxed = { 18, 25, 15 }, grip = { 70, 90, 55 }, carry = { 20, 30, 22 } },
 	thumb = { relaxed = { 5, 10, 10 }, grip = { 20, 35, 30 }, carry = { 30, 45, 35 } },
 }
+-- Turns the hand (and its fingers) about the wrist by Enx's carry and grab
+-- fixes, as far as the hand is carrying or grabbing. Returns the hand's
+-- matrix after.
+local function WristFix(info, world, hand, side, hm)
+	local Gestures = S3GM_Gestures
+	if not (Gestures and Gestures.WristTurn) then return hm end
+	for _, name in ipairs({ "carry", "grab" }) do
+		local w = hand[name] or 0
+		local fix = w > 0.001 and Gestures.WristTurn(name, side)
+		if fix then
+			local turn = Turn(hm)
+			local x, y, z = turn * hand.wrist[1], turn * hand.wrist[2], turn * hand.wrist[3]
+			local axis = x * fix[1] + y * fix[2] + z * fix[3]
+			if axis:LengthSqr() > 1e-8 then
+				axis:Normalize()
+				local r = About(AxisAngle(axis, fix[4] * math.min(w, 1)), hm:GetTranslation())
+				for _, k in ipairs(info.below(hand.hand)) do
+					if world[k] then world[k] = r * world[k] end
+				end
+				hm = world[hand.hand]
+			end
+		end
+	end
+	return hm
+end
+
 local function Hands(info, world, pose)
 	local scale = cv_fingers:GetBool() and cv_curl:GetFloat() or 0
 	local dt = math.min(FrameTime(), 0.1)
@@ -760,6 +795,8 @@ local function Hands(info, world, pose)
 			hand.wanted = holding and 2 or bailing and 0.3 or 1
 			-- Carrying the board on foot: a flat hand with the thumb over.
 			local carrying = onFoot and near and 1 or 0
+			-- Holding it in a grab (not a punch's fist).
+			local grabbing = not onFoot and near and 1 or 0
 			-- Ease towards it, once a frame (this runs for every view and
 			-- shadow drawn): a grip closes fast, letting go is slower.
 			if hand.frame ~= FrameNumber() then
@@ -767,6 +804,7 @@ local function Hands(info, world, pose)
 				local rate = hand.wanted > (hand.now or 1) and 18 or 8
 				hand.now = Lerp(1 - math.exp(-rate * dt), hand.now or 1, hand.wanted)
 				hand.carry = Lerp(1 - math.exp(-12 * dt), hand.carry or 0, carrying)
+				hand.grab = Lerp(1 - math.exp(-12 * dt), hand.grab or 0, grabbing)
 				-- The gesture's fingers: copied while it plays, then eased
 				-- back into our own hand shapes from where it left them.
 				local mine = gesturing and (gesturing == 0 or gesturing == (side == "R" and 1 or 2))
@@ -796,13 +834,20 @@ local function Hands(info, world, pose)
 							else
 								Slerp(relaxed[j], grip[j], math.min(now - 1, 1), out)
 							end
-							if carry > 0.001 then Slerp(out, Slerp(relaxed[j], grip[j], CARRY, tmp), carry, out) end
+							if carry > 0.001 then
+								Slerp(out, everyday.carry and everyday.carry[f + 1][j] or Slerp(relaxed[j], grip[j], CARRY, tmp), carry, out)
+							end
 							if ga and ga[j] then Slerp(out, ga[j], g, out) end
 						end
 					end
 				else
 					hand.target = nil
 				end
+			end
+			-- The wrist turned the way Enx turned it holding the board, so the
+			-- hand grips the deck's edge rather than lying on it.
+			if scale > 0 and hand.wrist then
+				hm = WristFix(info, world, hand, side, hm)
 			end
 			if hand.target and scale > 0 and hand.axesOfHand then
 				-- Every finger bone pointed where Skate 3's points, in this

@@ -39,6 +39,7 @@ if SERVER then
 	AddCSLuaFile("skate3/cl_marker_static.lua")
 	AddCSLuaFile("skate3/cl_contextmenu.lua")
 	AddCSLuaFile("skate3/cl_gestures.lua")
+	AddCSLuaFile("skate3/cl_hand_poses.lua")
 	AddCSLuaFile("skate3/cl_customize.lua")
 	AddCSLuaFile("skate3/cl_score.lua")
 	AddCSLuaFile("skate3/cl_score_skate3.lua")
