@@ -36,8 +36,7 @@ Video walkthrough of this whole install: https://youtu.be/oGdIwMNwp14
                        Smart App Control or "Windows protected your PC":
                        delete the extracted folder, right-click the
                        downloaded .zip > Properties > tick Unblock > OK,
-                       then extract it again. A window asks for your
-                       folders, then the black window shows the progress)
+                       then extract it again)
      Linux / SteamOS:  S3GM-setup-Linux.sh (Desktop Mode; pick Execute/Run
                        if it asks. If it only opens as text: right-click >
                        Properties > Permissions > Is executable, or run
