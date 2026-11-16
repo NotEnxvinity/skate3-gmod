@@ -147,7 +147,7 @@ end
 local OURS = include("skate3/cl_hand_poses.lua")
 
 -- The everyday hands for one side, aimed like the gestures': { relaxed =
--- aims, grip = aims, open = aims, carry = aims or nil }, each [finger
+-- aims, grip = aims, open = aims, fist = aims, carry = aims or nil }, each [finger
 -- 1-5][joint 1-3] = { x, y, z } in the hand's frame. Enx's poses where there
 -- is one, else the setup's stand-ins from the gestures; nil without either.
 function G.HandPoses(side)
@@ -157,6 +157,8 @@ function G.HandPoses(side)
 		local p = poses and istable(poses[name]) and poses[name]["aim" .. side]
 		if istable(p) then out[name] = p end
 	end
+	-- A punch's fist stays the disc's own fist (Enx's grab wraps a board edge).
+	out.fist = out.grip
 	if istable(OURS) then
 		out.relaxed = OURS.riding or out.relaxed
 		out.grip = OURS.grab or out.grip
@@ -164,6 +166,7 @@ function G.HandPoses(side)
 		out.carry = OURS.carry
 	end
 	out.open = out.open or out.relaxed
+	out.fist = out.fist or out.grip
 	if not (out.relaxed and out.grip) then return nil end
 	return out
 end

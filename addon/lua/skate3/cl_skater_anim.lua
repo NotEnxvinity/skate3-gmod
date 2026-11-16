@@ -696,7 +696,8 @@ local function EverydayHands(side)
 	if not (Gestures and Gestures.HandPoses) then return nil end
 	local p = Gestures.HandPoses(side)
 	local ok = istable(p)
-	for _, name in ipairs({ "relaxed", "grip", "open", "carry" }) do
+	if ok and p.fist == nil then p.fist = p.grip end
+	for _, name in ipairs({ "relaxed", "grip", "open", "fist", "carry" }) do
 		-- carrying the board has a pose of its own only when Enx made one
 		if name == "carry" and ok and p.carry == nil then break end
 		for f = 1, 5 do
@@ -824,7 +825,8 @@ local function Hands(info, world, pose)
 					for f = 0, 4 do
 						local tf = target[f] or {}
 						target[f] = tf
-						local relaxed, grip, open = everyday.relaxed[f + 1], everyday.grip[f + 1], everyday.open[f + 1]
+						local relaxed, open = everyday.relaxed[f + 1], everyday.open[f + 1]
+						local grip = (info.fist == side and everyday.fist or everyday.grip)[f + 1]
 						local ga = g > 0 and hand.gestureAim and hand.gestureAim[f]
 						for j = 1, 3 do
 							local out = tf[j] or { 0, 0, 0 }
