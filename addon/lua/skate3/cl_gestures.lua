@@ -169,10 +169,9 @@ function G.HandPoses(side)
 end
 
 -- How far Enx turned the wrist from where the game holds it, for carrying
--- the board ("carry") or grabbing it ("grab"): { x, y, z, radians, mx, my,
--- mz }, an axis in the hand frame { to the knuckles, the second axis,
--- knuckles x (index -> pinky) }, then where the hand moved in that frame in
--- hand lengths (maybe left out), or nil when there's no such fix.
+-- the board ("carry") or grabbing it ("grab"): { x, y, z, radians }, an axis
+-- in the hand frame { to the knuckles, the second axis, knuckles x (index ->
+-- pinky) }, or nil when there's no such fix.
 function G.WristTurn(name, side)
 	local w = istable(OURS) and istable(OURS.wrist) and istable(OURS.wrist[name]) and OURS.wrist[name][side]
 	if istable(w) and isnumber(w[1]) and isnumber(w[2]) and isnumber(w[3]) and isnumber(w[4]) then return w end
