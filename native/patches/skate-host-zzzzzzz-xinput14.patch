@@ -1,0 +1,17 @@
+diff --git a/skate/crates/skate-host/src/input/platform.rs b/skate/crates/skate-host/src/input/platform.rs
+index 99ad31d..d263a8e 100644
+--- a/skate/crates/skate-host/src/input/platform.rs
++++ b/skate/crates/skate-host/src/input/platform.rs
+@@ -84,7 +84,11 @@ mod windows {
+     const _: () = assert!(size_of::<State>() == 16);
+     const _: () = assert!(size_of::<Capabilities>() == 20);
+ 
+-    #[link(name = "xinput")]
++    // xinput1_4 ships with every Windows 8/10/11 (and Wine/Proton). Plain
++    // "xinput" means XINPUT1_3.dll under MinGW: the old DirectX runtime a
++    // fresh Windows 11 lacks, so the whole module failed to load there.
++    // raw-dylib: no import library needed on MinGW or MSVC.
++    #[link(name = "xinput1_4", kind = "raw-dylib")]
+     unsafe extern "system" {
+         fn XInputGetState(index: u32, state: *mut State) -> u32;
+         fn XInputGetCapabilities(index: u32, flags: u32, capabilities: *mut Capabilities) -> u32;
