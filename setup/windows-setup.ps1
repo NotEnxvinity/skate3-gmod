@@ -193,8 +193,11 @@ if (-not $gmod) { try { $gmod = FindGmod } catch { $gmod = $null } }
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $form = New-Object System.Windows.Forms.Form -Property @{
     Text = ("S3GM $version setup" -replace '  ', ' '); Width = 640; Height = 330; AutoScroll = $true; FormBorderStyle = 'FixedDialog'; MaximizeBox = $false
-    MinimizeBox = $false; StartPosition = 'CenterScreen'; TopMost = $true
+    MinimizeBox = $false; StartPosition = 'CenterScreen'
 }
+# Come to the front once when it opens (a .bat's window can open behind
+# others), then be a normal window that other apps can cover.
+$form.Add_Shown({ $form.TopMost = $true; $form.Activate(); $form.TopMost = $false })
 function AddRow($y, $label, $value) {
     $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{ Text = $label; Left = 16; Top = $y; Width = 590; Height = 20 }))
     $box = New-Object System.Windows.Forms.TextBox -Property @{ Left = 16; Top = $y + 22; Width = 490; Text = "$value" }
@@ -229,7 +232,7 @@ $form.Controls.Add($engineBox)
 $ok = New-Object System.Windows.Forms.Button -Property @{ Text = 'Install'; Left = 420; Top = 200; Width = 90; Height = 30 }
 $cancel = New-Object System.Windows.Forms.Button -Property @{ Text = 'Cancel'; Left = 516; Top = 200; Width = 90; Height = 30; DialogResult = 'Cancel' }
 $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
-    Text = 'Check both, then press Install.'; Left = 16; Top = 206; Width = 380; Height = 20 }))
+    Text = 'Check both, then press Install. The black window shows the progress.'; Left = 16; Top = 200; Width = 390; Height = 34 }))
 $ok.Add_Click({
     $picked = GarrysmodIn $gmodBox.Text.Trim().Trim('"')
     if (-not $picked) {
@@ -250,6 +253,9 @@ if ($form.ShowDialog() -ne 'OK') { Die 'Setup cancelled, so nothing was installe
 $gmod = $gmodBox.Text
 $game = $gameBox.Text.Trim().Trim('"')
 $engineArg = if ($engineBox.Checked) { '--audio-engine' } else { '--no-audio-engine' }
+Write-Host ''
+Write-Host 'Installing. The progress shows in this window; keep it open. A box pops up when it is done.' -ForegroundColor Cyan
+Write-Host ''
 $form.Dispose()
 Write-Host "Garry's Mod: $gmod"
 Write-Host "Skate 3: $game"
@@ -370,5 +376,9 @@ $steamapps = Split-Path (Split-Path (Split-Path $gmod -Parent) -Parent) -Parent
 if (Test-Path -LiteralPath (Join-Path $steamapps 'workshop\content\4000\3814357793')) {
     $done += "`n`nYou're also subscribed to S3GM on the Steam Workshop. That's fine while it's the same version; if the game seems older than this, unsubscribe from it: steamcommunity.com/sharedfiles/filedetails/?id=3814357793"
 }
-[void][System.Windows.Forms.MessageBox]::Show($done, 'S3GM setup')
+# Owned by a front-most form so "All set" pops up over whatever the player
+# switched to while it ran (the console may be behind other windows by now).
+$owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false }
+[void][System.Windows.Forms.MessageBox]::Show($owner, $done, 'S3GM setup')
+$owner.Dispose()
 exit 0

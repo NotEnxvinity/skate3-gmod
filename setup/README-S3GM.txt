@@ -32,7 +32,12 @@ Video walkthrough of this whole install: https://youtu.be/oGdIwMNwp14
 2. Open S3GM-setup and double-click the setup for your computer. That's the
    only thing to click: the setup-files folder is what the setup itself uses,
    nothing in there needs opening.
-     Windows:          S3GM-setup-Windows.bat
+     Windows:          S3GM-setup-Windows.bat (if Windows blocks it, e.g.
+                       Smart App Control or "Windows protected your PC":
+                       delete the extracted folder, right-click the
+                       downloaded .zip > Properties > tick Unblock > OK,
+                       then extract it again. A window asks for your
+                       folders, then the black window shows the progress)
      Linux / SteamOS:  S3GM-setup-Linux.sh (Desktop Mode; pick Execute/Run
                        if it asks. If it only opens as text: right-click >
                        Properties > Permissions > Is executable, or run
