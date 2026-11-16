@@ -1,5 +1,5 @@
-S3GM v2.3.0: Skate 3 in Garry's Mod
-===================================
+S3GM: Skate 3 in Garry's Mod
+============================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
 grinds, manuals and bails, on any map, with any playermodel.
@@ -75,8 +75,10 @@ tricks, triggers grab. B (R1) is the attack button: a board smack when the
 board is in your hand, punches without it. Hold L1 (Shift on keyboard) for the quick menu: D-pad
 down drops a session marker, hold D-pad up to go back to it, left interacts
 with what you're next to, Y opens the games list and X opens settings (D-pad up
-and down pick a row, left and right change a setting, B goes back). Switch
-weapons to leave skate mode.
+and down pick a row, left and right change a setting, B goes back). Tap the
+D-pad without L1 for Skate 3's own gestures on whichever hand is free (hold
+to loop; pick yours in the menu's Settings). Switch weapons to leave skate
+mode.
 
 
 Settings
