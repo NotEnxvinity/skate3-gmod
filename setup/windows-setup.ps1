@@ -573,10 +573,12 @@ if ($problems) { $done += "`n`nInstalled, but not everything worked:`n- " + ($pr
 # A Workshop S3GM of another version loaded alongside can mix with this one.
 $steamapps = Split-Path (Split-Path (Split-Path $gmod -Parent) -Parent) -Parent
 if (Test-Path -LiteralPath (Join-Path $steamapps 'workshop\content\4000\3814357793')) {
-    $done += "`n`nYou're also subscribed to S3GM on the Steam Workshop. That's fine while it's the same version; if the game seems older than this, unsubscribe from it: steamcommunity.com/sharedfiles/filedetails/?id=3814357793"
+    $workshop = "You're also subscribed to S3GM on the Steam Workshop. That's fine while it's the same version; if the game seems older than this, unsubscribe from it: steamcommunity.com/sharedfiles/filedetails/?id=3814357793"
+    $done += "`n`n" + $workshop
+    # The log already ends with setup's own "All set" line; only this is new.
+    Say ''
+    Say $workshop
 }
-Say ''
-Say $done
 $installing = $false
 $bar.Style = 'Continuous'
 $bar.Value = 100
