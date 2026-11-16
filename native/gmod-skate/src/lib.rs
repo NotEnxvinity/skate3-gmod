@@ -885,6 +885,20 @@ pub unsafe extern "C" fn gmod13_close(state: State) -> c_int {
     0
 }
 
+/// Our own DllMain, so the MinGW linker stops taking one from an import
+/// library. winapi's XInput import lib lists `DllMain` as an XINPUT1_4.dll
+/// export, and the real DLL has none, which would stop Windows loading us.
+/// Rust's thread-local cleanup uses TLS callbacks, not DllMain.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub extern "system" fn DllMain(
+    _module: *mut std::ffi::c_void,
+    _reason: u32,
+    _reserved: *mut std::ffi::c_void,
+) -> i32 {
+    1
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
