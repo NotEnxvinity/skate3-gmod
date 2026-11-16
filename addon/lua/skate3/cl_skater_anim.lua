@@ -231,8 +231,7 @@ local function FindHand(ent, rest, side)
 	local wy = wz:Cross(forward):GetNormalized()
 	local wrist = { toHand * forward, toHand * wy, toHand * wz }
 	return { hand = hand, fingers = fingers, axes = axes, vote = vote, restBend = restBend,
-		axesOfHand = frame, wrist = wrist, span = (knuckles - handPos):Length(),
-		point = point, curl = { 0, 0 }, wanted = 0 }
+		axesOfHand = frame, wrist = wrist, point = point, curl = { 0, 0 }, wanted = 0 }
 end
 
 -- One leg's chain and how high its ankle sits off the floor, for matching
@@ -589,17 +588,6 @@ function Anim.Carrying()
 	return carrying and RealTime() - carryAt < 0.5
 end
 
--- Where Enx moved the hand to hold the board ("carry" or "grab"), as a
--- world offset for the hand matrix hm, or nil.
-local function WristMove(info, side, name, hm)
-	local Gestures = S3GM_Gestures
-	local hand = info.hands and info.hands[side]
-	local fix = hand and hand.wrist and hand.span and Gestures and Gestures.WristTurn and Gestures.WristTurn(name, side)
-	if not (fix and isnumber(fix[5]) and isnumber(fix[6]) and isnumber(fix[7])) then return nil end
-	local turn = Turn(hm)
-	return (turn * hand.wrist[1] * fix[5] + turn * hand.wrist[2] * fix[6] + turn * hand.wrist[3] * fix[7]) * hand.span
-end
-
 local function Arms(info, world, pose)
 	local want = vector_origin
 	local grip, gap = GRIP_DISTANCE * (info.scale or 1), CARRY_GAP * (info.scale or 1)
@@ -613,7 +601,7 @@ local function Arms(info, world, pose)
 		end
 		local best
 		carried = false
-		for side, arm in pairs(info.arms or {}) do
+		for _, arm in pairs(info.arms or {}) do
 			local skate = arm and pose.bones[arm.skateHand]
 			if skate and world[arm.foot] then
 				local target = Mat(skate):GetTranslation()
@@ -633,10 +621,6 @@ local function Arms(info, world, pose)
 						w = 1 - math.Clamp((d - grip) / grip, 0, 1)
 					end
 					aim = LerpVector(w, own, target)
-					-- Grabbing: the hand where Enx put it on the deck. Reach
-					-- keeps the hand's turn, so its frame now is its frame after.
-					local move = w > 0.001 and WristMove(info, side, "grab", world[arm.foot])
-					if move then aim = aim + move * w end
 				end
 				Reach(world, arm, aim, info.below)
 				local near = deckA and target:Distance(Closest(target, deckA, deckB))
@@ -645,9 +629,6 @@ local function Arms(info, world, pose)
 					carried = true
 					want = world[arm.foot]:GetTranslation() - target
 					if want:Length() > gap then want = want:GetNormalized() * gap end
-					-- Carrying: the board where Enx had it against the hand.
-					local move = WristMove(info, side, "carry", world[arm.foot])
-					if move then want = want - move end
 				end
 			end
 		end
