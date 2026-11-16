@@ -7,7 +7,11 @@
 #   S3GM-setup-Windows.bat --game "D:\Skate 3\skate3.iso"  [--gmod <folder>]
 #
 # Either way a small window shows the Garry's Mod folder and disc it found,
-# so the player checks or changes them before anything runs.
+# so the player checks or changes them before anything runs. After Install
+# the same window shows the progress and the result: setup starts itself
+# again without a console, so the .bat's black window closes right away
+# (set S3GM_CONSOLE=1 to keep everything in the console instead). Everything
+# it prints also goes to %LOCALAPPDATA%\skate3-gmod\setup-log.txt.
 #
 # This installs the S3GM addon and skate module into Garry's Mod and converts
 # what it needs from the disc. Nothing needs installing first:
@@ -44,6 +48,34 @@ function PythonWorks($exe, [string[]]$flags) {
     return ((Ask $exe ($flags + @('-I', '-c', 'import encodings, venv, ensurepip, ssl; print(1)'))) -eq '1')
 }
 
+# One argument as Windows programs read their command line.
+function Quote([string]$text) {
+    if ($text -and $text -notmatch '[\s"]') { return $text }
+    $text = [regex]::Replace($text, '(\\*)"', { param($m) $m.Groups[1].Value * 2 + '\"' })
+    $text = [regex]::Replace($text, '(\\+)$', { param($m) $m.Groups[1].Value * 2 })
+    return '"' + $text + '"'
+}
+
+# Started from the .bat: start again without a console window (the setup
+# window shows the progress), so the .bat's black window closes. Programs
+# this one runs share its hidden console, so none of them pops one up either.
+if (-not $env:S3GM_WINDOWED -and -not $env:S3GM_CONSOLE) {
+    try {
+        $env:S3GM_WINDOWED = '1'
+        $info = New-Object System.Diagnostics.ProcessStartInfo
+        $info.FileName = (Get-Process -Id $PID).Path
+        $info.Arguments = (@('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath) + @($args) |
+            ForEach-Object { Quote "$_" }) -join ' '
+        $info.UseShellExecute = $false
+        $info.CreateNoWindow = $true
+        [void][System.Diagnostics.Process]::Start($info)
+        exit 0
+    } catch {
+        # Couldn't: carry on in the console as before.
+        Remove-Item -LiteralPath Env:S3GM_WINDOWED -ErrorAction SilentlyContinue
+    }
+}
+
 # The engine revision the skate host was built from (the same as skate3-setup.sh).
 $EngineRev = 'cb7968930f14dad38457e98720d1a274e469eec2'
 # Python's portable Windows build, published by Python itself on NuGet.
@@ -64,18 +96,134 @@ try { $version = (Get-Content -LiteralPath (Join-Path $here 'VERSION') -Raw -Err
 $cache = Join-Path $env:LOCALAPPDATA 'skate3-gmod'
 New-Item -ItemType Directory -Force -Path $cache | Out-Null
 
+$logFile = Join-Path $cache 'setup-log.txt'
+try { Set-Content -LiteralPath $logFile -Value "S3GM $version setup, $(Get-Date)" } catch {}
+
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+$form = $null
+$logBox = $null
+$installing = $false
+$running = $null
+$runOutput = @()
+
+# Keeps the window answering while setup works.
+function Pump {
+    [System.Windows.Forms.Application]::DoEvents()
+    Start-Sleep -Milliseconds 30
+}
+
+# A line of progress: the console, the log file, and the window's log.
+function Say([string]$text) {
+    Write-Host $text
+    try { Add-Content -LiteralPath $logFile -Value $text } catch {}
+    if ($script:logBox) {
+        $script:logBox.AppendText($text + "`r`n")
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+}
+
 function Die($message) {
-    Write-Host "error: $message" -ForegroundColor Red
-    [void][System.Windows.Forms.MessageBox]::Show($message, 'S3GM setup', 'OK', 'Error')
+    Say "error: $message"
+    $message = "$message`n`nEverything setup printed is in $logFile"
+    if ($script:logBox -and $script:form.Visible) {
+        # Keep the window, with its log, until the player closes it.
+        $script:installing = $false
+        $script:bar.Style = 'Continuous'
+        $script:bar.Value = 0
+        $script:status.ForeColor = [System.Drawing.Color]::DarkRed
+        $script:status.Text = "Setup stopped: $message"
+        $script:finish.Text = 'Close'
+        $script:finish.Visible = $true
+        [void][System.Windows.Forms.MessageBox]::Show($script:form, $message, 'S3GM setup', 'OK', 'Error')
+        while ($script:form.Visible) { Pump }
+    } else {
+        [void][System.Windows.Forms.MessageBox]::Show($message, 'S3GM setup', 'OK', 'Error')
+    }
     exit 1
+}
+# Anything that stops the script unexpectedly still says why (there may be no console to read).
+trap { Die "Setup stopped on an unexpected error: $($_.Exception.Message)" }
+
+# Downloads $url to $file while the window keeps answering; throws when it fails.
+function Download($url, $file) {
+    $client = New-Object System.Net.WebClient
+    $task = $client.DownloadFileTaskAsync($url, $file)
+    $next = [DateTime]::Now
+    while (-not $task.IsCompleted) {
+        if ($script:status -and [DateTime]::Now -ge $next -and (Test-Path -LiteralPath $file)) {
+            $mb = [math]::Round((Get-Item -LiteralPath $file).Length / 1MB)
+            $script:status.Text = "$($script:step) ($mb MB so far)"
+            $next = [DateTime]::Now.AddSeconds(1)
+        }
+        Pump
+    }
+    $client.Dispose()
+    if ($task.IsFaulted) { throw $task.Exception.InnerException }
+    if ($task.IsCanceled) { throw 'the download was cancelled' }
+}
+
+# Unpacks a zip in the background while the window keeps answering; throws when it fails.
+function Unzip($zip, $dest) {
+    $job = Start-Job -ScriptBlock {
+        param($z, $d)
+        $ProgressPreference = 'SilentlyContinue'
+        Expand-Archive -LiteralPath $z -DestinationPath $d -Force
+    } -ArgumentList $zip, $dest
+    while ($job.State -eq 'NotStarted' -or $job.State -eq 'Running') { Pump }
+    try { [void](Receive-Job -Job $job -ErrorAction Stop) } finally { Remove-Job -Job $job -Force }
+}
+
+# A step's heading: in the log and on the window's status line.
+function Step($text) {
+    $script:step = $text
+    if ($script:status) { $script:status.Text = $text }
+    Say $text
+}
+
+# Runs a program with no window of its own, its output going to the log as
+# it comes. Returns its exit code; $runOutput holds its lines.
+function Run($exe, [string[]]$arguments) {
+    $info = New-Object System.Diagnostics.ProcessStartInfo
+    $info.FileName = $exe
+    $info.Arguments = ($arguments | ForEach-Object { Quote $_ }) -join ' '
+    $info.UseShellExecute = $false
+    $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true
+    $info.RedirectStandardError = $true
+    $info.StandardOutputEncoding = [System.Text.Encoding]::UTF8
+    $info.StandardErrorEncoding = [System.Text.Encoding]::UTF8
+    $info.EnvironmentVariables['PYTHONUNBUFFERED'] = '1'
+    $info.EnvironmentVariables['PYTHONIOENCODING'] = 'utf-8'
+    $process = [System.Diagnostics.Process]::Start($info)
+    $script:running = $process
+    $lines = New-Object System.Collections.Generic.List[string]
+    $out = $process.StandardOutput.ReadLineAsync()
+    $err = $process.StandardError.ReadLineAsync()
+    while ($out -or $err) {
+        $got = $false
+        if ($out -and $out.IsCompleted) {
+            $got = $true
+            if ($null -eq $out.Result) { $out = $null } else { Say $out.Result; $lines.Add($out.Result); $out = $process.StandardOutput.ReadLineAsync() }
+        }
+        if ($err -and $err.IsCompleted) {
+            $got = $true
+            if ($null -eq $err.Result) { $err = $null } else { Say $err.Result; $lines.Add($err.Result); $err = $process.StandardError.ReadLineAsync() }
+        }
+        if (-not $got) { Pump }
+    }
+    $process.WaitForExit()
+    $script:running = $null
+    $script:runOutput = $lines.ToArray()
+    return $process.ExitCode
 }
 
 # Downloads Python's portable build into $portable, replacing whatever is
 # there, and checks it can start. Stops with a message that names the cause
 # when it can't.
 function FetchPython {
-    Write-Host "Fetching Python $PythonVersion for the converters (one time, nothing is installed)..."
+    Step "Fetching Python $PythonVersion for the converters (one time, nothing is installed)..."
     $zip = Join-Path $cache 'python.zip'
     $partial = "$portable.partial"
     # A copy a stopped run left half done would swallow the new one.
@@ -85,9 +233,9 @@ function FetchPython {
             catch { Die "Couldn't remove the old Python folder $old : $($_.Exception.Message) Close anything using it (an antivirus scan, a Python window), delete $cache by hand, then run this again." }
         }
     }
-    try { Invoke-WebRequest -Uri $PythonZip -OutFile $zip -UseBasicParsing }
+    try { Download $PythonZip $zip }
     catch { Die "Downloading Python from nuget.org failed: $($_.Exception.Message) Check the internet connection, then run this again." }
-    try { Expand-Archive -LiteralPath $zip -DestinationPath $partial -Force }
+    try { Unzip $zip $partial }
     catch { Die "Unpacking Python failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
     # Expand-Archive can leave files out without saying so; the .NET unzipper
     # fills in what is missing.
@@ -110,7 +258,7 @@ function FetchPython {
         }
         # Python's own words, for the console and for a screenshot.
         $ErrorActionPreference = 'Continue'
-        Write-Host (& $portableExe -I -c 'import encodings, venv, ensurepip, ssl' 2>&1 | ForEach-Object { "$_" } | Out-String)
+        Say (& $portableExe -I -c 'import encodings, venv, ensurepip, ssl' 2>&1 | ForEach-Object { "$_" } | Out-String)
         Die "Python was fetched but won't start. $why Allow the folder $cache in your antivirus (Windows Security > Virus & threat protection > Manage settings > Exclusions), delete the folder, then run this again."
     }
 }
@@ -232,7 +380,7 @@ $form.Controls.Add($engineBox)
 $ok = New-Object System.Windows.Forms.Button -Property @{ Text = 'Install'; Left = 420; Top = 200; Width = 90; Height = 30 }
 $cancel = New-Object System.Windows.Forms.Button -Property @{ Text = 'Cancel'; Left = 516; Top = 200; Width = 90; Height = 30; DialogResult = 'Cancel' }
 $form.Controls.Add((New-Object System.Windows.Forms.Label -Property @{
-    Text = 'Check both, then press Install. The black window shows the progress.'; Left = 16; Top = 200; Width = 390; Height = 34 }))
+    Text = 'Check both, then press Install. This window shows the progress.'; Left = 16; Top = 200; Width = 390; Height = 34 }))
 $ok.Add_Click({
     $picked = GarrysmodIn $gmodBox.Text.Trim().Trim('"')
     if (-not $picked) {
@@ -249,16 +397,61 @@ $ok.Add_Click({
 })
 $form.Controls.Add($ok); $form.Controls.Add($cancel)
 $form.AcceptButton = $ok; $form.CancelButton = $cancel
-if ($form.ShowDialog() -ne 'OK') { Die 'Setup cancelled, so nothing was installed.' }
+if ($form.ShowDialog() -ne 'OK') {
+    Say 'Setup cancelled, so nothing was installed.'
+    exit 0
+}
 $gmod = $gmodBox.Text
 $game = $gameBox.Text.Trim().Trim('"')
 $engineArg = if ($engineBox.Checked) { '--audio-engine' } else { '--no-audio-engine' }
-Write-Host ''
-Write-Host 'Installing. The progress shows in this window; keep it open. A box pops up when it is done.' -ForegroundColor Cyan
-Write-Host ''
-$form.Dispose()
-Write-Host "Garry's Mod: $gmod"
-Write-Host "Skate 3: $game"
+
+# The same window, now showing the progress: a status line, a bar, the log,
+# and a Finish button once it's done.
+$form.Controls.Clear()
+$form.AcceptButton = $null
+$form.CancelButton = $null
+$form.AutoScroll = $false
+$form.FormBorderStyle = 'Sizable'
+$form.MaximizeBox = $true
+$form.MinimizeBox = $true
+$form.Size = New-Object System.Drawing.Size(760, 540)
+$form.MinimumSize = New-Object System.Drawing.Size(560, 380)
+$logBox = New-Object System.Windows.Forms.TextBox -Property @{
+    Multiline = $true; ReadOnly = $true; ScrollBars = 'Vertical'; Dock = 'Fill'; WordWrap = $true
+    Font = New-Object System.Drawing.Font('Consolas', 9); BackColor = [System.Drawing.SystemColors]::Window }
+$bottom = New-Object System.Windows.Forms.Panel -Property @{ Dock = 'Bottom'; Height = 50 }
+$finish = New-Object System.Windows.Forms.Button -Property @{ Text = 'Finish'; Width = 100; Height = 30; Top = 10; Visible = $false; Anchor = 'Top, Right' }
+$bottom.Controls.Add($finish)
+$finish.Left = $bottom.ClientSize.Width - $finish.Width - 16
+$finish.Add_Click({ $form.Close() })
+$bar = New-Object System.Windows.Forms.ProgressBar -Property @{ Dock = 'Top'; Height = 18; Style = 'Marquee'; MarqueeAnimationSpeed = 30 }
+$status = New-Object System.Windows.Forms.Label -Property @{
+    Dock = 'Top'; Height = 96; Padding = New-Object System.Windows.Forms.Padding(4, 8, 4, 4)
+    Font = New-Object System.Drawing.Font('Segoe UI', 10); Text = 'Installing S3GM. The first time takes a few minutes.' }
+$spacer = New-Object System.Windows.Forms.Panel -Property @{ Dock = 'Top'; Height = 10 }
+# Docked controls stack from the last one added, so the log goes in first.
+$form.Padding = New-Object System.Windows.Forms.Padding(14, 6, 14, 0)
+$form.Controls.Add($logBox)
+$form.Controls.Add($spacer)
+$form.Controls.Add($bar)
+$form.Controls.Add($status)
+$form.Controls.Add($bottom)
+$form.Add_FormClosing({
+    param($sender, $e)
+    if (-not $script:installing) { return }
+    $answer = [System.Windows.Forms.MessageBox]::Show($form, 'Setup is still installing. Stop it now? You can run it again later.', 'S3GM setup', 'YesNo', 'Warning')
+    if ($answer -eq 'Yes') {
+        try { if ($script:running) { $script:running.Kill() } } catch {}
+        [Environment]::Exit(1)
+    }
+    $e.Cancel = $true
+})
+$installing = $true
+$form.Show()
+$form.Activate()
+Pump
+Say "Garry's Mod: $gmod"
+Say "Skate 3: $game"
 
 # A Python that numpy 2.2 has wheels for: 3.10 to 3.13.
 $python = $null
@@ -284,7 +477,7 @@ $pyExe = $python[0]; $pyArgs = @($python | Select-Object -Skip 1)
 $engine = Join-Path $cache ('engine-' + $EngineRev.Substring(0, 7))
 $converters = Join-Path $engine 'tools\asset_pipeline'
 if (-not (Test-Path -LiteralPath $converters)) {
-    Write-Host "Fetching the Skate 3 engine's converters ($($EngineRev.Substring(0, 7)), one time)..."
+    Step "Fetching the Skate 3 engine's converters ($($EngineRev.Substring(0, 7)), one time)..."
     $zip = Join-Path $cache 'engine.zip'
     $partial = "$engine.partial"
     # What a run that stopped part way left behind: a folder already there
@@ -293,9 +486,9 @@ if (-not (Test-Path -LiteralPath $converters)) {
     foreach ($old in @($engine, $partial)) {
         if (Test-Path -LiteralPath $old) { Remove-Item -LiteralPath $old -Recurse -Force }
     }
-    try { Invoke-WebRequest -Uri $EngineZip -OutFile $zip -UseBasicParsing }
+    try { Download $EngineZip $zip }
     catch { Die "Downloading the Skate 3 engine's converters from github.com failed: $($_.Exception.Message) Check the internet connection, then run this again." }
-    try { Expand-Archive -LiteralPath $zip -DestinationPath $partial -Force }
+    try { Unzip $zip $partial }
     catch { Die "Unpacking the Skate 3 engine's converters failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
     Remove-Item -LiteralPath $zip -Force
     # GitHub puts everything in one folder named after the repo and revision.
@@ -311,11 +504,13 @@ if (-not (Test-Path -LiteralPath $converters)) {
 $vgmDir = Join-Path $cache 'vgmstream'
 $vgmstream = Join-Path $vgmDir 'vgmstream-cli.exe'
 if (-not (Test-Path $vgmstream)) {
-    Write-Host "Fetching vgmstream, which decodes the disc's sounds (one time)..."
+    Step "Fetching vgmstream, which decodes the disc's sounds (one time)..."
     New-Item -ItemType Directory -Force -Path $vgmDir | Out-Null
     $zip = Join-Path $vgmDir 'vgmstream.zip'
-    Invoke-WebRequest -Uri $VgmstreamZip -OutFile $zip -UseBasicParsing
-    Expand-Archive -Path $zip -DestinationPath $vgmDir -Force
+    try { Download $VgmstreamZip $zip }
+    catch { Die "Downloading vgmstream from github.com failed: $($_.Exception.Message) Check the internet connection, then run this again." }
+    try { Unzip $zip $vgmDir }
+    catch { Die "Unpacking vgmstream failed: $($_.Exception.Message) An antivirus may have blocked it: allow the folder $cache, then run this again." }
     Remove-Item -Force $zip
 }
 
@@ -326,59 +521,75 @@ if (Test-Path $venvPython) {
     $ready = ($null -ne (Ask $venvPython @('-c', 'import numpy, PIL; print(1)')))
 }
 if (-not $ready) {
-    Write-Host 'Creating a Python environment for the converters (one time)...'
+    Step 'Creating a Python environment for the converters (one time)...'
     $venvLog = ''
     $venvCode = 1
     # Twice at most: with our own portable Python, the second try starts from a fresh copy of it.
     for ($attempt = 1; $attempt -le 2 -and $venvCode -ne 0; $attempt++) {
         if ($attempt -eq 2) {
             if (-not $portable) { break }
-            Write-Host 'Python could not make its environment; fetching a fresh copy of it and trying once more...'
+            Say 'Python could not make its environment; fetching a fresh copy of it and trying once more...'
             FetchPython
         }
         if (Test-Path $venv) { Remove-Item -Recurse -Force $venv }
-        # Python writes its errors to stderr, which would end the setup here.
-        $ErrorActionPreference = 'Continue'
-        $venvLog = & $pyExe @pyArgs -I -m venv $venv 2>&1 | ForEach-Object { "$_" } | Out-String
-        $venvCode = $LASTEXITCODE
-        $ErrorActionPreference = 'Stop'
+        $venvCode = Run $pyExe ($pyArgs + @('-I', '-m', 'venv', $venv))
+        $venvLog = ($runOutput -join "`n")
     }
     if ($venvCode -ne 0) {
-        Write-Host $venvLog
         $tail = if ($venvLog.Length -gt 500) { $venvLog.Substring($venvLog.Length - 500) } else { $venvLog }
         Die ("Python could not make its environment. If an antivirus is running, allow the folder $cache, delete it, then run this again.`n`n" + $tail.Trim())
     }
-    & $venvPython -m pip install -q --upgrade pip
-    & $venvPython -m pip install -q 'numpy==2.2.6' 'Pillow==11.3.0'
-    if ($LASTEXITCODE -ne 0) { Die 'Installing numpy and Pillow failed (see above).' }
+    [void](Run $venvPython @('-m', 'pip', 'install', '-q', '--upgrade', 'pip'))
+    if ((Run $venvPython @('-m', 'pip', 'install', '-q', 'numpy==2.2.6', 'Pillow==11.3.0')) -ne 0) {
+        Die 'Installing numpy and Pillow failed (the log above says why).'
+    }
 }
 
 $env:SKATE3_ENGINE = $engine
 $env:SKATE3_VGMSTREAM = $vgmstream
 $setup = Join-Path $here 'skate3_setup.py'
-& $venvPython $setup --game $game --gmod $gmod $engineArg @rest
+Step 'Installing S3GM and converting what it needs from your disc. The first time takes a few minutes.'
+$code = Run $venvPython (@($setup, '--game', $game, '--gmod', $gmod, $engineArg) + @($rest))
 $tries = 0
-while ($LASTEXITCODE -eq 2 -and $tries -lt 3) {
+while ($code -eq 2 -and $tries -lt 3) {
     # Garry's Mod wasn't found in any Steam library on any drive, or the picked folder had no Gmod in it.
     $tries++
-    $owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true }
     $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
     $dialog.Description = 'Garry''s Mod wasn''t found. Select its garrysmod folder (Steam > Garry''s Mod > Manage > Browse local files, then the garrysmod folder inside). The GarrysMod folder or your Steam library folder works too.'
-    $picked = $dialog.ShowDialog($owner)
-    $owner.Dispose()
-    if ($picked -ne 'OK') { Die 'No garrysmod folder picked, so nothing was installed.' }
-    & $venvPython $setup --game $game --gmod $dialog.SelectedPath $engineArg @rest
+    if ($dialog.ShowDialog($form) -ne 'OK') { Die 'No garrysmod folder picked, so nothing was installed.' }
+    $gmod = $dialog.SelectedPath
+    $code = Run $venvPython (@($setup, '--game', $game, '--gmod', $gmod, $engineArg) + @($rest))
 }
-if ($LASTEXITCODE -ne 0) { Die 'Setup stopped with an error; the window above says why.' }
-$done = ("All set! S3GM $version is installed." -replace '  ', ' ') + "`n`nStart Garry's Mod, load a map and equip the Skateboard (spawn menu > Weapons > Skate 3)."
+if ($code -ne 0) { Die 'Setup stopped with an error; the log above says why.' }
+$done = ("All set! S3GM $version is installed." -replace '  ', ' ') + " Start Garry's Mod, load a map and equip the Skateboard (spawn menu > Weapons > Skate 3)."
+# What setup skipped ("Installed, but not everything worked:" and a " - " line each).
+$problems = @()
+$listing = $false
+foreach ($line in $runOutput) {
+    if ($line -like 'Installed, but not everything worked*') { $listing = $true; continue }
+    if ($listing -and $line -like ' - *') { $problems += $line.Substring(3) }
+}
+if ($problems) { $done += "`n`nInstalled, but not everything worked:`n- " + ($problems -join "`n- ") }
 # A Workshop S3GM of another version loaded alongside can mix with this one.
 $steamapps = Split-Path (Split-Path (Split-Path $gmod -Parent) -Parent) -Parent
 if (Test-Path -LiteralPath (Join-Path $steamapps 'workshop\content\4000\3814357793')) {
     $done += "`n`nYou're also subscribed to S3GM on the Steam Workshop. That's fine while it's the same version; if the game seems older than this, unsubscribe from it: steamcommunity.com/sharedfiles/filedetails/?id=3814357793"
 }
-# Owned by a front-most form so "All set" pops up over whatever the player
-# switched to while it ran (the console may be behind other windows by now).
-$owner = New-Object System.Windows.Forms.Form -Property @{ TopMost = $true; ShowInTaskbar = $false }
-[void][System.Windows.Forms.MessageBox]::Show($owner, $done, 'S3GM setup')
-$owner.Dispose()
+Say ''
+Say $done
+$installing = $false
+$bar.Style = 'Continuous'
+$bar.Value = 100
+$status.Height = if ($problems -or $done.Length -gt 200) { 170 } else { 70 }
+$status.ForeColor = if ($problems) { [System.Drawing.Color]::DarkOrange } else { [System.Drawing.Color]::DarkGreen }
+$status.Text = $done
+$finish.Visible = $true
+$form.AcceptButton = $finish
+# Pops up over whatever the player switched to while it ran, then stays a normal window.
+$form.WindowState = 'Normal'
+$form.TopMost = $true
+$form.Activate()
+$form.TopMost = $false
+[void]$finish.Focus()
+while ($form.Visible) { Pump }
 exit 0
