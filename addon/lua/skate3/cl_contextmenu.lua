@@ -190,6 +190,8 @@ local ONOFF = { { "On", "1" }, { "Off", "0" } }
 local SETTINGS = {
 	{ "Stance", "skate3_stance", { { "Regular", "regular" }, { "Goofy", "goofy" } }, note = "Stance applies the next time you get on" },
 	{ "Camera", "skate3_camera", { { "Low", "low" }, { "Normal", "normal" }, { "High", "high" } } },
+	{ "Camera offset", "skate3_camera_offset", { { "Centred", "0" }, { "A little", "0.5" }, { "Skate 3", "1" }, { "More", "1.5" }, { "Most", "2" } }, number = true },
+	{ "Camera side", "skate3_camera_side", { { "Automatic", "auto" }, { "Left", "left" }, { "Right", "right" } } },
 	{ "Volume", "skate3_volume", { { "0%", "0" }, { "25%", "0.25" }, { "50%", "0.5" }, { "75%", "0.75" }, { "100%", "1" } }, number = true },
 	{ "Trick score", "skate3_score_hud", ONOFF },
 	{ "Look", "skate3_ui_style", { { "Skate 3", "skate3" }, { "Minimal", "minimal" }, { "Half-Life 2", "hl2" } } },

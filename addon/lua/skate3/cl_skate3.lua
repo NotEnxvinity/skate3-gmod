@@ -68,6 +68,9 @@ local pose
 -- the simulation's last two steps, see cl_smooth.lua. Everything else (the
 -- menu, sounds, bails, what's sent to other players) reads `pose`, the newest.
 local drawn
+-- The skate camera's side (see ViewOf): eased, -1 left .. 1
+-- right, and where it's headed. Fresh for each ride.
+local offsetSide, offsetTarget
 local rails
 local railsRevision -- the collision swap the rails above came from
 local status = {}
@@ -255,6 +258,7 @@ local function Stop()
 	end
 	SetActive(false)
 	pose, drawn = nil, nil
+	offsetSide, offsetTarget = nil, nil
 	Smooth.Reset()
 	lastTick = nil
 	recent, wasBailing = {}, false
@@ -430,6 +434,12 @@ end)
 -- Camera height presets, in units above (or below) the game's own camera.
 local CAMERA_HEIGHTS = { low = -16, normal = 0, high = 32 }
 local cv_camera = CreateClientConVar("skate3_camera", "low", true, false, "Skate camera height: low, normal or high")
+local cv_offset = CreateClientConVar("skate3_camera_offset", "1", true, false,
+	"How far the skate camera sits off to the side of the skater, like Skate 3 (0 = dead centre behind them, 1 = Skate 3, up to 2)")
+local cv_side = CreateClientConVar("skate3_camera_side", "auto", true, false,
+	"Which side of the skater the camera sits on: auto (the side they face, flips for goofy, fakie and switch), left or right")
+-- In units at skate3_camera_offset 1: across, and up.
+local OFFSET_SIDE, OFFSET_UP = 22, 10
 
 -- Where the skate camera is: origin, forward, up and field of view.
 local function ViewOf(pose)
@@ -447,7 +457,58 @@ local function ViewOf(pose)
 		up = forward:Cross(up):Cross(forward)
 		up:Normalize()
 	end
+	-- Skate 3's framing: the skater a little off to one side and low in the
+	-- picture, so the rail or ledge ahead isn't behind their body. The camera
+	-- slides sideways and up without turning, so it still looks where the
+	-- game aims it.
+	local scale = cv_offset:GetFloat()
+	if scale ~= 0 and offsetSide then
+		local right = forward:Cross(up)
+		right:Normalize()
+		local want = origin + right * (offsetSide * OFFSET_SIDE * scale) + up * (OFFSET_UP * scale)
+		-- Never into a wall or under a ceiling: stop short of whatever is there.
+		local tr = util.TraceHull({ start = origin, endpos = want, mins = Vector(-4, -4, -4), maxs = Vector(4, 4, 4), mask = MASK_SOLID_BRUSHONLY })
+		origin = tr.Hit and tr.HitPos or want
+	end
 	return origin, forward, up, c.fov
+end
+
+-- Which side the camera slides to, eased: -1 left, 1 right. With
+-- skate3_camera_side auto it's the side the skater's chest faces, so the
+-- view opens up in front of their toes, where most grinds and ledges are. That
+-- flips by itself for goofy, fakie and switch, since it reads the body.
+local function UpdateOffset(pose, dt)
+	local mode = cv_side:GetString()
+	local target
+	if mode == "left" then target = -1
+	elseif mode == "right" then target = 1
+	else
+		target = offsetTarget
+		local state = pose and pose.state or ""
+		-- Only while rolling or grinding: a spin or flip in the air would
+		-- swing it back and forth, and on foot it keeps what you rode with.
+		local rolling = state:find("^Physics") and not state:find("Air")
+		local facing = Skater.Facing()
+		if pose and pose.camera and facing and (rolling or not offsetTarget) then
+			local f = V(pose.camera.forward)
+			f.z = 0
+			if f:LengthSqr() > 1e-4 then
+				f:Normalize()
+				-- Clearly sideways only, so riding straight at or away from
+				-- the camera (a turn or a 180) doesn't flicker it.
+				local side = f.x * facing.y - f.y * facing.x -- (f x facing).z: + is left
+				if math.abs(side) > 0.5 then target = side > 0 and -1 or 1 end
+			end
+		end
+		target = target or 1
+	end
+	offsetTarget = target
+	if not offsetSide then
+		offsetSide = target
+	else
+		-- Eased over about half a second.
+		offsetSide = offsetSide + (target - offsetSide) * math.min(1, dt * 6)
+	end
 end
 
 hook.Add("Think", "skate3_step", function()
@@ -546,6 +607,7 @@ hook.Add("Think", "skate3_step", function()
 		lastTick, tickAt = pose.tick, now
 	end
 	drawn = Smooth.Drawn(pose, FrameTime())
+	UpdateOffset(drawn or pose, FrameTime())
 	Perf.Time("body", Skater.UpdateModel, drawn)
 	if not skip.net then WatchBail(now, pose) end
 	if skip.sounds then Sounds.Stop() else Perf.Time("sounds", Sounds.Update, LocalPlayer(), pose, Skater.BoardPos(pose)) end
