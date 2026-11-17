@@ -62,6 +62,75 @@ local function Sound(which)
 	ply:EmitSound(s[2], 0, 100, math.Clamp(volume, 0, 1))
 end
 
+-- The hiss under the static: TV static that rises as you hold the way back
+-- and ends with it. No recording of it is on the disc (every bank and archive
+-- was listened through, and retail's marker code posts no sound while you
+-- hold), so it's made here, like the picture's noise, and follows the
+-- picture's amount: louder as the hold goes on, full for the teleport's
+-- three frames, gone the moment you let go.
+local cv_hiss = CreateClientConVar("skate3_marker_static_sound", "1", true, false,
+	"TV static sound while going back to your marker (1 on, 0 off)")
+local HISS = "s3gm_marker_hiss"
+local HISS_RATE, HISS_LENGTH = 22050, 2
+local HISS_LEVEL = 0.45
+local hiss = { made = nil, patch = nil, volume = 0 }
+
+-- Two seconds of looping static: white noise, a touch of low-pass so it hisses
+-- rather than whistles, a slow wobble in level, and the odd crackle.
+local function MakeHiss()
+	if hiss.made ~= nil then return hiss.made end
+	local total = HISS_RATE * HISS_LENGTH
+	local low, crackle = 0, 0
+	local ok = pcall(sound.Generate, HISS, HISS_RATE, HISS_LENGTH, function(t)
+		local white = math.random() * 2 - 1
+		low = low + (white - low) * 0.55
+		if crackle <= 0 and math.random() < 0.0015 then crackle = math.random(20, 90) end
+		local pop = 0
+		if crackle > 0 then
+			crackle = crackle - 1
+			pop = (math.random() * 2 - 1) * 0.6
+		end
+		-- The wobble ends where it starts, so the loop doesn't jump.
+		local wobble = 0.85 + 0.15 * math.sin(t / total * math.pi * 2 * 6)
+		-- Fade the first and last few ms into each other for a seamless loop.
+		local edge = math.min(1, t / 64, (total - 1 - t) / 64)
+		return math.Clamp((low * 0.8 * wobble + pop) * (0.6 + 0.4 * edge), -1, 1)
+	end, 0)
+	hiss.made = ok
+	if not ok then print("[skate3] marker static sound unavailable") end
+	return ok
+end
+
+local function HissStop()
+	if hiss.patch then hiss.patch:Stop() end
+	hiss.patch, hiss.volume = nil, 0
+end
+
+hook.Add("Think", "skate3_marker_hiss", function()
+	local amount = Static.Amount and Static.Amount() or 0
+	local cv = GetConVar("skate3_volume")
+	local volume = cv and cv:GetFloat() or 1
+	local sounds = GetConVar("skate3_sounds")
+	if amount <= 0 or not cv_hiss:GetBool() or volume <= 0 or (sounds and sounds:GetString() == "off") then
+		if hiss.patch then HissStop() end
+		return
+	end
+	local ply = LocalPlayer()
+	if not IsValid(ply) or not MakeHiss() then return end
+	if not hiss.patch then
+		local ok, patch = pcall(CreateSound, ply, HISS)
+		if not ok or not patch then return end
+		hiss.patch = patch
+		patch:SetSoundLevel(0)
+		patch:PlayEx(0, 100)
+	end
+	local target = math.Clamp(amount * HISS_LEVEL * volume, 0, 1)
+	if math.abs(target - hiss.volume) > 0.005 then
+		hiss.volume = target
+		hiss.patch:ChangeVolume(target, 0.03)
+	end
+end)
+
 local function Tell(pos, yaw)
 	net.Start("skate3_marker")
 	net.WriteBool(pos ~= nil)

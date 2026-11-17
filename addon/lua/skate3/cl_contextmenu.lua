@@ -196,6 +196,7 @@ local SETTINGS = {
 	{ "Button pictures", "skate3_ui_glyphs", { { "Automatic", "auto" }, { "Xbox", "xbox" }, { "PlayStation", "playstation" } } },
 	{ "Score beside the skater", "skate3_ui_world", ONOFF },
 	{ "Marker static", "skate3_marker_static", ONOFF },
+	{ "Marker static sound", "skate3_marker_static_sound", ONOFF },
 	{ "Hall of Meat", "skate3_hall_of_meat", ONOFF },
 	{ "Hall of Meat bones", "skate3_hom_look", { { "Skeleton", "skeleton" }, { "X-ray", "xray" } },
 		after = function(value)
