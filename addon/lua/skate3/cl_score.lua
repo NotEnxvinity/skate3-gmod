@@ -13,6 +13,7 @@ Score.Meat = Meat
 
 local UI = S3GM_UI
 local Skate3 = include("skate3/cl_score_skate3.lua")
+local Spin = include("skate3/cl_score_spin.lua")
 
 local cv_score = CreateClientConVar("skate3_score_hud", "1", true, false, "Show the trick score widget")
 -- Retired: the look is skate3_ui_style now (with skate3_ui_world for where).
@@ -160,6 +161,11 @@ local function Lookup(part)
 	return part
 end
 
+local cv_spin = CreateClientConVar("skate3_ui_spin", "1", true, false,
+	"Name a jump's spin in its trick, the way Skate 3 does (Kickflip 360, FS Half-Cab)")
+local cv_spin_flip = CreateClientConVar("skate3_spin_flip", "0", true, false,
+	"Swap FS and BS in spin names, if they come out the wrong way round")
+
 local names = {}
 local function TrickName(label)
 	if label == "" then return "" end
@@ -227,9 +233,15 @@ local shown = 0 -- what the widget showed last, kept while it fades
 local lastTrick = ""
 local tricks = {} -- this line's trick names, oldest first (the stack above the disc)
 local trickAt = {} -- when each of those was added (the stack animates on it)
+-- What each of those names was made from, while its jump can still spin
+-- further: { base = trick name or nil (a spin with no trick), jump = which jump }.
+local trickInfo = {}
+local lastCount -- the engine's trick counter when the stack last grew
+local groundTrick -- { jump, at }: the last trick, done before leaving the ground
 local scoreAt, multAt, lastMult = -math.huge, -math.huge, 1 -- when the big number last changed, when the multiplier last went up
 local tierAt = -math.huge -- when the multiplier last reached x2 or x3
 local lastLabel = ""
+local lastName -- the latest row's name, spin and all
 local lastSeq = 0 -- the last trick sequence's score, the big number in Skate 3's look
 local wasLive = false
 -- Distance readouts (Skate 3's "Air Distance 30.2 ft" boxes). They only show a
@@ -321,6 +333,86 @@ local function ReadoutRows()
 	return rows
 end
 
+local function Push(name, info, now)
+	tricks[#tricks + 1] = name
+	trickAt[#tricks] = now
+	trickInfo[#tricks] = info
+	if #tricks > 3 then
+		table.remove(tricks, 1)
+		table.remove(trickAt, 1)
+		table.remove(trickInfo, 1)
+	end
+end
+
+-- How long before leaving the ground a trick still counts as the jump's
+-- (a flip is called at the pop, a moment before the air starts).
+local POP = 0.25
+
+-- The trick stack: a new row each time the engine calls a new trick (its
+-- counter, or a new name from a module without one), the current row renamed
+-- when the engine changes the trick in place (Skate 3's CurrentTrickModified).
+-- Rows of the latest jump take its spin, live, until the next jump.
+local function UpdateStack(sc, now)
+	local count = sc.tricks
+	local renamed = sc.trick ~= "" and sc.trick ~= lastLabel
+	local new = renamed and (count == nil or count ~= lastCount or #tricks == 0)
+	if renamed then
+		lastLabel = sc.trick
+		local info = { base = TrickName(sc.trick), label = sc.trick }
+		if sc.jump then
+			if sc.air then
+				info.jump = sc.jump
+			else
+				groundTrick = { info = info, jump = sc.jump, at = now }
+			end
+		end
+		local top = trickInfo[#tricks]
+		if not new and top then
+			info.jump = info.jump or top.jump
+			tricks[#tricks], trickInfo[#tricks] = info.base, info
+		elseif top and top.base == nil and info.jump and top.jump == info.jump then
+			-- A spin called before its trick: the trick takes its row.
+			tricks[#tricks], trickInfo[#tricks] = info.base, info
+		else
+			Push(info.base, info, now)
+		end
+	elseif count and count ~= lastCount and sc.trick ~= "" then
+		-- The same trick again.
+		local info = { base = TrickName(sc.trick), label = sc.trick, jump = sc.air and sc.jump or nil }
+		if sc.jump and not sc.air then groundTrick = { info = info, jump = sc.jump, at = now } end
+		Push(info.base, info, now)
+	end
+	lastCount = count
+
+	if not sc.jump or not cv_spin:GetBool() then return end
+	-- A trick from just before the pop belongs to the jump that followed it.
+	if groundTrick and sc.air then
+		if sc.jump == groundTrick.jump + 1 and now - groundTrick.at <= POP then groundTrick.info.jump = sc.jump end
+		groundTrick = nil
+	end
+	local spin = sc.spin or 0
+	local mine = false
+	for _, info in ipairs(trickInfo) do
+		if info.jump == sc.jump then mine = true end
+	end
+	-- A spin with no trick called gets a row of its own.
+	if not mine and sc.air and spin ~= 0 then
+		Push("", { base = nil, jump = sc.jump }, now)
+	end
+	local want = GetConVar("skate3_stance")
+	local opts = {
+		name = function(id) return Known()[id] end,
+		goofy = not want or want:GetString() ~= "regular",
+		fakie = sc.takeoff_fakie, switch = sc.takeoff_switch,
+		flip = cv_spin_flip:GetBool(),
+	}
+	for i, info in ipairs(trickInfo) do
+		if info.jump == sc.jump then
+			tricks[i] = Spin.Name(info.base, spin, opts) or info.base or ""
+		end
+	end
+end
+
 -- Works out this frame's view from the engine's score.
 local function Update(pose)
 	view = nil
@@ -358,7 +450,9 @@ local function Update(pose)
 	local live = sc.active or sc.timer > 0
 	Distances(pose, sc, bailing, now)
 	if live then
-		if not wasLive then tricks, trickAt, lastLabel, lastSeq, readouts, lastMult, tierAt = {}, {}, "", 0, {}, 1, -math.huge end
+		if not wasLive then
+			tricks, trickAt, trickInfo, lastLabel, lastSeq, readouts, lastMult, tierAt = {}, {}, {}, "", 0, {}, 1, -math.huge
+		end
 		seenAt = now
 		shown = sc.line + (sc.active and sc.sequence or 0)
 		if sc.trick ~= "" then lastTrick = sc.trick end
@@ -370,15 +464,8 @@ local function Update(pose)
 		-- reaching x2 or x3 (not the half steps between) sets off the glow and flash
 		if sc.multiplier >= 2 and math.floor(math.min(sc.multiplier, 3)) > math.floor(math.min(lastMult, 3)) then tierAt = now end
 		lastMult = sc.multiplier
-		if sc.trick ~= "" and sc.trick ~= lastLabel then
-			lastLabel = sc.trick
-			tricks[#tricks + 1] = TrickName(sc.trick)
-			trickAt[#tricks] = now
-			if #tricks > 3 then
-				table.remove(tricks, 1)
-				table.remove(trickAt, 1)
-			end
-		end
+		UpdateStack(sc, now)
+		if tricks[#tricks] and tricks[#tricks] ~= "" then lastName = tricks[#tricks] end
 	end
 	wasLive = live
 	local age = now - math.max(seenAt, flash and flash.at or -math.huge)
@@ -399,7 +486,7 @@ local function Update(pose)
 		-- The same as a bare number, for fonts with only digits.
 		value = math.floor((showFlash and flash.value or shown) + 0.5),
 		good = not showFlash or flash.good,
-		trick = TrickName(lastTrick),
+		trick = lastName or TrickName(lastTrick),
 		-- Skate 3's look: the stack of this line's tricks, the last trick
 		-- sequence's score and the line's total, and "FAKIE" when rolling backwards.
 		tricks = tricks,
@@ -575,7 +662,8 @@ end
 function Score.Reset()
 	Meat.Reset()
 	last, flash, shown, lastTrick, seenAt, view, worldOffset = nil, nil, 0, "", -math.huge, nil, nil
-	tricks, trickAt, lastLabel, lastSeq, wasLive = {}, {}, "", 0, false
+	tricks, trickAt, trickInfo, lastLabel, lastSeq, wasLive = {}, {}, {}, "", 0, false
+	lastName, lastCount, groundTrick = nil, nil, nil
 	scoreAt, multAt, lastMult, tierAt = -math.huge, -math.huge, 1, -math.huge
 	readouts, airFrom, manualLast = {}, nil, nil
 	thumpAt, thumpSize, thumpTop, thumpLast = -math.huge, 1, nil, nil
