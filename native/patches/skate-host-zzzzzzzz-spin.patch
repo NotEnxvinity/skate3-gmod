@@ -1,0 +1,99 @@
+Lets skate-host report each jump's spin with the score: the half turns the
+scoring counts (the same tolerance short of each 180 it scores spins with),
+signed by the board's heading, plus the stance the jump left the ground in, a
+jump counter and a trick counter, so the addon's HUD can name spins the way
+Skate 3 does ("Kickflip 360", "FS Half-Cab"). Applied on top of
+skate-host-hud.patch and skate-host-stance.patch (it adds fields to their
+Score). Same license as the files it changes (Apache-2.0).
+
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 98afc5f..1097a70 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -41,6 +41,21 @@ pub struct Score {
+     pub fakie: bool,
+     /// Riding with the opposite foot forward from the natural stance.
+     pub switch: bool,
++    /// The latest jump's spin in half turns, rounded the way the scoring
++    /// does (its tolerance short of each 180), signed by the board's heading:
++    /// positive turns counter-clockwise seen from above. Held after landing
++    /// until the next jump.
++    pub spin: i32,
++    /// Counts jumps; goes up as each one leaves the ground.
++    pub jump: u32,
++    /// Whether the skater is in the air now.
++    pub air: bool,
++    /// The stance the latest jump left the ground in.
++    pub takeoff_fakie: bool,
++    pub takeoff_switch: bool,
++    /// Counts tricks the scoring has announced, so the same trick twice in a
++    /// row still reads as two.
++    pub tricks: u32,
+ }
+ pub struct Pose {
+     pub root: Mat4,
+diff --git a/skate/crates/skate-host/src/scoring_runtime.rs b/skate/crates/skate-host/src/scoring_runtime.rs
+index 18303f7..0b7e093 100644
+--- a/skate/crates/skate-host/src/scoring_runtime.rs
++++ b/skate/crates/skate-host/src/scoring_runtime.rs
+@@ -54,6 +54,10 @@ pub(crate) struct Runtime {
+     previous: [f32; 3],
+     previous_heading: f32,
+     spin: f32,
++    spin_turns: i32,
++    jump: u32,
++    takeoff: (bool, bool),
++    tricks: u32,
+     peak: f32,
+     air_factor: f32,
+     air_repetition: f32,
+@@ -90,6 +94,10 @@ impl Runtime {
+             previous: [0.; 3],
+             previous_heading: 0.,
+             spin: 0.,
++            spin_turns: 0,
++            jump: 0,
++            takeoff: (false, false),
++            tricks: 0,
+             peak: 0.,
+             air_factor: 1.,
+             air_repetition: 1.,
+@@ -247,6 +255,7 @@ impl Runtime {
+                 self.trick_name = d.label.clone();
+                 self.stance = [f.switch, f.fakie, f.nollie, false];
+                 self.new_trick = true;
++                self.tricks = self.tricks.wrapping_add(1);
+                 if self.collector == Collector::Air && !self.air_repetition_set {
+                     self.air_repetition = penalty;
+                     self.air_repetition_set = true;
+@@ -327,6 +336,12 @@ impl Runtime {
+             // The animation owns these two; Session::score fills them in.
+             fakie: false,
+             switch: false,
++            spin: self.spin_turns,
++            jump: self.jump,
++            air: self.collector == Collector::Air,
++            takeoff_fakie: self.takeoff.1,
++            takeoff_switch: self.takeoff.0,
++            tricks: self.tricks,
+         }
+     }
+     pub fn advance(&mut self, f: Frame) -> Result<(), String> {
+@@ -399,6 +414,9 @@ impl Runtime {
+             self.manual_revert_ticks = 0;
+             self.revert_id = None;
+             if next == Collector::Air {
++                self.jump = self.jump.wrapping_add(1);
++                self.spin_turns = 0;
++                self.takeoff = (f.switch, f.fakie);
+                 self.session.holder.reward_sequence(1.);
+                 self.landing_countdown = 0;
+                 if previous_type == Some(8) {
+@@ -499,6 +517,7 @@ impl Runtime {
+             let turns =
+                 ((self.spin.to_degrees().abs() + self.data.collector.scalar(0x63c)) / 180.) as i32;
+             self.air_metrics[3] = self.data.collector.curve(0x370, (turns * 180) as f32) * scale;
++            self.spin_turns = if self.spin < 0. { -turns } else { turns };
+             if f.body_flip
+                 && self.carriers[0]
+                     .as_ref()

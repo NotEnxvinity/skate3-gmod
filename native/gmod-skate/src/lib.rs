@@ -588,6 +588,25 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"fakie");
     lua.push_bool(score.switch);
     lua.set_field(-2, c"switch");
+    // The latest jump's spin (half turns, signed by the board's heading,
+    // counter-clockwise from above positive) and how it left the ground,
+    // for naming spins the way Skate 3 does.
+    for (name, value) in [
+        (c"spin", f64::from(score.spin)),
+        (c"jump", f64::from(score.jump)),
+        (c"tricks", f64::from(score.tricks)),
+    ] {
+        lua.push_number(value);
+        lua.set_field(-2, name);
+    }
+    for (name, value) in [
+        (c"air", score.air),
+        (c"takeoff_fakie", score.takeoff_fakie),
+        (c"takeoff_switch", score.takeoff_switch),
+    ] {
+        lua.push_bool(value);
+        lua.set_field(-2, name);
+    }
     lua.set_field(-2, c"score");
     if let Some(c) = p.camera {
         lua.new_table();
