@@ -17,7 +17,7 @@ local Conflicts = include("skate3/cl_conflicts.lua")
 local Keyboard = S3GM_Keyboard -- loaded just before this file
 
 -- What "Reset these to defaults" puts back.
-local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_retail_audio", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
+local DEFAULTS = { "skate3_stance", "skate3_camera", "skate3_camera_offset", "skate3_camera_side", "skate3_retail_audio", "skate3_sounds", "skate3_bail_sounds", "skate3_footsteps",
 	"skate3_volume", "skate3_score_hud", "skate3_score_style", "skate3_ui_style", "skate3_ui_crisp", "skate3_ui_glyphs", "skate3_ui_world", "skate3_menu", "skate3_marker_static", "skate3_hud", "skate3_melee", "skate3_update_notices", "skate3_hom_look", "skate3_ui_hd" }
 for _, p in ipairs(Boards.PARTS) do
 	DEFAULTS[#DEFAULTS + 1] = p.look
@@ -127,6 +127,13 @@ hook.Add("PopulateToolMenu", "skate3_menu", function()
 			{ "Low", "low" },
 			{ "Normal", "normal" },
 			{ "High", "high" },
+		})
+		panel:NumSlider("Camera offset", "skate3_camera_offset", 0, 2, 2)
+		panel:ControlHelp("How far off to the side the camera sits, so your playermodel isn't in the way of the rail. 0 = dead centre, 1 = Skate 3.")
+		Choices(panel, "Camera side", "skate3_camera_side", {
+			{ "Automatic (the way you face)", "auto" },
+			{ "Left", "left" },
+			{ "Right", "right" },
 		})
 
 		panel:CheckBox("Skate 3's own sound engine (beta)", "skate3_retail_audio")

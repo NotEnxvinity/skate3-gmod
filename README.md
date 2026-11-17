@@ -81,6 +81,9 @@ Settings live in the spawn menu under Utilities > Skate 3: stance (regular or
 goofy), camera height, sounds and volume, and the score widget. The same as
 console variables: `skate3_stance regular` or `goofy`, `skate3_camera low`,
 `normal` or `high` (`skate3_camera_cycle` steps through them, handy on a bind),
+`skate3_camera_offset` from 0 (camera dead centre behind you) to 2 (1 is Skate 3's
+framing, off to the side so your body isn't in the way), `skate3_camera_side auto`
+(the side you face, flips for goofy, fakie and switch), `left` or `right`,
 `skate3_sounds hl2`, `disc` (Skate 3's own sounds, which setup installs) or `off`, `skate3_bail_sounds disc` or `hl2` (bails with the disc sounds), `skate3_bone_sounds auto`, `disc`, `hl2` or `off` (the cracks of a fracture or a break), `skate3_multiplier_sounds 0` (the chime when the score multiplier goes up), `skate3_volume` from 0 to 1, `skate3_score_hud 0`
 hides the trick score, and `skate3_score_style minimal`, `world` (floating beside the skater) or `hl2` picks its look. For debugging, `skate3_debug_rails 1` draws the grind rails found in the
 map, `skate3_debug_input 1` shows the controller input, `skate3_debug_sounds 1` prints each bail hit, bone break and multiplier chime, `skate3_sound_scan menu` plays a bank's sounds one by one (and `skate3_menu_names mult` lists the interface sounds by name), `skate3_data_path` points at converted data somewhere else, and the
