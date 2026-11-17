@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use glam::{Mat3, Mat4, Vec3};
 use skate_bridge::bridge::{Controls, Session};
-use skate_bridge::repro::{Driver, Event, Recording};
+use skate_bridge::repro::{Driver, Event, Recording, Splice};
 use skate_bridge::surfaces::{Fitted, Surfaces};
 use skate_bridge::{collision, world};
 
@@ -32,6 +32,9 @@ pub enum Job {
         aspect: f32,
     },
     Suspend,
+    /// The player's D-pad gestures: Skate 3 catalog indices for Up, Down,
+    /// Left and Right, or None for the retail default. Kept for later rides.
+    Gestures { picks: Option<[u32; 4]> },
     /// Objects on top of the map, such as spawned props, in Source units.
     Props { extra: Vec<[Vec3; 3]> },
     /// Where the map's moving brush entities (doors...) stand now.
@@ -79,6 +82,12 @@ pub struct Pose {
     /// Every bone of the skater and board, in Source space.
     pub bones: Vec<(String, Mat4)>,
     pub score: Score,
+    /// The D-pad gesture playing: (catalog index, hands), hands 0 = both,
+    /// 1 = right only, 2 = left only.
+    pub gesture: Option<(u32, u8)>,
+    /// Seconds of frame time one simulation step takes now: a sixtieth,
+    /// longer while Skate 3's slow motion plays. For drawing between steps.
+    pub period: f32,
 }
 
 /// The trick score, as the engine keeps it for its HUD.
@@ -143,9 +152,12 @@ impl Runtime {
 
     pub fn send(&self, job: Job) {
         // A send only fails once the worker died, which Shared already reports.
-        if let Some(send) = &self.send {
-            let _ = send.send(job);
-        }
+        let _ = self.try_send(job);
+    }
+
+    /// Like `send`, saying whether the job reached the worker.
+    pub fn try_send(&self, job: Job) -> bool {
+        self.send.as_ref().is_some_and(|send| send.send(job).is_ok())
     }
 }
 
@@ -320,6 +332,10 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
     // Set once the simulation failed: some of its state may be non-finite
     // beyond what a teleport resets, so the next ride starts a fresh session.
     let mut broken = false;
+    // The player's D-pad gestures, applied to every session built.
+    let mut gestures: Option<[u32; 4]> = None;
+    // Arms drawn from the animation instead of the spring-driven body.
+    let mut calm = skate_bridge::calm::Calm::default();
     // Prop collision: built on its own thread, one build at a time, with the
     // newest set of props waiting its turn. Builds for a map since replaced
     // are dropped.
@@ -388,9 +404,17 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             map.fitted = r.fitted;
                             map.base_gen = r.generation;
                         }
-                        // A ride recorded from here replays on the new collision.
-                        recording = Some(Recording::new(done.triangles.clone(), done.rails.clone()));
-                        recording_full = false;
+                        // The swap goes into the recording at the frame it
+                        // happened, so a replay swaps it in at the same point.
+                        // (Restarting the recording here left rides that began
+                        // mid-way, which replayed as a skater who never rode.)
+                        if recording.is_some() {
+                            let event = Event::Collision {
+                                triangles: Splice::between(&map.triangles, &done.triangles),
+                                rails: Splice::between(&map.rails, &done.rails),
+                            };
+                            record(&mut recording, &mut recording_full, event);
+                        }
                         map.triangles = done.triangles;
                         map.rails = done.rails;
                     }
@@ -571,6 +595,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         }
                         let session = session.as_mut().ok_or("the map isn't loaded yet")?;
                         session.set_stance(goofy);
+                        session.set_gestures(gestures);
+                        record(&mut recording, &mut recording_full, Event::Gestures { picks: gestures });
                         record(&mut recording, &mut recording_full, Event::Stance { goofy });
                         let spawn = collision::to_skate(pos).to_array();
                         let heading = yaw_degrees.to_radians() + std::f32::consts::FRAC_PI_2;
@@ -585,7 +611,8 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         );
                         last_pos = Some(pos);
                         let pose = driver.activate(session, spawn, heading, aspect)?;
-                        let pose = convert(&pose)?;
+                        let mut pose = convert(&pose)?;
+                        pose.period = session.period();
                         set(&|s| {
                             s.active = true;
                             s.error = None;
@@ -617,9 +644,23 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                             crate::audio::on_tick(s, &mut audio_state)
                         })?;
                         if advanced {
-                            let mut pose = convert(&session.pose())?;
+                            let raw = session.pose();
+                            let mut pose = convert(&raw)?;
+                            if CALM_LIMBS.load(std::sync::atomic::Ordering::Relaxed) {
+                                // The animation's pose, placed like the bones are.
+                                let root = crate::skater::to_source(Mat4::from_cols_array(&raw.root.to_cols_array()));
+                                let animation: Vec<Mat4> = session
+                                    .animation_globals()
+                                    .iter()
+                                    .map(|m| root * crate::skater::to_source(Mat4::from_cols_array(m)))
+                                    .collect();
+                                calm.apply(&mut pose.bones, &animation, &pose.state, 1. / 0.0254);
+                            } else {
+                                calm = skate_bridge::calm::Calm::default();
+                            }
                             last_pos = Some(pose.pos);
                             pose.score = session.score();
+                            pose.period = session.period();
                             if states.last().is_none_or(|(state, _)| *state != pose.state) {
                                 if states.len() == 6 {
                                     states.remove(0);
@@ -630,12 +671,20 @@ fn run(jobs: mpsc::Receiver<Job>, shared: Arc<Mutex<Shared>>) {
                         }
                     }
                     Job::Props { .. } | Job::Doors { .. } | Job::Surfaces { .. } => {}
+                    Job::Gestures { picks } => {
+                        gestures = picks;
+                        if let Some(session) = session.as_mut() {
+                            session.set_gestures(gestures);
+                            record(&mut recording, &mut recording_full, Event::Gestures { picks });
+                        }
+                    }
                     Job::Suspend => {
                         if let Some(session) = session.as_mut().filter(|_| !broken) {
                             record(&mut recording, &mut recording_full, Event::Suspend);
                             driver.suspend(session);
                         }
                         crate::audio::deactivate();
+                        crate::audio::suspend_done();
                         set(&|s| s.active = false);
                     }
                 }
@@ -786,8 +835,15 @@ fn convert(p: &skate_bridge::bridge::Pose) -> Result<Pose, String> {
                 .collect()
         },
         score: Score::default(),
+        gesture: p.gesture,
+        period: 1. / 60.,
     })
 }
+
+/// Whether the arms are drawn from the animation (skate3_calm_limbs): the
+/// body the engine simulates overshoots fast arm swings. Only what is drawn
+/// changes; the simulation is the same either way.
+pub static CALM_LIMBS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// A vertical field of view as Source's horizontal one at a 4:3 aspect.
 fn source_fov(vertical_degrees: f32) -> f32 {

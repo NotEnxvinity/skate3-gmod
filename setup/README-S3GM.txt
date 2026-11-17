@@ -1,5 +1,5 @@
-S3GM v2.3.0: Skate 3 in Garry's Mod
-===================================
+S3GM: Skate 3 in Garry's Mod
+============================
 
 Skate 3's real skating in Garry's Mod: its own physics, flick-it tricks,
 grinds, manuals and bails, on any map, with any playermodel.
@@ -26,15 +26,24 @@ Install
 -------
 Video walkthrough of this whole install: https://youtu.be/oGdIwMNwp14
 
-1. Extract this zip anywhere. You get one folder, S3GM-setup.
-2. Open S3GM-setup and double-click the setup for your computer:
-     Windows:          S3GM-setup-Windows.bat
+1. Extract this zip anywhere. You get one folder, S3GM-setup. Updating?
+   Extract the new zip into a fresh place (or delete the old S3GM-setup
+   folder first), don't extract it over the old one.
+2. Open S3GM-setup and double-click the setup for your computer. That's the
+   only thing to click: the setup-files folder is what the setup itself uses,
+   nothing in there needs opening.
+     Windows:          S3GM-setup-Windows.bat (if Windows blocks it, e.g.
+                       Smart App Control or "Windows protected your PC":
+                       delete the extracted folder, right-click the
+                       downloaded .zip > Properties > tick Unblock > OK,
+                       then extract it again)
      Linux / SteamOS:  S3GM-setup-Linux.sh (Desktop Mode; pick Execute/Run
                        if it asks. If it only opens as text: right-click >
                        Properties > Permissions > Is executable, or run
                        "bash S3GM-setup-Linux.sh" in a terminal)
-     Mac:              S3GM-setup-Mac.command (use the Mac download. The
-                       first time macOS blocks it: System Settings >
+     Mac:              S3GM-setup-Mac.command (in the Mac download, the
+                       zip ending in -Mac.zip. The first time macOS
+                       blocks it: System Settings >
                        Privacy & Security > Open Anyway, or run
                        "bash S3GM-setup-Mac.command" in Terminal)
 3. A window shows your garrysmod folder and your Skate 3 disc. Fix either
@@ -66,8 +75,10 @@ tricks, triggers grab. B (R1) is the attack button: a board smack when the
 board is in your hand, punches without it. Hold L1 (Shift on keyboard) for the quick menu: D-pad
 down drops a session marker, hold D-pad up to go back to it, left interacts
 with what you're next to, Y opens the games list and X opens settings (D-pad up
-and down pick a row, left and right change a setting, B goes back). Switch
-weapons to leave skate mode.
+and down pick a row, left and right change a setting, B goes back). Tap the
+D-pad without L1 for Skate 3's own gestures on whichever hand is free (hold
+to loop; pick yours in the menu's Settings). Switch weapons to leave skate
+mode.
 
 
 Settings
@@ -113,7 +124,8 @@ Credits
   Chasm and contributors), used with their permission on the condition
   that this mod stays free. It always will be.
 - Headless host, collision handoff and grind-rail finder:
-  chasmlol/2010-rust-rewrite-mashup (Apache-2.0, see LICENSES/ and NOTICE).
+  chasmlol/2010-rust-rewrite-mashup (Apache-2.0, see setup-files/LICENSES
+  and setup-files/NOTICE).
 - Module architecture inspired by ckosmic/g64. No code taken.
 - Skate 3's sound engine: becaring/SK8V (Apache-2.0), ported for this mod.
 - Sound bank research: doriangironde/skate-3-rust-macos and Hailey-Ross's
@@ -123,6 +135,6 @@ Credits
 
 License
 -------
-GPL-3.0 (LICENSE). Code ported from chasmlol's project stays under
-Apache-2.0 as NOTICE describes. The source code is in the S3GM release post
+GPL-3.0 (setup-files/LICENSE). Code ported from chasmlol's project stays
+under Apache-2.0 as setup-files/NOTICE describes. The source code is in the S3GM release post
 next to this download. Skate 3 and its assets belong to Electronic Arts.

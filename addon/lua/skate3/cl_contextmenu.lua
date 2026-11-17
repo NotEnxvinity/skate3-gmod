@@ -19,7 +19,10 @@
 -- mach 1 (jump, L1, land on the board) works as ever. The menu only opens
 -- once L1 has been down a moment and the skater is on the ground, so the L1
 -- of a mach 1 jump never flashes it up. While it is open X and Y belong to the
--- menu: Menu.Mask() is what the simulation must not see.
+-- menu: Menu.Mask() is what the simulation must not see. The D-pad on its own
+-- plays Skate 3's gestures (cl_gestures.lua); the engine already ignores it
+-- while L1 is down, and Menu.Mask() keeps it from the skater while a list is
+-- open and until a direction that worked the menu is let go.
 
 S3GM_Menu = S3GM_Menu or {}
 local Menu = S3GM_Menu
@@ -41,6 +44,7 @@ local lbSince               -- when L1 went down on the ground
 local rootShown = false
 local last = 0              -- last frame's buttons
 local ignore = 0            -- D-pad directions held since a view opened; ignored until let go
+local swallow = 0           -- D-pad directions that worked the menu, kept from the skater until let go
 local hold                  -- { bit, since } while up is held to go back to the marker
 local repeatAt              -- when a held up/down repeats next
 local repeatSince           -- when this hold of up/down began
@@ -127,14 +131,22 @@ end
 -- is up (Y would step off the board). Read before the frame's step, so it
 -- goes by the menu as the last frame left it.
 function Menu.Mask()
-	if #stack > 0 then return bor(BTN_X, BTN_Y, BTN_B) end
-	if rootShown then return bor(BTN_X, BTN_Y) end
-	return 0
+	local mask = swallow
+	if #stack > 0 then
+		mask = bor(mask, BTN_X, BTN_Y, BTN_B, DPAD)
+	elseif rootShown then
+		mask = bor(mask, BTN_X, BTN_Y)
+	end
+	-- Gestures turned off: the D-pad alone does nothing. With L1 down it
+	-- still goes through, as it always has.
+	local Gestures = S3GM_Gestures
+	if Gestures and not Gestures.Enabled() and band(last, LB) == 0 then mask = bor(mask, DPAD) end
+	return mask
 end
 
 -- Starts over: the skater stopped skating.
 function Menu.Reset()
-	stack, lbSince, rootShown, hold, repeatAt, ignore = {}, nil, false, nil, nil, 0
+	stack, lbSince, rootShown, hold, repeatAt, ignore, swallow = {}, nil, false, nil, nil, 0, 0
 end
 
 ---------------------------------------------------------------------------
@@ -183,6 +195,7 @@ local SETTINGS = {
 	{ "Look", "skate3_ui_style", { { "Skate 3", "skate3" }, { "Minimal", "minimal" }, { "Half-Life 2", "hl2" } } },
 	{ "Button pictures", "skate3_ui_glyphs", { { "Automatic", "auto" }, { "Xbox", "xbox" }, { "PlayStation", "playstation" } } },
 	{ "Score beside the skater", "skate3_ui_world", ONOFF },
+	{ "Marker static", "skate3_marker_static", ONOFF },
 	{ "Hall of Meat", "skate3_hall_of_meat", ONOFF },
 	{ "Hall of Meat bones", "skate3_hom_look", { { "Skeleton", "skeleton" }, { "X-ray", "xray" } },
 		after = function(value)
@@ -192,8 +205,27 @@ local SETTINGS = {
 			end
 		end },
 	{ "Punch and smack", "skate3_melee", ONOFF },
+	{ "D-pad gestures", "skate3_gestures", ONOFF },
 	{ "Update notices", "skate3_update_notices", ONOFF },
 }
+
+-- A row per D-pad direction, cycling through Skate 3's 37 gestures.
+do
+	local Gestures = S3GM_Gestures
+	if Gestures then
+		local choices = {}
+		for i, g in ipairs(Gestures.LIST) do choices[#choices + 1] = { Gestures.Name(i), g[1] } end
+		for i = #SETTINGS, 1, -1 do
+			if SETTINGS[i][2] == "skate3_gestures" then
+				for k, d in ipairs(Gestures.DIRECTIONS) do
+					table.insert(SETTINGS, i + k, { "Gesture " .. d[2], "skate3_gesture_" .. d[1], choices,
+						enabled = Gestures.Enabled })
+				end
+				break
+			end
+		end
+	end
+end
 
 -- Which of a setting's values the convar is on (the nearest, for numbers).
 local function ValueIndex(def, cv)
@@ -219,7 +251,8 @@ local function SettingsRows()
 	for _, def in ipairs(SETTINGS) do
 		local cv = GetConVar(def[2])
 		if cv then
-			rows[#rows + 1] = { label = def[1], tag = def[3][ValueIndex(def, cv)][1], def = def, cv = cv }
+			rows[#rows + 1] = { label = def[1], tag = def[3][ValueIndex(def, cv)][1], def = def, cv = cv,
+				enabled = not def.enabled or def.enabled() }
 		end
 	end
 	return rows
@@ -269,6 +302,11 @@ function Menu.Update(now, pose, buttons)
 
 	local pressed = band(buttons, bnot(last))
 	last = buttons
+	-- A direction let go is the skater's again; one held while the menu is
+	-- up stays the menu's until then (backing out of a list with left must
+	-- not start the left gesture as the list closes).
+	swallow = band(swallow, buttons)
+	if #stack > 0 or rootShown then swallow = bor(swallow, band(buttons, DPAD)) end
 	ignore = band(ignore, buttons)
 	local free = band(buttons, bnot(ignore))
 	local freshly = band(pressed, bnot(ignore))
@@ -313,11 +351,13 @@ function Menu.Update(now, pose, buttons)
 			Menu.Back()
 		end
 		hold = nil
+		Marker.Hold(0)
 		return false
 	end
 
 	if not rootShown then
 		hold = nil
+		Marker.Hold(0)
 		return false
 	end
 
@@ -347,10 +387,12 @@ function Menu.Update(now, pose, buttons)
 			if hold.progress >= 1 then
 				hold = nil
 				ignore = bor(ignore, UP)
+				Marker.Hold(0)
 				if Marker.GoTo() then return true end
 			end
 		end
 	end
+	Marker.Hold(hold and hold.progress or 0)
 	return false
 end
 
@@ -588,9 +630,6 @@ local function DrawRoot(look, pose, style)
 			local alpha = (r.enabled == false) and 0.3 or 1
 			look.Icon(r.icon, 99, top, alpha)
 			look.Text(r.label, 158, top + 11, 20, alpha)
-			if hold and r.bit == hold.bit and hold.progress and hold.progress > 0 then
-				UI.Rect(158, top + 36, math.max(look.Width(r.label, 20), 20) * hold.progress, 2, CREAM, 0.9)
-			end
 			top = top + PITCH
 		end
 	end

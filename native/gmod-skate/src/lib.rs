@@ -427,6 +427,16 @@ lua_fn!(audio_ground, |lua| {
     0
 });
 
+// AudioEvent(name): plays one of Skate 3's front-end sound events (retail's
+// GlobalFEPlaySound, e.g. "cellphone_goto_marker") through the engine, on the
+// ride's next tick (after any ride stop asked for before it). False when the
+// engine isn't playing.
+lua_fn!(audio_event, |lua| {
+    let posted = lua.string(1).is_some_and(|name| audio::post_event(&name));
+    lua.push_bool(posted);
+    1
+});
+
 // AudioGrind(row): the material of the rail or ledge being ground; nothing clears it.
 lua_fn!(audio_grind, |lua| {
     audio::set_grind(lua.number(1).filter(|r| *r >= 0.).map(|r| r as u32));
@@ -484,8 +494,30 @@ lua_fn!(audio_status, |lua| {
     2
 });
 
+// Arms drawn from the animation (1, the default) or from the spring-driven
+// body as Skate 3 simulates it (0).
+lua_fn!(set_calm_limbs, |lua| {
+    let on = lua.number(1).is_none_or(|v| v != 0.);
+    runtime::CALM_LIMBS.store(on, std::sync::atomic::Ordering::Relaxed);
+    0
+});
+
+// The player's D-pad gestures, Skate 3 catalog indices 0..36 for Up, Down,
+// Left and Right. No arguments (or any out of range) = the retail default.
+lua_fn!(set_gestures, |lua| {
+    let picks: Option<Vec<u32>> = (1..=4)
+        .map(|i| lua.number(i).filter(|v| (0. ..37.).contains(v)).map(|v| v as u32))
+        .collect();
+    let picks = picks.map(|p| [p[0], p[1], p[2], p[3]]);
+    with_runtime(|r| r.send(Job::Gestures { picks }));
+    0
+});
+
 lua_fn!(suspend, |lua| {
-    with_runtime(|r| r.send(Job::Suspend));
+    // Counted only when the worker will carry it out (audio events wait for it).
+    if with_runtime(|r| r.try_send(Job::Suspend)) == Some(true) {
+        audio::suspend_asked();
+    }
     let _ = lua;
     0
 });
@@ -516,6 +548,14 @@ lua_fn!(get_pose, |lua| {
     lua.set_field(-2, c"bail");
     lua.push_number(p.tick as f64);
     lua.set_field(-2, c"tick");
+    lua.push_number(f64::from(p.period));
+    lua.set_field(-2, c"period");
+    if let Some((gesture, hands)) = p.gesture {
+        lua.push_number(f64::from(gesture));
+        lua.set_field(-2, c"gesture");
+        lua.push_number(f64::from(hands));
+        lua.set_field(-2, c"gesture_hands");
+    }
     // Only the bones Lua draws or retargets; the rest are fingers and faces.
     if let Ok(wanted) = WANTED_BONES.lock() {
         lua.new_table();
@@ -801,10 +841,13 @@ pub unsafe extern "C" fn gmod13_open(state: State) -> c_int {
         (c"Activate", activate),
         (c"Step", step),
         (c"Suspend", suspend),
+        (c"SetGestures", set_gestures),
+        (c"SetCalmLimbs", set_calm_limbs),
         (c"AudioStart", audio_start),
         (c"AudioStop", audio_stop),
         (c"AudioGround", audio_ground),
         (c"AudioGrind", audio_grind),
+        (c"AudioEvent", audio_event),
         (c"AudioSpace", audio_space),
         (c"AudioReverb", audio_reverb),
         (c"AudioVolume", audio_volume),
@@ -840,6 +883,20 @@ pub unsafe extern "C" fn gmod13_close(state: State) -> c_int {
         lua.set_field(lua::GLOBALS, c"skate3");
     }
     0
+}
+
+/// Our own DllMain, so the MinGW linker stops taking one from an import
+/// library. winapi's XInput import lib lists `DllMain` as an XINPUT1_4.dll
+/// export, and the real DLL has none, which would stop Windows loading us.
+/// Rust's thread-local cleanup uses TLS callbacks, not DllMain.
+#[cfg(windows)]
+#[unsafe(no_mangle)]
+pub extern "system" fn DllMain(
+    _module: *mut std::ffi::c_void,
+    _reason: u32,
+    _reserved: *mut std::ffi::c_void,
+) -> i32 {
+    1
 }
 
 #[cfg(test)]

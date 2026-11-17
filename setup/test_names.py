@@ -19,8 +19,9 @@ def table(strings):
 @unittest.skipUnless(ENGINE, 'SKATE3_ENGINE not set')
 class NamesTest(unittest.TestCase):
     def test_install(self):
-        labels = table(['', 'ID_TRICK_FLIP_NOLLIE_KICKFLIP', 'ID_MENU_START', 'ID_TRICK_GRAB_MIRACLE_WHIP', 'ID_TRICK_EMPTY', ''])
-        english = table(['', 'Nollie Kickflip', 'Start', 'Miracle Whip ', '', ''])
+        labels = table(['', 'ID_TRICK_FLIP_NOLLIE_KICKFLIP', 'ID_MENU_START', 'ID_TRICK_GRAB_MIRACLE_WHIP', 'ID_TRICK_EMPTY',
+                        'ID_GESTURE_SPOCK', ''])
+        english = table(['', 'Nollie Kickflip', 'Start', 'Miracle Whip ', '', 'Live Long', ''])
         with tempfile.TemporaryDirectory() as tmp:
             disc = Path(tmp) / 'disc/data/big'
             disc.mkdir(parents=True)
@@ -29,6 +30,7 @@ class NamesTest(unittest.TestCase):
             self.assertEqual(names.install(ENGINE, Path(tmp) / 'disc', out, lambda _: None), 2)
             self.assertEqual(json.loads((out / 'tricks.json').read_text(encoding='utf-8')),
                              {'ID_TRICK_FLIP_NOLLIE_KICKFLIP': 'Nollie Kickflip', 'ID_TRICK_GRAB_MIRACLE_WHIP': 'Miracle Whip'})
+            self.assertEqual(json.loads((out / 'gestures.json').read_text(encoding='utf-8')), {'ID_GESTURE_SPOCK': 'Live Long'})
 
     def test_missing_tables(self):
         with tempfile.TemporaryDirectory() as tmp:

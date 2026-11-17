@@ -27,13 +27,16 @@ ReadSkip()
 cvars.AddChangeCallback("skate3_debug_skip", ReadSkip, "skate3")
 
 -- Rows of a 3x4 transform, as the module returns them.
+-- One set of rows, filled in again for every matrix (Matrix() copies the
+-- numbers out): a fresh table of tables per bone per frame was a good part
+-- of the throwaway memory whose clean-up froze the game.
+local ROWS = { { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 0 }, { 0, 0, 0, 1 } }
+local ROW1, ROW2, ROW3 = ROWS[1], ROWS[2], ROWS[3]
 local function Mat(t)
-	return Matrix({
-		{ t[1], t[2], t[3], t[4] },
-		{ t[5], t[6], t[7], t[8] },
-		{ t[9], t[10], t[11], t[12] },
-		{ 0, 0, 0, 1 },
-	})
+	ROW1[1], ROW1[2], ROW1[3], ROW1[4] = t[1], t[2], t[3], t[4]
+	ROW2[1], ROW2[2], ROW2[3], ROW2[4] = t[5], t[6], t[7], t[8]
+	ROW3[1], ROW3[2], ROW3[3], ROW3[4] = t[9], t[10], t[11], t[12]
+	return Matrix(ROWS)
 end
 
 local data -- skate3.GetSkater(): board parts and the skater's bind pose
@@ -797,11 +800,8 @@ local function KeepNeck(ent, world)
 	end
 	for i, m in pairs(world) do
 		local by = Total(i)
-		if by then
-			m = Matrix(m)
-			m:SetTranslation(m:GetTranslation() + by)
-			world[i] = m
-		end
+		-- Moved in place: every matrix in world was made for this frame.
+		if by then m:SetTranslation(m:GetTranslation() + by) end
 	end
 end
 
@@ -1056,6 +1056,7 @@ end
 -- Your skater's pose p as a frame for Body.Apply (and, the same numbers, for
 -- other players): each posed bone's world turn relative to the way the
 -- skater faces, and where the hips go.
+local beforePose = {} -- the skeleton before the finishing touches, kept between frames
 local function RealFrame(p)
 	local origin = Vector(p.pos[1], p.pos[2], p.pos[3])
 	local forward = Vector(p.forward[1], p.forward[2], p.forward[3])
@@ -1093,8 +1094,8 @@ local function RealFrame(p)
 	KeepNeck(model, world)
 	local t2 = SysTime()
 	if not Skater.Skip.anim then
-		local before = {}
-		for i, m in pairs(world) do before[i] = m end
+		local before = beforePose
+		for i = 0, frozen.count - 1 do before[i] = world[i] end
 		Anim.PostPose(owner, world, p)
 		-- What it moved of the ValveBiped skeleton (fingers, legs) is turned
 		-- too; hair, tails and capes below those stay the engine's, so they
@@ -1110,23 +1111,24 @@ local function RealFrame(p)
 	lastWorld = world
 	-- The finished pose of every skeleton bone the copy would write, exactly
 	-- as the copy gets it: your body is set to it at the end of each setup.
-	local rots, final, sent = {}, {}, {}
+	local rots, final, rels = {}, {}, {}
 	for i = 0, frozen.count - 1 do
 		if world[i] and writable[i] and skeleton[i] and frozen.locals[i] then
 			final[i] = world[i]
 			local rel = toFace * world[i]
 			local r = Body.RotOnly(rel)
 			rots[i] = r
-			-- Turned into numbers to send only when a frame is sent (a few
-			-- times a second), not every frame.
-			sent[#sent + 1] = { i = i, r = r, p = rel:GetTranslation() }
+			-- Turned into a list of numbers to send only when a frame is
+			-- sent (a few times a second), not every frame.
+			rels[i] = rel
 		end
 	end
 	local hipsAt = pelvis and world[pelvis] and toFace * world[pelvis]:GetTranslation()
 	pelvisWant = pelvis and world[pelvis]
 	lastFrame = {
 		origin = origin, yaw = yaw, state = p.state, forward = forward, up = up,
-		bones = sent, pelvis = hipsAt and pelvis or nil, ppos = hipsAt, boardOf = p,
+		rots = rots, rels = rels, count = frozen.count,
+		pelvis = hipsAt and pelvis or nil, ppos = hipsAt, boardOf = p,
 		model = model.skate3Name, scale = p.scale,
 	}
 	return { origin = origin, yaw = yaw, rots = rots, final = final, hips = hipsAt and pelvis or nil, hipsAt = hipsAt },
@@ -1167,9 +1169,12 @@ function Skater.NetFrame()
 	if model.skate3Real then
 		local f = lastFrame
 		if f and f.boardOf then
-			for _, b in ipairs(f.bones) do
-				if b.r then b.q, b.r = Body.Quat(b.r), nil end
+			local sent = {}
+			for i = 0, f.count - 1 do
+				local r = f.rots[i]
+				if r then sent[#sent + 1] = { i = i, q = Body.Quat(r), p = f.rels[i]:GetTranslation() } end
 			end
+			f.bones, f.rots, f.rels = sent, nil, nil
 			f.board, f.boardOf = BoardParts(f.boardOf, f.origin), nil
 		end
 		return f

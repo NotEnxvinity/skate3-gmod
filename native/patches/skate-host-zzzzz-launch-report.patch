@@ -1,0 +1,72 @@
+diff --git a/skate/crates/skate-host/src/physics/biped_ground.rs b/skate/crates/skate-host/src/physics/biped_ground.rs
+index 4bab9bf..25083b8 100644
+--- a/skate/crates/skate-host/src/physics/biped_ground.rs
++++ b/skate/crates/skate-host/src/physics/biped_ground.rs
+@@ -307,7 +307,16 @@ pub(crate) fn update(
+     //every native non-mode1 launch; no fabricated departure vectors.
+     let launch_input = services::launch_input(skater, None)?;
+     if let Some(packet) = skater.biped_ground.prepare_air(&launch_input)? {
+-        services::submit_air(physics, skater, packet)?;
++        services::submit_air(physics, skater, packet).map_err(|error| {
++            if error.starts_with("Nonfinite") {
++                format!(
++                    "{error} [{}]",
++                    launch_report(&packet, &launch_input, &skater.biped_ground.controller.state)
++                )
++            } else {
++                error
++            }
++        })?;
+     }
+     let owner = &mut skater.biped_ground;
+     owner.ground.flags_144_to_150[0] = false;
+@@ -392,3 +401,49 @@ pub(crate) fn submit_geometry(
+         p.flags_2488,
+     )
+ }
++
++/// Names every non-finite packet lane and the values the launch read, so a
++/// glitched ride's console line shows where the launch went wrong.
++fn launch_report(
++    packet: &skate_core::player::offboard::air_launch::Packet,
++    input: &sync::LaunchInput,
++    state: &skate_core::player::offboard::controller::State,
++) -> String {
++    let fields = [
++        ("velocity_0", packet.velocity_0),
++        ("secondary_16", packet.secondary_velocity_16),
++        ("position_32", packet.position_32),
++        ("up_48", packet.up_48),
++        ("forward_64", packet.forward_64),
++        ("board_80", packet.board_position_80),
++    ];
++    let mut bad = Vec::new();
++    for (name, v) in fields {
++        for (lane, x) in v.iter().enumerate() {
++            if !x.is_finite() {
++                bad.push(format!("{name}.{}", ["x", "y", "z", "w"][lane]));
++            }
++        }
++    }
++    for (name, x) in [("s96", packet.scalar_96), ("s100", packet.scalar_100), ("s104", packet.scalar_104)] {
++        if !x.is_finite() {
++            bad.push(name.to_owned());
++        }
++    }
++    let p = &input.processed;
++    format!(
++        "bad {}; mode {}; packet {:?}; processed {:?}; elapsed {}; com {:?}; ref_up {:?}; motion_up {:?}; spin {} speed {} steer {} contact {}",
++        bad.join(","),
++        skate_core::player::offboard::air_launch::mode(p, false),
++        packet,
++        p,
++        input.elapsed_2664,
++        input.skeleton_point_10960,
++        state.frame_output.frame[1],
++        state.motion.frame_0[1],
++        state.motion.angular_velocity_688,
++        state.motion.speed_704,
++        state.intent.steering,
++        state.contact.active,
++    )
++}

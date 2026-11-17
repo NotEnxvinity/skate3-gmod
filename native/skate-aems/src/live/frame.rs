@@ -27,6 +27,10 @@ pub struct Frame {
     /// Share of the wheels (0..=1) on loose ground or vegetation (Skate rows
     /// 7, 9); trims the rolling grains (`Grains::set_ground`).
     pub loose_ground: f32,
+    /// Front-end sound events posted this tick, by name hash (`GlobalFEPlaySound`,
+    /// e.g. the session marker's `cellphone_goto_marker`): host input, not a
+    /// skater field.
+    pub ui_events: Vec<u64>,
 }
 
 /// One wheel entering a measured groove, raised line or pit

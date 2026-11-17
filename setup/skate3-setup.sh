@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # S3GM (Skate 3 in Garry's Mod) setup for Linux / SteamOS and macOS.
-# S3GM-setup-Linux.sh and S3GM-setup-Mac.command start it with a double-click.
+# S3GM-setup-Linux.sh and S3GM-setup-Mac.command start it with a double-click;
+# in the download it sits in S3GM-setup/setup-files.
 #
 #   ./skate3-setup.sh                                        the setup window,
 #                                                            filled in with an
@@ -32,6 +33,11 @@ if [ "$(uname -s)" = Darwin ]; then
 fi
 
 here=$(cd "$(dirname "$0")" && pwd)
+# The folder the player opened: the download keeps this script in
+# S3GM-setup/setup-files, with only the launchers and README above it.
+top=$here
+[ "$(basename "$here")" = setup-files ] && top=$(dirname "$here")
+export PYTHONDONTWRITEBYTECODE=1
 cache=${XDG_CACHE_HOME:-$HOME/.cache}/skate3-gmod
 die() {
     echo "error: $*" >&2
@@ -66,7 +72,7 @@ while [ $# -gt 0 ]; do
 done
 if [ -z "$game" ]; then
     found=()
-    for dir in "$here" "$(dirname "$here")"; do
+    for dir in "$top" "$(dirname "$top")"; do
         for f in "$dir"/*.iso "$dir"/*.ISO "$dir"/default.xex "$dir"/*/default.xex; do
             [ -f "$f" ] && found+=("$f")
         done

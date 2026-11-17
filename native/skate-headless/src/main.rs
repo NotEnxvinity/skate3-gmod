@@ -14,6 +14,9 @@
 //! `--soak` rides the test park for that long at 60 frames a second, driven
 //! exactly as the game drives it, and prints the process's memory as it goes,
 //! to tell a leak in the simulation from one in the game.
+//!
+//! `--gestures` rolls along and plays all 37 of Skate 3's D-pad gestures, four
+//! at a time, printing which ones start and which hands they use.
 
 use glam::Vec3;
 use skate_bridge::bridge::{Controls, Session};
@@ -25,6 +28,7 @@ fn main() {
     let mut ticks = 300u32;
     let mut replay = None;
     let mut soak = None;
+    let mut gestures = false;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -32,6 +36,7 @@ fn main() {
             "--ticks" => ticks = args.next().and_then(|n| n.parse().ok()).unwrap_or(ticks),
             "--replay" => replay = args.next(),
             "--soak" => soak = args.next().and_then(|n| n.parse::<u32>().ok()),
+            "--gestures" => gestures = true,
             _ => {
                 eprintln!(
                     "usage: skate-headless [--assets <dir>] [--ticks N] [--replay <ride.sk3r>] [--soak <seconds>]"
@@ -79,6 +84,19 @@ fn main() {
         println!("no --assets given; skipping the simulation");
         return;
     };
+    if gestures {
+        let result = std::thread::Builder::new()
+            .stack_size(32 * 1024 * 1024)
+            .spawn(move || run_gestures(&assets, park))
+            .expect("spawn skate thread")
+            .join()
+            .expect("skate thread panicked");
+        if let Err(e) = result {
+            eprintln!("skate: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Some(seconds) = soak {
         let result = std::thread::Builder::new()
             .stack_size(32 * 1024 * 1024)
@@ -239,6 +257,17 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
         rec.rails.len(),
         rec.events.len()
     );
+    // Older builds restarted the recording when prop or door collision was
+    // swapped in mid-ride, so the replay never rode and always came back clean.
+    if !matches!(
+        rec.events.iter().find(|e| matches!(e, Event::Activate { .. } | Event::Step { .. })),
+        None | Some(Event::Activate { .. })
+    ) {
+        println!("this ride starts mid-way (recorded before collision swaps were saved), so it can't replay the glitch");
+        return Ok(());
+    }
+    let mut triangles = rec.triangles.clone();
+    let mut rails = rec.rails.clone();
     let mut session = Session::new(
         std::path::Path::new(assets),
         rec.triangles,
@@ -253,7 +282,7 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
     // tick that breaks.
     let mut ticks = 0u64;
     for (i, event) in rec.events.iter().enumerate() {
-        let result = match *event {
+        let result = match event.clone() {
             Event::Activate {
                 spawn,
                 heading,
@@ -292,6 +321,27 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
                 println!("event {i}: suspended");
                 Ok(())
             }
+            Event::Collision {
+                triangles: t,
+                rails: r,
+            } => t.apply(&triangles).and_then(|t| {
+                triangles = t;
+                rails = r.apply(&rails)?;
+                let prepared = session
+                    .collision_builder()
+                    .build(triangles.clone(), rails.clone())?;
+                session.install_collision(prepared)?;
+                println!(
+                    "event {i}: collision swapped ({} triangles, {} rails)",
+                    triangles.len(),
+                    rails.len()
+                );
+                Ok(())
+            }),
+            Event::Gestures { picks } => {
+                session.set_gestures(picks);
+                Ok(())
+            }
         };
         if let Err(e) = result {
             println!("BROKE at event {i} (frame {frame}, tick {ticks}): {e}");
@@ -299,5 +349,71 @@ fn play(assets: &str, path: &str) -> Result<(), String> {
         }
     }
     println!("replayed the whole ride without a glitch");
+    Ok(())
+}
+
+/// XInput's D-pad bits, Up, Down, Left, Right.
+const DPAD: [u16; 4] = [0x0001, 0x0002, 0x0004, 0x0008];
+
+/// Plays every gesture: four picks at a time, each direction held for a
+/// second (so its loop plays) then let go, while rolling slowly.
+fn run_gestures(assets: &str, park: world::World) -> Result<(), String> {
+    skate_bridge::float_mode::pc();
+    let mut session = Session::new(
+        std::path::Path::new(assets),
+        park.triangles,
+        park.rails,
+        [0.; 3],
+        0.,
+    )?;
+    session.activate(collision::to_skate(Vec3::ZERO).to_array(), 0.)?;
+    // One push to get rolling.
+    for tick in 0..30u32 {
+        let buttons = if tick < 6 { BUTTON_A } else { 0 };
+        session.tick(Controls { buttons, ..Controls::default() })?;
+    }
+    let mut errors = 0;
+    for group in 0..10u32 {
+        let picks: [u32; 4] = std::array::from_fn(|d| (group * 4 + d as u32).min(36));
+        session.set_gestures(Some(picks));
+        for (d, name) in ["up", "down", "left", "right"].iter().enumerate() {
+            if group * 4 + d as u32 > 36 {
+                break;
+            }
+            let mut seen = None;
+            let mut ticks = 0;
+            for tick in 0..150u32 {
+                let held = tick < 60;
+                // Keep rolling: a light push every few seconds.
+                let push = tick == 100 && group % 2 == 0;
+                let buttons = if held { DPAD[d] } else { 0 } | if push { BUTTON_A } else { 0 };
+                if let Err(e) = session.tick(Controls { buttons, ..Controls::default() }) {
+                    println!("  {name} pick {}: tick error {e}", picks[d]);
+                    errors += 1;
+                    break;
+                }
+                let pose = session.pose();
+                if let Some(g) = pose.gesture {
+                    seen.get_or_insert(g);
+                    ticks += 1;
+                }
+            }
+            match seen {
+                Some((id, hands)) => println!(
+                    "gesture {:2} on {name:5}: played (id {id}, {} hand{}), {ticks} ticks, state {}",
+                    picks[d],
+                    ["both", "right", "left"][hands as usize],
+                    if hands == 0 { "s" } else { "" },
+                    session.pose().state,
+                ),
+                None => println!(
+                    "gesture {:2} on {name:5}: DID NOT START (state {})",
+                    picks[d],
+                    session.pose().state
+                ),
+            }
+        }
+    }
+    println!("errors: {errors}");
     Ok(())
 }

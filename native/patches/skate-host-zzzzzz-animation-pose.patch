@@ -1,0 +1,23 @@
+diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
+index 7569e2c..98afc5f 100644
+--- a/skate/crates/skate-host/src/physics/bridge.rs
++++ b/skate/crates/skate-host/src/physics/bridge.rs
+@@ -216,6 +216,18 @@ impl Session {
+             .position(|name| channels.has(name))?;
+         Some((publication.gesture, hands as u8))
+     }
++    /// This tick's evaluated animation, the pose the body is driven toward,
++    /// as column-major matrices in the same order and space as `pose().bones`.
++    pub fn animation_globals(&self) -> Vec<[f32; 16]> {
++        self.skater
++            .animation
++            .evaluator
++            .hierarchy(&self.skater.animation.pose)
++            .unwrap_or_default()
++            .into_iter()
++            .map(|m| crate::animation::native_matrix(m).to_cols_array())
++            .collect()
++    }
+     pub fn pose(&self) -> Pose {
+         let v = self.physics.board.bodies()[skate_core::physics::board::BodyId::Deck.index()]
+             .rates

@@ -34,8 +34,8 @@ Keyboard.BINDS = {
 	{ name = "X", convar = "skate3_kb_x", key = KEY_LALT, button = X },
 	{ name = "B", convar = "skate3_kb_b", key = KEY_F, button = B },
 	{ name = "Right stick click", convar = "skate3_kb_r3", key = MOUSE_MIDDLE, button = R3 },
-	{ name = "Set marker (D-pad down)", convar = "skate3_kb_marker", key = KEY_DOWN, button = DOWN },
-	{ name = "Back to marker (D-pad up)", convar = "skate3_kb_return", key = KEY_UP, button = UP },
+	{ name = "D-pad down (gesture; marker with L1)", convar = "skate3_kb_marker", key = KEY_DOWN, button = DOWN },
+	{ name = "D-pad up (gesture; back to marker with L1)", convar = "skate3_kb_return", key = KEY_UP, button = UP },
 	{ name = "D-pad left", convar = "skate3_kb_dpad_left", key = KEY_LEFT, button = LEFT },
 	{ name = "D-pad right", convar = "skate3_kb_dpad_right", key = KEY_RIGHT, button = RIGHT },
 }
