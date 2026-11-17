@@ -10,16 +10,17 @@ Source code (GPL-3.0) and bug reports: [url=https://github.com/NotEnxvinity/skat
 [b]Setup video:[/b] [url=https://youtu.be/oGdIwMNwp14]https://youtu.be/oGdIwMNwp14[/url]
 Discord: Enxvinity's Atelier, channel gmod-releases.
 
-[h2]What's new in v2.4.0[/h2]
+[h2]What's new in v2.5.0[/h2]
 [list]
-[*][b]In-game phone menu[/b]: hold L1 for a Skate 2 phone-style menu with Skate 3's look: markers, Interact, Games and all your Settings, even during a bail.
-[*][b]Player and board customizer[/b]: D-pad right in the menu opens Customize to switch playermodels and pick your deck, trucks and wheels (works with Enhanced PlayerModel Selector).
-[*][b]Hall of Meat uses Skate 3's real bail skeleton[/b], read from your own disc by setup (the old X-ray look is still an option).
-[*][b]Spawnable Skate 3 Skateboard[/b] (Entities > Skate 3), drawn with your own board, that skaters roll over.
-[*]Fixed: Hall of Meat staying up after a respawn or marker teleport, the skeleton lagging behind the skater, thin lines on the edges of UI panels, and clipped g/j/p/y letters.
-[*]Update checker: the menu tells you when a new release is out (skate3_update_notices 0 turns it off).
+[*][b]D-pad gestures[/b]: tap the D-pad (no L1) for Skate 3's own 37 gestures, with their real names, on whichever hand is free. Hold to loop, and pick yours in the menu's Settings.
+[*][b]Skate 3 hands[/b]: fingers are aimed in each playermodel's own hand, so thumbs ups and fists look right on far more models. New hand-made riding, grab, carry and Hall of Meat hands; punches use Skate 3's fist.
+[*][b]Smooth skater[/b]: your body, board and camera stay smooth on high refresh rate screens (skate3_smooth 0 turns it off).
+[*][b]Calm limbs[/b]: arms follow Skate 3's animation instead of overshooting on fast tricks (skate3_calm_limbs 0 for the old look).
+[*][b]Marker return[/b] plays Skate 3's own sound when you hold the way back to your session marker.
+[*][b]New setup[/b]: the zip only shows the launcher for your computer and a README, Windows setup is one window from start to finish, and it ends with a Finish button.
+[*]Fixed: S3GM not loading at all on a fresh Windows 10/11 without the old 2010 DirectX runtime, big freezes on prop-heavy maps, and a rare failed jump after a bail respawn.
 [/list]
-[b]Updating? Run the new setup again[/b] so it can read the skeleton and the new menu pictures off your disc.
+[b]Updating? Run the new setup again[/b]: it installs the new engine and reads the hand shapes off your disc.
 
 [h2]Features[/h2]
 [list]
@@ -47,12 +48,13 @@ Discord: Enxvinity's Atelier, channel gmod-releases.
 [*]Subscribe to this addon.
 [*]Download the zip for your computer from [url=https://github.com/NotEnxvinity/skate3-gmod/releases]GitHub Releases[/url] and [b]extract it anywhere[/b]. You get one folder: S3GM-setup. The Workshop can't carry the skate engine itself, so it comes from there, like G64 does.
 [*]Double-click the setup: [b]S3GM-setup-Windows.bat[/b] (Windows), [b]S3GM-setup-Linux.sh[/b] (Linux / SteamOS, pick Execute) or [b]S3GM-setup-Mac.command[/b] (Mac; if macOS blocks it: Privacy & Security > Open Anyway).
+[b]Windows blocked it?[/b] (Smart App Control or "Windows protected your PC"): delete the extracted folder, right-click the downloaded .zip > Properties > tick [b]Unblock[/b] > OK, then extract it again.
 [*]Check your [b]garrysmod[/b] folder (lowercase, inside GarrysMod) and your Skate 3 .iso, press Install. Leave "Skate 3's own sound engine" ticked (a few GB, a few more minutes). Updating? Run the new setup again.
-[*]Wait for "All set!", load a map and equip [b]Skateboard[/b] (spawn menu > Weapons > Skate 3).
+[*]Wait for "All set", press [b]Finish[/b], then load a map and equip [b]Skateboard[/b] (spawn menu > Weapons > Skate 3).
 [/olist]
 
 [h2]Controls[/h2]
-Skate 3's own: [b]A[/b] pushes, [b]Y[/b] gets on and off the board, the right stick flicks tricks, triggers grab. [b]D-pad down[/b] drops a session marker, hold [b]D-pad up[/b] to go back to it. [b]B[/b] / [b]R1[/b] punches, or smacks with the board when it's in your hand. Switch weapons to leave skate mode.
+Skate 3's own: [b]A[/b] pushes, [b]Y[/b] gets on and off the board, the right stick flicks tricks, triggers grab. Hold [b]L1[/b] for the phone menu: [b]D-pad down[/b] drops a session marker, hold [b]D-pad up[/b] to go back to it. Tap the [b]D-pad[/b] without L1 for gestures. [b]B[/b] / [b]R1[/b] punches, or smacks with the board when it's in your hand. Switch weapons to leave skate mode.
 
 [h2]Settings[/h2]
 Spawn menu > Utilities > Skate 3: stance (regular or goofy), camera height, the sound engine switch with its status, Hall of Meat, volume, and the trick score's look. Server: [b]skate3_bail_damage[/b] turns bail damage on or off.
