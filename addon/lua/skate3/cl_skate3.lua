@@ -71,6 +71,7 @@ local drawn
 -- The skate camera's side (see ViewOf): eased, -1 left .. 1
 -- right, and where it's headed. Fresh for each ride.
 local offsetSide, offsetTarget
+local offsetSpeed, offsetPending, offsetPendingFor = 0, nil, 0
 local rails
 local railsRevision -- the collision swap the rails above came from
 local status = {}
@@ -259,6 +260,7 @@ local function Stop()
 	SetActive(false)
 	pose, drawn = nil, nil
 	offsetSide, offsetTarget = nil, nil
+	offsetSpeed, offsetPending, offsetPendingFor = 0, nil, 0
 	Smooth.Reset()
 	lastTick = nil
 	recent, wasBailing = {}, false
@@ -438,8 +440,9 @@ local cv_offset = CreateClientConVar("skate3_camera_offset", "1", true, false,
 	"How far the skate camera sits off to the side of the skater, like Skate 3 (0 = dead centre behind them, 1 = Skate 3, up to 2)")
 local cv_side = CreateClientConVar("skate3_camera_side", "auto", true, false,
 	"Which side of the skater the camera sits on: auto (the side they face, flips for goofy, fakie and switch), left or right")
--- In units at skate3_camera_offset 1: across, and up.
-local OFFSET_SIDE, OFFSET_UP = 22, 10
+-- In units at skate3_camera_offset 1: across, and up. No lift: the height
+-- stays what skate3_camera says (with a lift, low felt like normal).
+local OFFSET_SIDE, OFFSET_UP = 13, 0
 
 -- Where the skate camera is: origin, forward, up and field of view.
 local function ViewOf(pose)
@@ -497,7 +500,18 @@ local function UpdateOffset(pose, dt)
 				-- Clearly sideways only, so riding straight at or away from
 				-- the camera (a turn or a 180) doesn't flicker it.
 				local side = f.x * facing.y - f.y * facing.x -- (f x facing).z: + is left
-				if math.abs(side) > 0.5 then target = side > 0 and -1 or 1 end
+				local seen = math.abs(side) > 0.5 and (side > 0 and -1 or 1) or nil
+				if seen and not offsetTarget then
+					target = seen
+				elseif seen and seen ~= offsetTarget then
+					-- The other side has to hold for a moment before the
+					-- camera goes over: a wobble or a quick revert doesn't move it.
+					offsetPendingFor = offsetPending == seen and offsetPendingFor + dt or 0
+					offsetPending = seen
+					if offsetPendingFor > 0.6 then target = seen end
+				else
+					offsetPending, offsetPendingFor = nil, 0
+				end
 			end
 		end
 		target = target or 1
@@ -506,8 +520,13 @@ local function UpdateOffset(pose, dt)
 	if not offsetSide then
 		offsetSide = target
 	else
-		-- Eased over about half a second.
-		offsetSide = offsetSide + (target - offsetSide) * math.min(1, dt * 6)
+		-- A soft spring: starts slowly, glides over and settles without a
+		-- bump, about a second and a half side to side.
+		dt = math.min(dt, 0.05)
+		local w = 3.5
+		local accel = w * w * (target - offsetSide) - 2 * w * offsetSpeed
+		offsetSpeed = offsetSpeed + accel * dt
+		offsetSide = offsetSide + offsetSpeed * dt
 	end
 end
 
