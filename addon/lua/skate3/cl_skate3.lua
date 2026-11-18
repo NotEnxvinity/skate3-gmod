@@ -69,7 +69,7 @@ local pose
 -- menu, sounds, bails, what's sent to other players) reads `pose`, the newest.
 local drawn
 -- The skate camera's side (see ViewOf): eased, -1 left .. 1
--- right, and where it's headed. Fresh for each ride.
+-- right (0 centred, on foot), and the side it's on. Fresh for each ride.
 local offsetSide, offsetTarget
 local offsetSpeed, offsetPending, offsetPendingFor = 0, nil, 0
 local rails
@@ -517,6 +517,9 @@ local function UpdateOffset(pose, dt)
 		target = target or 1
 	end
 	offsetTarget = target
+	-- Standing or walking off the board: centred behind them, as in Skate 3.
+	-- The side is kept for when they're back on.
+	if pose and pose.state and pose.state:find("^Biped") then target = 0 end
 	if not offsetSide then
 		offsetSide = target
 	else
