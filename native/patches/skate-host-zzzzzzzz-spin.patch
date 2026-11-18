@@ -1,10 +1,12 @@
-Lets skate-host report each jump's spin with the score: the half turns the
-scoring counts (the same tolerance short of each 180 it scores spins with),
-signed by the board's heading, plus the stance the jump left the ground in, a
+Lets skate-host report each jump's spin with the score: the skater's own half
+turns (the animated skeleton's root heading, so a shuvit or varial board spin
+doesn't count; the same tolerance short of each 180 the scoring uses), signed
+counter-clockwise from above, plus the stance the jump left the ground in, a
 jump counter and a trick counter, so the addon's HUD can name spins the way
-Skate 3 does ("Kickflip 360", "FS Half-Cab"). Applied on top of
-skate-host-hud.patch and skate-host-stance.patch (it adds fields to their
-Score). Same license as the files it changes (Apache-2.0).
+Skate 3 does ("Kickflip 360", "FS Half-Cab"). The score's own spin points are
+unchanged. Applied on top of skate-host-hud.patch and skate-host-stance.patch
+(it adds fields to their Score). Same license as the files it changes
+(Apache-2.0).
 
 diff --git a/skate/crates/skate-host/src/physics/bridge.rs b/skate/crates/skate-host/src/physics/bridge.rs
 index 98afc5f..1097a70 100644
@@ -32,33 +34,59 @@ index 98afc5f..1097a70 100644
  }
  pub struct Pose {
      pub root: Mat4,
+diff --git a/skate/crates/skate-host/src/physics/frame.rs b/skate/crates/skate-host/src/physics/frame.rs
+index c0509ea..1872aa4 100644
+--- a/skate/crates/skate-host/src/physics/frame.rs
++++ b/skate/crates/skate-host/src/physics/frame.rs
+@@ -326,6 +326,7 @@ pub(super) fn advance(
+         grind_id: filtered.map_or(-1, |f|f.grind.scorable_id), flags:score.flags,
+         position:[position.x,position.y,position.z], velocity:[velocity.x,velocity.y,velocity.z],
+         forward:deck_frame.basis.columns[2],
++        body_forward:{let r=skater.animated_skeleton.roots.animation_to_world;[r[2][0],r[2][1],r[2][2]]},
+         switch:skater.animation.packet.riding_switch,fakie:skater.animation.packet.riding_fakie,
+         nollie:skater.animation.packet.weight_forwards,body_flip:skater.player_input.physical.air.flag_441!=0,
+         suspend_air:skater.player_input.physical.air.use_air_reckoning_452!=0,
 diff --git a/skate/crates/skate-host/src/scoring_runtime.rs b/skate/crates/skate-host/src/scoring_runtime.rs
-index 18303f7..0b7e093 100644
+index 18303f7..a7591af 100644
 --- a/skate/crates/skate-host/src/scoring_runtime.rs
 +++ b/skate/crates/skate-host/src/scoring_runtime.rs
-@@ -54,6 +54,10 @@ pub(crate) struct Runtime {
+@@ -32,6 +32,9 @@ pub(crate) struct Frame {
+     pub position: [f32; 3],
+     pub velocity: [f32; 3],
+     pub forward: [f32; 3],
++    /// The skater's own forward (the animated skeleton's root), which a
++    /// shuvit or a varial leaves where it is: the spin a trick name says.
++    pub body_forward: [f32; 3],
+     pub switch: bool,
+     pub fakie: bool,
+     pub nollie: bool,
+@@ -54,6 +57,12 @@ pub(crate) struct Runtime {
      previous: [f32; 3],
      previous_heading: f32,
      spin: f32,
 +    spin_turns: i32,
++    body_spin: f32,
++    previous_body_heading: f32,
 +    jump: u32,
 +    takeoff: (bool, bool),
 +    tricks: u32,
      peak: f32,
      air_factor: f32,
      air_repetition: f32,
-@@ -90,6 +94,10 @@ impl Runtime {
+@@ -90,6 +99,12 @@ impl Runtime {
              previous: [0.; 3],
              previous_heading: 0.,
              spin: 0.,
 +            spin_turns: 0,
++            body_spin: 0.,
++            previous_body_heading: 0.,
 +            jump: 0,
 +            takeoff: (false, false),
 +            tricks: 0,
              peak: 0.,
              air_factor: 1.,
              air_repetition: 1.,
-@@ -247,6 +255,7 @@ impl Runtime {
+@@ -247,6 +262,7 @@ impl Runtime {
                  self.trick_name = d.label.clone();
                  self.stance = [f.switch, f.fakie, f.nollie, false];
                  self.new_trick = true;
@@ -66,7 +94,7 @@ index 18303f7..0b7e093 100644
                  if self.collector == Collector::Air && !self.air_repetition_set {
                      self.air_repetition = penalty;
                      self.air_repetition_set = true;
-@@ -327,6 +336,12 @@ impl Runtime {
+@@ -327,6 +343,12 @@ impl Runtime {
              // The animation owns these two; Session::score fills them in.
              fakie: false,
              switch: false,
@@ -79,7 +107,16 @@ index 18303f7..0b7e093 100644
          }
      }
      pub fn advance(&mut self, f: Frame) -> Result<(), String> {
-@@ -399,6 +414,9 @@ impl Runtime {
+@@ -390,6 +412,8 @@ impl Runtime {
+             self.peak = f.position[1];
+             self.spin = 0.;
+             self.previous_heading = f.forward[0].atan2(f.forward[2]);
++            self.body_spin = 0.;
++            self.previous_body_heading = f.body_forward[0].atan2(f.body_forward[2]);
+             self.air_metrics = [0.; 5];
+             self.air_repetition = 1.;
+             self.air_repetition_set = false;
+@@ -399,6 +423,9 @@ impl Runtime {
              self.manual_revert_ticks = 0;
              self.revert_id = None;
              if next == Collector::Air {
@@ -89,11 +126,21 @@ index 18303f7..0b7e093 100644
                  self.session.holder.reward_sequence(1.);
                  self.landing_countdown = 0;
                  if previous_type == Some(8) {
-@@ -499,6 +517,7 @@ impl Runtime {
+@@ -499,6 +526,17 @@ impl Runtime {
              let turns =
                  ((self.spin.to_degrees().abs() + self.data.collector.scalar(0x63c)) / 180.) as i32;
              self.air_metrics[3] = self.data.collector.curve(0x370, (turns * 180) as f32) * scale;
-+            self.spin_turns = if self.spin < 0. { -turns } else { turns };
++            // The name counts the skater's turns, not the board's: a 360
++            // Pop Shuvit on its own is no 360. Same tolerance as the score.
++            let body = f.body_forward[0].atan2(f.body_forward[2]);
++            self.body_spin += (body - self.previous_body_heading + std::f32::consts::PI)
++                .rem_euclid(std::f32::consts::TAU)
++                - std::f32::consts::PI;
++            self.previous_body_heading = body;
++            let body_turns = ((self.body_spin.to_degrees().abs()
++                + self.data.collector.scalar(0x63c))
++                / 180.) as i32;
++            self.spin_turns = if self.body_spin < 0. { -body_turns } else { body_turns };
              if f.body_flip
                  && self.carriers[0]
                      .as_ref()
